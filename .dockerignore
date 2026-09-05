@@ -1,0 +1,7 @@
+.git
+.DS_Store
+data
+*.tar.gz
+*.test
+vectordb
+docs

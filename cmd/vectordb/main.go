@@ -1,0 +1,277 @@
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/vectordb/vectordb/internal/api/rest"
+	"github.com/vectordb/vectordb/internal/cluster"
+	appconfig "github.com/vectordb/vectordb/internal/config"
+	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/vectordb/vectordb/internal/wal"
+)
+
+var version, commit, buildDate = "dev", "unknown", "unknown"
+
+func main() {
+	defaults := appconfig.Default()
+	configFile := flag.String("config", "", "strict JSON configuration file")
+	address := flag.String("http-address", defaults.HTTPAddress, "REST listen address")
+	advertiseAddress := flag.String("advertise-address", defaults.AdvertiseAddress, "address advertised to other nodes; defaults to HTTP address")
+	clusterID := flag.String("cluster-id", defaults.ClusterID, "shared 32-character hexadecimal cluster ID; generated and persisted when omitted")
+	peers := flag.String("peers", strings.Join(defaults.Peers, ","), "comma-separated static peer base URLs")
+	dataPath := flag.String("data-path", defaults.DataPath, "persistent data directory")
+	walSync := flag.String("wal-sync", defaults.WALSync, "WAL durability: always or async")
+	checkpointEvery := flag.Uint64("checkpoint-every", defaults.CheckpointEvery, "checkpoint a shard after this many mutations; 0 disables")
+	replicationFactor := flag.Int("replication-factor", defaults.ReplicationFactor, "number of deterministic shard replicas")
+	placementCapacity := flag.Uint("placement-capacity", uint(defaults.PlacementCapacity), "relative shard placement capacity from 1 to 256")
+	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
+	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
+	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow bearer authentication over cleartext HTTP on a non-loopback listener")
+	enableStaticRouting := flag.Bool("enable-static-routing", false, "activate immutable static placement only while all peer views converge")
+	tlsCertFile := flag.String("tls-cert-file", "", "TLS certificate chain file")
+	tlsKeyFile := flag.String("tls-key-file", "", "TLS private key file")
+	tlsCAFile := flag.String("tls-ca-file", "", "private CA bundle for mutual TLS on internal APIs")
+	backupTo := flag.String("backup-to", "", "create a consistent backup archive and exit")
+	restoreFrom := flag.String("restore-from", "", "restore an archive into the data path and exit (destination must not exist)")
+	verifyData := flag.Bool("verify-data", false, "open and validate the data path, then exit")
+	validateConfig := flag.Bool("validate-config", false, "validate effective configuration, then exit")
+	showVersion := flag.Bool("version", false, "print version information and exit")
+	healthcheckURL := flag.String("healthcheck-url", "", "check an HTTP health URL and exit")
+	flag.Parse()
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	if *showVersion {
+		fmt.Printf("vectordb %s commit=%s built=%s\n", version, commit, buildDate)
+		return
+	}
+	if *healthcheckURL != "" {
+		client := &http.Client{Timeout: 3 * time.Second}
+		response, err := client.Get(*healthcheckURL)
+		if err != nil {
+			logger.Error("healthcheck failed", "error", err)
+			os.Exit(1)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			logger.Error("healthcheck failed", "status", response.StatusCode)
+			os.Exit(1)
+		}
+		return
+	}
+	settings := defaults
+	var configErr error
+	if *configFile != "" {
+		settings, configErr = appconfig.Load(*configFile, settings)
+	}
+	if configErr == nil {
+		settings, configErr = appconfig.ApplyEnv(settings, os.LookupEnv)
+	}
+	if configErr != nil {
+		logger.Error("load configuration", "error", configErr)
+		os.Exit(2)
+	}
+	flagValues := make(map[string]string)
+	flag.Visit(func(item *flag.Flag) { flagValues[item.Name] = item.Value.String() })
+	settings, configErr = appconfig.ApplyFlags(settings, flagValues)
+	if configErr != nil {
+		logger.Error("apply CLI configuration", "error", configErr)
+		os.Exit(2)
+	}
+	if err := settings.Validate(); err != nil {
+		logger.Error("invalid configuration", "error", err)
+		os.Exit(2)
+	}
+	*address, *advertiseAddress, *dataPath, *walSync, *checkpointEvery = settings.HTTPAddress, settings.AdvertiseAddress, settings.DataPath, settings.WALSync, settings.CheckpointEvery
+	*replicationFactor = settings.ReplicationFactor
+	*placementCapacity = uint(settings.PlacementCapacity)
+	*clusterID = settings.ClusterID
+	*apiKeyFile, *allowUnauthenticated, *allowInsecureHTTP = settings.APIKeyFile, settings.AllowUnauthenticated, settings.AllowInsecureHTTP
+	*enableStaticRouting = settings.EnableStaticRouting
+	*tlsCertFile, *tlsKeyFile, *tlsCAFile = settings.TLSCertFile, settings.TLSKeyFile, settings.TLSCAFile
+	*peers = strings.Join(settings.Peers, ",")
+	if *backupTo != "" && *restoreFrom != "" {
+		logger.Error("-backup-to and -restore-from are mutually exclusive")
+		os.Exit(2)
+	}
+	if *restoreFrom != "" {
+		if err := engine.RestoreBackup(*restoreFrom, *dataPath); err != nil {
+			logger.Error("restore backup", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("backup restored", "source", *restoreFrom, "data_path", *dataPath)
+		return
+	}
+	var apiKey string
+	offline := *backupTo != "" || *verifyData
+	if !offline {
+		if _, err := rest.ParseAddress(*address); err != nil {
+			logger.Error("invalid HTTP address", "error", err)
+			os.Exit(2)
+		}
+		if *advertiseAddress == "" {
+			*advertiseAddress = *address
+		}
+		if _, err := rest.ParseAddress(*advertiseAddress); err != nil {
+			logger.Error("invalid advertise address", "error", err)
+			os.Exit(2)
+		}
+		if *apiKeyFile != "" {
+			loaded, keyErr := rest.LoadAPIKeyFile(*apiKeyFile)
+			if keyErr != nil {
+				logger.Error("load API key", "error", keyErr)
+				os.Exit(2)
+			}
+			apiKey = loaded
+		}
+		if apiKey == "" && !rest.IsLoopbackAddress(*address) && !*allowUnauthenticated {
+			logger.Error("refusing unauthenticated non-loopback listener", "address", *address, "hint", "configure -api-key-file or explicitly set -allow-unauthenticated")
+			os.Exit(2)
+		}
+		if apiKey != "" && !rest.IsLoopbackAddress(*address) && *tlsCertFile == "" && !*allowInsecureHTTP {
+			logger.Error("refusing bearer authentication over non-loopback cleartext HTTP", "hint", "configure TLS or explicitly set -allow-insecure-http")
+			os.Exit(2)
+		}
+	}
+	if *validateConfig {
+		logger.Info("configuration valid")
+		return
+	}
+	var internalClient *http.Client
+	var serverTLSConfig *tls.Config
+	if *tlsCAFile != "" {
+		certificate, err := tls.LoadX509KeyPair(*tlsCertFile, *tlsKeyFile)
+		if err != nil {
+			logger.Error("load mutual TLS identity", "error", err)
+			os.Exit(2)
+		}
+		caData, err := os.ReadFile(*tlsCAFile)
+		if err != nil {
+			logger.Error("load mutual TLS CA", "error", err)
+			os.Exit(2)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(caData) {
+			logger.Error("load mutual TLS CA", "error", "CA bundle contains no certificates")
+			os.Exit(2)
+		}
+		serverTLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: roots}
+		internalClient = &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, Certificates: []tls.Certificate{certificate}}}}
+	}
+	db, err := engine.OpenWithOptions(*dataPath, engine.Options{
+		WALSyncMode: wal.SyncMode(*walSync), CheckpointEvery: *checkpointEvery,
+	})
+	if err != nil {
+		logger.Error("open engine", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			logger.Error("close engine", "error", err)
+		}
+	}()
+	if *backupTo != "" {
+		if err := db.Backup(*backupTo); err != nil {
+			logger.Error("create backup", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("backup created", "destination", *backupTo)
+		return
+	}
+	if *verifyData {
+		logger.Info("data verification complete", "data_path", *dataPath)
+		return
+	}
+	identity, err := cluster.LoadOrCreate(*dataPath)
+	if err != nil {
+		logger.Error("load node identity", "error", err)
+		os.Exit(1)
+	}
+	clusterMetadata, err := cluster.LoadOrCreateMetadata(*dataPath, *clusterID)
+	if err != nil {
+		logger.Error("load cluster metadata", "error", err)
+		os.Exit(1)
+	}
+	raftStore, err := cluster.OpenRaftStore(*dataPath, identity.ID, clusterMetadata.Epoch)
+	if err != nil {
+		logger.Error("load metadata Raft state", "error", err)
+		os.Exit(1)
+	}
+	rebalanceBarriers, err := cluster.OpenRebalanceBarrierStore(*dataPath)
+	if err != nil {
+		logger.Error("load rebalance write barriers", "error", err)
+		os.Exit(1)
+	}
+	rebalanceExecutor, err := cluster.OpenRebalanceExecutor(*dataPath)
+	if err != nil {
+		logger.Error("load rebalance execution journal", "error", err)
+		os.Exit(1)
+	}
+	_, _, metadataEpoch := raftStore.State()
+	discovery, err := cluster.NewDiscovery(identity.ID, clusterMetadata.ClusterID, settings.Peers, apiKey, internalClient)
+	if err != nil {
+		logger.Error("configure peer discovery", "error", err)
+		os.Exit(2)
+	}
+	raftRuntime, err := cluster.NewRaftRuntime(raftStore, identity.ID, func() []cluster.RaftPeer {
+		peers := discovery.Peers()
+		result := make([]cluster.RaftPeer, 0, len(peers))
+		for _, peer := range peers {
+			result = append(result, cluster.RaftPeer{NodeID: peer.NodeID, BaseURL: peer.SeedURL})
+		}
+		return result
+	}, &cluster.HTTPRaftTransport{ClusterID: clusterMetadata.ClusterID, APIKey: apiKey, Client: internalClient}, cluster.RaftRuntimeConfig{})
+	if err != nil {
+		logger.Error("configure metadata Raft runtime", "error", err)
+		os.Exit(2)
+	}
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != ""})
+	server := &http.Server{
+		Addr: *address, Handler: apiServer.Handler(),
+		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
+	}
+	server.TLSConfig = serverTLSConfig
+
+	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	runContext, cancelRun := context.WithCancel(context.Background())
+	defer cancelRun()
+	go discovery.Run(runContext, 5*time.Second)
+	go raftRuntime.Run(runContext)
+	go apiServer.RunReplicaRepair(runContext, 10*time.Second)
+	go func() {
+		<-signalContext.Done()
+		apiServer.BeginDrain()
+		transferContext, cancelTransfer := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := raftRuntime.TransferLeadership(transferContext); err != nil {
+			logger.Warn("leadership transfer before shutdown did not complete", "error", err)
+		}
+		cancelTransfer()
+		cancelRun()
+		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancelShutdown()
+		_ = server.Shutdown(shutdownContext)
+	}()
+	logger.Info("server starting", "address", *address, "advertise_address", *advertiseAddress, "node_id", identity.ID, "cluster_id", clusterMetadata.ClusterID, "metadata_epoch", metadataEpoch, "peers", len(settings.Peers), "static_routing", *enableStaticRouting, "replication_factor", *replicationFactor, "data_path", *dataPath)
+	var serveErr error
+	if *tlsCertFile != "" {
+		serveErr = server.ListenAndServeTLS(*tlsCertFile, *tlsKeyFile)
+	} else {
+		serveErr = server.ListenAndServe()
+	}
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		logger.Error("server stopped", "error", serveErr)
+		os.Exit(1)
+	}
+}

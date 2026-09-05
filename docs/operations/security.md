@@ -1,0 +1,45 @@
+# Security foundations
+
+The server defaults to the loopback address. It refuses an unauthenticated
+non-loopback bind unless `-allow-unauthenticated` is explicitly supplied.
+
+## Bearer authentication
+
+Place a random token containing at least 16 characters in a file readable only
+by its owner or the process's effective/supplementary group, then run:
+
+```bash
+vectordb -api-key-file /run/secrets/vectordb-api-key \
+  -tls-cert-file /run/tls/tls.crt -tls-key-file /run/tls/tls.key \
+  -tls-ca-file /run/tls/ca.crt \
+  -http-address 0.0.0.0:6333
+```
+
+Clients send `Authorization: Bearer <token>`. Token digests are compared in
+constant time. Collection, vector, search, and metrics routes require the token;
+`/v1/health` and the detail-free `/v1/ready` remain unauthenticated for process
+and traffic probes. API key material and
+authorization headers are never logged.
+
+On Unix-like platforms the API-key file rejects all access by other users.
+Group access is limited to read-only and is accepted only when the file group
+matches the process's effective or supplementary groups; this supports
+Kubernetes projected Secrets with `fsGroup`. Windows ACL validation is outside
+the current implementation.
+
+## Transport and headers
+
+Authenticated non-loopback listeners require TLS unless the operator explicitly
+sets `-allow-insecure-http`. Supplying only one of the TLS certificate/key flags
+is rejected. Configuring `-tls-ca-file` enables private-CA mutual TLS: all
+outbound discovery and internal fanout calls present the node certificate and
+validate peer servers, while every inbound `/v1/internal/*` route requires a
+verified client certificate. Responses include `nosniff`, frame denial, no-referrer, and
+`no-store` headers.
+
+## Current limitations
+
+This foundation provides one process-wide bearer credential. It does not yet
+provide key rotation without restart, multiple principals, authorization roles,
+tenant isolation, audit retention, rate limiting, certificate reload, distinct
+client/server node identities, or automated certificate management.

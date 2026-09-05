@@ -1,0 +1,964 @@
+openapi: 3.1.0
+info:
+  title: VectorDB experimental API
+  version: 0.0.1
+  description: Phase 1 API; compatibility is not yet promised.
+servers:
+  - url: http://127.0.0.1:6333/v1
+paths:
+  /internal/replicas/{collection}/{shard}/status:
+    get:
+      operationId: internalReplicaStatus
+      description: Return the durable sequence of an assigned replica for leader repair.
+      parameters:
+        - {name: collection, in: path, required: true, schema: {type: string}}
+        - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      responses:
+        "200": {description: Fenced replica sequence status.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/rebalance/{collection}/{shard}/snapshot:
+    post:
+      operationId: internalRebalanceSnapshot
+      description: Authenticated internal staging of a planned shard image on a joining learner.
+      parameters:
+        - {name: collection, in: path, required: true, schema: {type: string}}
+        - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      responses:
+        "200": {description: Snapshot staged after target-plan validation.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: Process is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string}
+                required: [status]
+  /ready:
+    get:
+      operationId: readiness
+      description: Probe-safe readiness status without cluster topology details.
+      responses:
+        "200":
+          description: The node can receive traffic.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [ready]}
+                required: [status]
+        "503":
+          description: The node has not converged or activated assigned shard ownership.
+  /node:
+    get:
+      operationId: nodeInfo
+      responses:
+        "200":
+          description: Stable node identity and advertised address.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                  cluster_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                  advertise_address: {type: string}
+                  started_at: {type: string, format: date-time}
+                  mode: {type: string, enum: [standalone, static-discovery, static-routing]}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  replication_factor: {type: integer, minimum: 1}
+                  placement_capacity: {type: integer, minimum: 1}
+                  min_protocol_version: {type: integer, minimum: 1}
+                  protocol_version: {type: integer, minimum: 1}
+                  authentication_required: {type: boolean}
+                  internal_mtls_required: {type: boolean}
+                  static_routing: {type: boolean}
+                  membership_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  catalog_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  placement_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  raft_role: {type: string, enum: [follower, candidate, leader]}
+                  raft_leader_id: {type: string, pattern: "^$|^[0-9a-f]{32}$"}
+                  raft_term: {type: integer, minimum: 0}
+                  raft_voters: {type: array, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+                  raft_joint_old_voters: {type: array, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+                  raft_joint_new_voters: {type: array, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+                  committed_membership_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  committed_catalog_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  committed_placement_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                required: [node_id, cluster_id, advertise_address, started_at, mode, metadata_epoch, replication_factor, placement_capacity, min_protocol_version, protocol_version, authentication_required, internal_mtls_required, static_routing, membership_digest, catalog_digest, placement_digest]
+        "401": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/peers:
+    get:
+      operationId: clusterPeers
+      responses:
+        "200":
+          description: Local observational view of configured static peers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  local_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                  cluster_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  peers:
+                    type: array
+                    items: {$ref: "#/components/schemas/Peer"}
+                required: [cluster_id, local_node_id, metadata_epoch, peers]
+        "401": {$ref: "#/components/responses/Error"}
+  /cluster/placement:
+    get:
+      operationId: clusterPlacement
+      responses:
+        "200":
+          description: Deterministic logical-shard placement with static activation status.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/PlacementTable"}
+        "401": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/replicas:
+    get:
+      operationId: clusterReplicaPlacement
+      parameters:
+        - {name: replication_factor, in: query, required: true, schema: {type: integer, minimum: 1}}
+      responses:
+        "200":
+          description: Non-authoritative deterministic replica-set preview.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReplicaPlacementTable"}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+  /cluster/rebalance/plan:
+    get:
+      operationId: clusterRebalancePlan
+      description: Preview exactly one non-mutating node join or leave transition.
+      parameters:
+        - {name: join_node_id, in: query, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+        - {name: join_address, in: query, schema: {type: string}}
+        - {name: leave_node_id, in: query, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      responses:
+        "200":
+          description: Non-authoritative next-epoch movement plan.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  change: {type: object, additionalProperties: {type: string}}
+                  plan: {$ref: "#/components/schemas/RebalancePlan"}
+                  target_placement: {$ref: "#/components/schemas/ReplicaPlacementTable"}
+                required: [change, plan, target_placement]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/rebalance/apply:
+    post:
+      operationId: clusterRebalanceApply
+      description: Commit exactly one discovered-node join or configured-node leave through Raft joint consensus.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expected_epoch: {type: integer, minimum: 1}
+                join_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                join_address: {type: string}
+                leave_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+              required: [expected_epoch]
+      responses:
+        "200":
+          description: Membership and next-epoch target view committed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  metadata_epoch: {type: integer, minimum: 2}
+                  change: {type: object, additionalProperties: {type: string}}
+                  plan: {$ref: "#/components/schemas/RebalancePlan"}
+                  target_placement: {$ref: "#/components/schemas/ReplicaPlacementTable"}
+                  voters: {type: array, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+                  membership_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  catalog_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                  placement_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+                required: [metadata_epoch, change, plan, target_placement, voters, membership_digest, catalog_digest, placement_digest]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/rebalance/prepare:
+    post:
+      operationId: clusterRebalancePrepare
+      description: Durably execute and resume source-dispatched snapshot and catch-up prerequisites.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expected_epoch: {type: integer, minimum: 1}
+                join_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                join_address: {type: string}
+                leave_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+              required: [expected_epoch]
+      responses:
+        "200": {description: Exact plan data prerequisites are prepared and source writes are fenced.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/rebalance/abort:
+    post:
+      operationId: clusterRebalanceAbort
+      description: Abort an exact prepared transition before joint consensus starts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                expected_epoch: {type: integer, minimum: 1}
+                join_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                join_address: {type: string}
+                leave_node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+              required: [expected_epoch]
+      responses:
+        "200": {description: Exact-plan source barriers and preparation journal cleared.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/readiness:
+    get:
+      operationId: clusterReadiness
+      responses:
+        "200":
+          description: Observational peer-health and control-plane convergence status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ready: {type: boolean}
+                  authoritative: {type: boolean}
+                  static_routing_enabled: {type: boolean}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  digests: {$ref: "#/components/schemas/ViewDigests"}
+                  peers_checked: {type: integer, minimum: 0}
+                  reasons: {type: array, items: {type: string}}
+                required: [ready, authoritative, static_routing_enabled, metadata_epoch, digests, peers_checked, reasons]
+        "401": {$ref: "#/components/responses/Error"}
+  /collections:
+    get:
+      operationId: listCollections
+      responses:
+        "200":
+          description: Collection configurations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  collections:
+                    type: array
+                    items: {$ref: "#/components/schemas/CollectionConfig"}
+                required: [collections]
+    post:
+      operationId: createCollection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CollectionConfig"}
+      responses:
+        "201": {description: Collection created.}
+        "400": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    get:
+      operationId: describeCollection
+      responses:
+        "200": {description: Collection description.}
+        "404": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteCollection
+      responses:
+        "204": {description: Collection deleted.}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}/vectors:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    get:
+      operationId: scrollVectors
+      description: Deterministically browse records physically present on this node; vectors are redacted by default.
+      parameters:
+        - {name: namespace, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: include_vector, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: Stable record page ordered by namespace and ID.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records: {type: array, items: {$ref: "#/components/schemas/RecordSummary"}}
+                  next_cursor: {type: string}
+                  vectors_included: {type: boolean}
+                required: [records, next_cursor, vectors_included]
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+    post:
+      operationId: upsertVector
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/Record"}
+      responses:
+        "200": {description: Stored record.}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}/vectors/batch:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    post:
+      operationId: batchUpsertVectors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                records:
+                  type: array
+                  minItems: 1
+                  maxItems: 10000
+                  items: {$ref: "#/components/schemas/Record"}
+              required: [records, acknowledgement]
+      responses:
+        "200": {description: Records stored; cross-shard atomicity is not guaranteed.}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}/vectors/{id}:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+      - name: id
+        in: path
+        required: true
+        schema: {type: string}
+      - name: namespace
+        in: query
+        schema: {type: string}
+    get:
+      operationId: getVector
+      responses:
+        "200": {description: Stored record.}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+    delete:
+      operationId: deleteVector
+      responses:
+        "204": {description: Record deleted.}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}/search:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    post:
+      operationId: search
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vector:
+                  type: array
+                  items: {type: number, format: float}
+                top_k: {type: integer, minimum: 1}
+                namespace: {type: string}
+                filter:
+                  type: object
+                  additionalProperties: true
+                  description: Metadata filter expression documented in docs/indexing/filtering.md.
+              required: [vector, top_k]
+      responses:
+        "200": {description: Ordered exact-search results.}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+  /internal/shards/{collection}/{shard}/search:
+    parameters:
+      - {name: collection, in: path, required: true, schema: {type: string}}
+      - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      operationId: internalShardSearch
+      description: Internal transport primitive; not a stable public client API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vector: {type: array, items: {type: number, format: float}}
+                top_k: {type: integer, minimum: 1}
+                namespace: {type: string}
+                filter: {type: object, additionalProperties: true}
+              required: [vector, top_k]
+      responses:
+        "200":
+          description: Results from exactly one local logical shard.
+          headers:
+            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/shards/{collection}/{shard}/vectors/batch:
+    parameters:
+      - {name: collection, in: path, required: true, schema: {type: string}}
+      - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      operationId: internalShardBatchUpsert
+      description: Fenced internal WAL-backed mutation of exactly one logical shard.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                records: {type: array, minItems: 1, maxItems: 10000, items: {$ref: "#/components/schemas/Record"}}
+                acknowledgement: {type: string, enum: [leader, quorum, all], default: quorum}
+              required: [records]
+      responses:
+        "200":
+          description: Shard group committed at the requested acknowledgement level.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records: {type: array, items: {$ref: "#/components/schemas/Record"}}
+                  shard_id: {type: integer, minimum: 0}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  replicas_acknowledged: {type: integer, minimum: 1}
+                  replication_factor: {type: integer, minimum: 1}
+                  acknowledgement: {type: string, enum: [leader, quorum, all]}
+                required: [records, shard_id, metadata_epoch, replicas_acknowledged, replication_factor, acknowledgement]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/replicas/{collection}/{shard}/append:
+    parameters:
+      - {name: collection, in: path, required: true, schema: {type: string}}
+      - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-VectorDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      operationId: internalReplicaAppend
+      description: Ordered, fenced follower WAL append; internal Phase 7 transport.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sequence, replication_factor, records]
+              properties:
+                sequence: {type: integer, minimum: 1}
+                replication_factor: {type: integer, minimum: 1}
+                records: {type: array, minItems: 1, maxItems: 10000, items: {$ref: "#/components/schemas/Record"}}
+      responses:
+        "200": {description: Sequence durably appended or identical retry acknowledged.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "410": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/replicas/{collection}/{shard}/snapshot:
+    parameters:
+      - {name: collection, in: path, required: true, schema: {type: string}}
+      - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
+      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-VectorDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-VectorDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
+    post:
+      operationId: internalReplicaSnapshot
+      description: Fenced complete-shard catch-up after a follower sequence gap or compaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [sequence, replication_factor, records]
+              properties:
+                sequence: {type: integer, minimum: 1}
+                replication_factor: {type: integer, minimum: 1}
+                records: {type: array, items: {$ref: "#/components/schemas/Record"}}
+      responses:
+        "200": {description: Snapshot durably installed at the supplied sequence.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/raft/request-vote:
+    post:
+      operationId: internalRaftRequestVote
+      description: Authenticated internal metadata-Raft vote RPC.
+      parameters:
+        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [term, candidate_id, last_log_index, last_log_term]
+              properties:
+                term: {type: integer, minimum: 1}
+                candidate_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                last_log_index: {type: integer, minimum: 0}
+                last_log_term: {type: integer, minimum: 0}
+      responses:
+        "200": {description: Current term and vote decision.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/metadata/epoch:
+    post:
+      operationId: advanceMetadataEpoch
+      description: Leader-only, quorum-committed metadata epoch advancement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_epoch]
+              properties:
+                expected_epoch: {type: integer, minimum: 1}
+      responses:
+        "200": {description: New epoch and canonical committed view digests.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/raft/append-entries:
+    post:
+      operationId: internalRaftAppendEntries
+      description: Authenticated internal metadata-Raft replication and heartbeat RPC.
+      parameters:
+        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [term, leader_id, prev_log_index, prev_log_term, entries, leader_commit]
+              properties:
+                term: {type: integer, minimum: 1}
+                leader_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                prev_log_index: {type: integer, minimum: 0}
+                prev_log_term: {type: integer, minimum: 0}
+                entries: {type: array, maxItems: 1024, items: {type: object}}
+                leader_commit: {type: integer, minimum: 0}
+      responses:
+        "200":
+          description: Current term, prefix-match result, and match index.
+          headers:
+            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/raft/install-snapshot:
+    post:
+      operationId: internalRaftInstallSnapshot
+      description: Authenticated installation of a compacted metadata-Raft prefix.
+      parameters:
+        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [term, leader_id, snapshot]
+              properties:
+                term: {type: integer, minimum: 1}
+                leader_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                snapshot:
+                  type: object
+                  additionalProperties: false
+                  required: [last_included_index, last_included_term, applied_epoch, voters, committed_view]
+                  properties:
+                    last_included_index: {type: integer, minimum: 1}
+                    last_included_term: {type: integer, minimum: 1}
+                    applied_epoch: {type: integer, minimum: 2}
+                    voters: {type: array, minItems: 1, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+                    committed_view: {$ref: "#/components/schemas/ViewDigests"}
+      responses:
+        "200":
+          description: Snapshot installation result and retained match index.
+          headers:
+            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /internal/raft/timeout-now:
+    post:
+      operationId: internalRaftTimeoutNow
+      description: Mutual-TLS-protected request for a caught-up voter to campaign immediately during graceful leader shutdown.
+      parameters:
+        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [term, leader_id]
+              properties:
+                term: {type: integer, minimum: 1}
+                leader_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+      responses:
+        "200": {description: The target campaigned and reports whether it became leader.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/collections/{name}/search:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    post:
+      operationId: distributedSearch
+      description: Experimental coordination over preview or converged static placement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                vector: {type: array, items: {type: number, format: float}}
+                top_k: {type: integer, minimum: 1}
+                namespace: {type: string}
+                filter: {type: object, additionalProperties: true}
+                allow_partial: {type: boolean, default: false}
+              required: [vector, top_k]
+      responses:
+        "200":
+          description: Globally merged results, potentially partial only when explicitly requested.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: {type: array, items: {$ref: "#/components/schemas/SearchResult"}}
+                  partial: {type: boolean}
+                  failures: {type: array, items: {$ref: "#/components/schemas/ShardSearchFailure"}}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  authoritative_placement: {type: boolean}
+                required: [results, partial, failures, metadata_epoch, authoritative_placement]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/collections/{name}/vectors/batch:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    post:
+      operationId: distributedBatchUpsert
+      description: Experimental non-atomic batch coordination over preview placement.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                records: {type: array, minItems: 1, maxItems: 10000, items: {$ref: "#/components/schemas/Record"}}
+                acknowledgement: {type: string, enum: [leader, quorum, all], default: quorum}
+              required: [records]
+      responses:
+        "200":
+          description: Every addressed shard reported committed.
+          content: {application/json: {schema: {$ref: "#/components/schemas/DistributedWriteResponse"}}}
+        "207":
+          description: One or more shard outcomes are failed or unknown.
+          content: {application/json: {schema: {$ref: "#/components/schemas/DistributedWriteResponse"}}}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+components:
+  parameters:
+    CollectionName:
+      name: name
+      in: path
+      required: true
+      schema: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}
+  responses:
+    Error:
+      description: Error response.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+  schemas:
+    ViewDigests:
+      type: object
+      properties:
+        membership_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        catalog_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        placement_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+      required: [membership_digest, catalog_digest, placement_digest]
+    DistributedWriteResponse:
+      type: object
+      properties:
+        outcomes: {type: array, items: {$ref: "#/components/schemas/ShardWriteOutcome"}}
+        partial: {type: boolean}
+        metadata_epoch: {type: integer, minimum: 1}
+        authoritative_placement: {type: boolean}
+      required: [outcomes, partial, metadata_epoch, authoritative_placement]
+    ShardWriteOutcome:
+      type: object
+      properties:
+        shard_id: {type: integer, minimum: 0}
+        node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        status: {type: string, enum: [committed, failed, unknown]}
+        records: {type: array, items: {$ref: "#/components/schemas/Record"}}
+        replicas_acknowledged: {type: integer, minimum: 1}
+        replication_factor: {type: integer, minimum: 1}
+        acknowledgement: {type: string, enum: [leader, quorum, all]}
+        error: {type: string}
+      required: [shard_id, node_id, status]
+    SearchResult:
+      type: object
+      properties:
+        id: {type: string}
+        score: {type: number, format: float}
+        metadata: {type: object, additionalProperties: true}
+        payload: {type: object, additionalProperties: true}
+        namespace: {type: string}
+        timestamp: {type: integer, format: int64}
+        version: {type: integer, format: uint64}
+      required: [id, score]
+    ShardSearchFailure:
+      type: object
+      properties:
+        shard_id: {type: integer, minimum: 0}
+        node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        error: {type: string}
+      required: [shard_id, node_id, error]
+    PlacementTable:
+      type: object
+      properties:
+        epoch: {type: integer, minimum: 1}
+        authoritative: {type: boolean}
+        nodes:
+          type: array
+          items: {$ref: "#/components/schemas/PlacementNode"}
+        shards:
+          type: array
+          items: {$ref: "#/components/schemas/ShardPlacement"}
+      required: [epoch, authoritative, nodes, shards]
+    ReplicaPlacementTable:
+      type: object
+      properties:
+        epoch: {type: integer, minimum: 1}
+        authoritative: {type: boolean, enum: [false]}
+        replication_factor: {type: integer, minimum: 1}
+        nodes: {type: array, items: {$ref: "#/components/schemas/PlacementNode"}}
+        shards:
+          type: array
+          items:
+            type: object
+            properties:
+              collection: {type: string}
+              shard_id: {type: integer, minimum: 0}
+              leader_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+              replicas: {type: array, minItems: 1, uniqueItems: true, items: {type: string, pattern: "^[0-9a-f]{32}$"}}
+            required: [collection, shard_id, leader_id, replicas]
+      required: [epoch, authoritative, replication_factor, nodes, shards]
+    RebalancePlan:
+      type: object
+      properties:
+        from_epoch: {type: integer, minimum: 1}
+        to_epoch: {type: integer, minimum: 2}
+        authoritative: {type: boolean, enum: [false]}
+        movements:
+          type: array
+          items:
+            type: object
+            properties:
+              collection: {type: string}
+              shard_id: {type: integer, minimum: 0}
+              source_leader_id: {type: string}
+              target_leader_id: {type: string}
+              source_replicas: {type: array, items: {type: string}}
+              target_replicas: {type: array, items: {type: string}}
+              actions:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string}
+                    type: {type: string, enum: [copy_snapshot, catch_up_wal, transfer_leadership, commit_placement, remove_replica]}
+                    source_id: {type: string}
+                    target_id: {type: string}
+                    requires: {type: array, items: {type: string}}
+                  required: [id, type]
+            required: [collection, shard_id, source_leader_id, target_leader_id, source_replicas, target_replicas, actions]
+      required: [from_epoch, to_epoch, authoritative, movements]
+    PlacementNode:
+      type: object
+      properties:
+        node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        advertise_address: {type: string}
+        metadata_epoch: {type: integer, minimum: 1}
+        membership_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        catalog_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        placement_digest: {type: string, pattern: "^[0-9a-f]{64}$"}
+        healthy: {type: boolean}
+        local: {type: boolean}
+      required: [node_id, advertise_address, healthy, local]
+    ShardPlacement:
+      type: object
+      properties:
+        collection: {type: string}
+        shard_id: {type: integer, minimum: 0}
+        node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+      required: [collection, shard_id, node_id]
+    Peer:
+      type: object
+      properties:
+        seed_url: {type: string, format: uri}
+        node_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        cluster_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+        advertise_address: {type: string}
+        healthy: {type: boolean}
+        state: {type: string, enum: [unknown, healthy, suspected, unhealthy, recovering]}
+        consecutive_failures: {type: integer, minimum: 0, maximum: 3}
+        consecutive_successes: {type: integer, minimum: 0, maximum: 2}
+        last_seen: {type: string, format: date-time}
+        last_checked: {type: string, format: date-time}
+        last_transition: {type: string, format: date-time}
+        error: {type: string}
+      required: [seed_url, healthy, state, consecutive_failures, consecutive_successes, last_checked]
+    CollectionConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        name: {type: string}
+        dimension: {type: integer, minimum: 1}
+        metric: {type: string, enum: [cosine, dot, l2]}
+        shard_count: {type: integer, minimum: 1}
+        index: {$ref: "#/components/schemas/IndexConfig"}
+      required: [name, dimension, metric, shard_count]
+    IndexConfig:
+      type: object
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [flat, hnsw], default: flat}
+        m: {type: integer, minimum: 2, maximum: 128}
+        ef_construction: {type: integer, minimum: 2, maximum: 10000}
+        ef_search: {type: integer, minimum: 1, maximum: 10000}
+    Record:
+      type: object
+      additionalProperties: false
+      properties:
+        id: {type: string}
+        vector:
+          type: array
+          items: {type: number, format: float}
+        metadata: {type: object, additionalProperties: true}
+        payload: {type: object, additionalProperties: true}
+        namespace: {type: string}
+        timestamp: {type: integer, format: int64, readOnly: true}
+        version: {type: integer, format: uint64, readOnly: true}
+      required: [id, vector]
+    RecordSummary:
+      type: object
+      properties:
+        id: {type: string}
+        vector:
+          type: array
+          items: {type: number, format: float}
+          description: Present only when include_vector=true.
+        metadata: {type: object, additionalProperties: true}
+        payload: {type: object, additionalProperties: true}
+        namespace: {type: string}
+        timestamp: {type: integer, format: int64}
+        version: {type: integer, format: uint64}
+      required: [id, timestamp, version]
+    Error:
+      type: object
+      properties:
+        code: {type: string}
+        message: {type: string}
+      required: [code, message]

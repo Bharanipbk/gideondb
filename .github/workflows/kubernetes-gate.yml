@@ -1,0 +1,78 @@
+name: Kubernetes gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/kubernetes-gate.yml"
+      - "cmd/**"
+      - "internal/**"
+      - "deployments/kubernetes/**"
+      - "scripts/kubernetes-gate.sh"
+      - "Dockerfile"
+      - "go.mod"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/kubernetes-gate.yml"
+      - "cmd/**"
+      - "internal/**"
+      - "deployments/kubernetes/**"
+      - "scripts/kubernetes-gate.sh"
+      - "Dockerfile"
+      - "go.mod"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kubernetes-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KIND_CLUSTER_NAME: vectordb-gate-${{ github.run_id }}-${{ github.run_attempt }}
+      KEEP_CLUSTER: "true"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install kind and kubectl
+        uses: helm/kind-action@v1.14.0
+        with:
+          install_only: true
+          version: v0.31.0
+          kubectl_version: v1.35.0
+
+      - name: Run real-cluster gate
+        run: make validate-kubernetes
+
+      - name: Capture failure diagnostics
+        if: failure()
+        run: |
+          mkdir -p kubernetes-diagnostics
+          kubectl get nodes,pods,services,endpoints,pvc,pdb,networkpolicy \
+            --all-namespaces -o wide > kubernetes-diagnostics/resources.txt 2>&1 || true
+          kubectl -n vectordb describe statefulset,pods,pdb \
+            > kubernetes-diagnostics/describe.txt 2>&1 || true
+          kubectl -n vectordb logs statefulset/vectordb --all-pods=true \
+            --prefix=true > kubernetes-diagnostics/vectordb.log 2>&1 || true
+          kubectl cluster-info dump --output-directory=kubernetes-diagnostics/cluster \
+            >/dev/null 2>&1 || true
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: kubernetes-gate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: kubernetes-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Delete disposable cluster
+        if: always()
+        run: kind delete cluster --name "$KIND_CLUSTER_NAME"
+

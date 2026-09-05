@@ -1,0 +1,408 @@
+package engine
+
+import (
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/vectordb/vectordb/internal/core"
+	"github.com/vectordb/vectordb/internal/metadata"
+	"github.com/vectordb/vectordb/internal/wal"
+)
+
+func TestPersistenceAndSearch(t *testing.T) {
+	path := t.TempDir()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "docs", Dimension: 3, Metric: core.MetricCosine, ShardCount: 4}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []core.Record{
+		{ID: "a", Vector: []float32{1, 0, 0}, Metadata: map[string]any{"kind": "a"}},
+		{ID: "b", Vector: []float32{0, 1, 0}},
+		{ID: "c", Namespace: "other", Vector: []float32{1, 0, 0}},
+	} {
+		if _, err := db.Upsert("docs", record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Get("docs", "", "a")
+	if err != nil || got.Metadata["kind"] != "a" {
+		t.Fatalf("Get() = %#v, %v", got, err)
+	}
+	results, err := reopened.Search("docs", "", []float32{1, 0, 0}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 2 || results[0].ID != "a" || results[1].ID != "b" {
+		t.Fatalf("unexpected namespace-filtered results: %#v", results)
+	}
+	if err := reopened.Delete("docs", "", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.Get("docs", "", "a"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("expected persisted deletion, got %v", err)
+	}
+	_ = reopened.Close()
+}
+
+func TestCheckpointLoadsSegmentThenReplaysWAL(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "checkpointed", Dimension: 2, Metric: core.MetricDot, ShardCount: 2}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []core.Record{
+		{ID: "keep", Vector: []float32{2, 0}},
+		{ID: "delete", Vector: []float32{1, 0}},
+		{ID: "other", Vector: []float32{0, 1}},
+	} {
+		if _, err := db.Upsert("checkpointed", record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Delete("checkpointed", "", "delete"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint("checkpointed"); err != nil {
+		t.Fatal(err)
+	}
+	for shardID := 0; shardID < 2; shardID++ {
+		walPath := filepath.Join(path, "wal", "checkpointed", fmt.Sprintf("shard-%06d.wal", shardID))
+		info, err := os.Stat(walPath)
+		if err != nil || info.Size() != 0 {
+			t.Fatalf("WAL %s not reset: size=%v err=%v", walPath, info.Size(), err)
+		}
+	}
+	if _, err := db.Upsert("checkpointed", core.Record{ID: "after", Vector: []float32{3, 0}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err := reopened.Get("checkpointed", "", "delete"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("deleted record resurrected: %v", err)
+	}
+	for _, id := range []string{"keep", "other", "after"} {
+		if _, err := reopened.Get("checkpointed", "", id); err != nil {
+			t.Fatalf("record %s missing after recovery: %v", id, err)
+		}
+	}
+}
+
+func TestMappedCheckpointMergesDeltaAndTombstones(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "mapped-live", Dimension: 2, Metric: core.MetricDot, ShardCount: 1, Index: core.IndexConfig{Type: core.IndexFlat}}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []core.Record{
+		{ID: "replace", Vector: []float32{1, 0}, Metadata: map[string]any{"generation": float64(1)}},
+		{ID: "remove", Vector: []float32{2, 0}},
+		{ID: "keep", Vector: []float32{0, 1}},
+	} {
+		if _, err := db.Upsert(config.Name, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "replace", Vector: []float32{4, 0}, Metadata: map[string]any{"generation": float64(2)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(config.Name, "", "remove"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "new", Vector: []float32{3, 0}}); err != nil {
+		t.Fatal(err)
+	}
+	results, err := db.Search(config.Name, "", []float32{1, 0}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 3 || results[0].ID != "replace" || results[1].ID != "new" || results[2].ID != "keep" {
+		t.Fatalf("unexpected merged mapped/delta results: %#v", results)
+	}
+	got, err := db.Get(config.Name, "", "replace")
+	if err != nil || got.Vector[0] != 4 || got.Metadata["generation"] != float64(2) {
+		t.Fatalf("replacement not visible: %#v, %v", got, err)
+	}
+	if _, err := db.Get(config.Name, "", "remove"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("tombstone not visible: %v", err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, id := range []string{"replace", "new", "keep"} {
+		if _, err := db.Get(config.Name, "", id); err != nil {
+			t.Fatalf("%s missing after mapped restart: %v", id, err)
+		}
+	}
+	if _, err := db.Get(config.Name, "", "remove"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("deleted record resurrected after restart: %v", err)
+	}
+}
+
+func TestAutomaticCheckpoint(t *testing.T) {
+	path := t.TempDir()
+	db, _ := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 2})
+	defer db.Close()
+	_ = db.CreateCollection(core.CollectionConfig{Name: "auto", Dimension: 1, Metric: core.MetricDot, ShardCount: 1})
+	_, _ = db.Upsert("auto", core.Record{ID: "one", Vector: []float32{1}})
+	_, err := db.Upsert("auto", core.Record{ID: "two", Vector: []float32{2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(path, "segments", "auto", "shard-000000", "MANIFEST.json")
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatalf("automatic checkpoint missing: %v", err)
+	}
+}
+
+func TestCorruptCheckpointFailsEngineStartup(t *testing.T) {
+	path := t.TempDir()
+	db, _ := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways})
+	_ = db.CreateCollection(core.CollectionConfig{Name: "corrupt", Dimension: 1, Metric: core.MetricDot, ShardCount: 1})
+	_, _ = db.Upsert("corrupt", core.Record{ID: "one", Vector: []float32{1}})
+	if err := db.Checkpoint("corrupt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	directory := filepath.Join(path, "segments", "corrupt", "shard-000000")
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var segmentPath string
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".vectors" {
+			segmentPath = filepath.Join(directory, entry.Name())
+			break
+		}
+	}
+	if segmentPath == "" {
+		t.Fatal("segment file not found")
+	}
+	file, _ := os.OpenFile(segmentPath, os.O_RDWR, 0)
+	_, _ = file.WriteAt([]byte{'X'}, 42)
+	_ = file.Close()
+	if reopened, err := Open(path); err == nil {
+		_ = reopened.Close()
+		t.Fatal("expected corrupt segment to fail engine startup")
+	}
+}
+
+func TestFilteredSearchWithFlatAndHNSW(t *testing.T) {
+	for _, indexConfig := range []core.IndexConfig{
+		{Type: core.IndexFlat},
+		{Type: core.IndexHNSW, M: 8, EFConstruction: 32, EFSearch: 32},
+	} {
+		t.Run(string(indexConfig.Type), func(t *testing.T) {
+			db, _ := Open(t.TempDir())
+			defer db.Close()
+			config := core.CollectionConfig{Name: "filtered", Dimension: 2, Metric: core.MetricDot, ShardCount: 2, Index: indexConfig}
+			if err := db.CreateCollection(config); err != nil {
+				t.Fatal(err)
+			}
+			for _, record := range []core.Record{
+				{ID: "best-wrong-language", Vector: []float32{10, 0}, Metadata: map[string]any{"language": "python", "year": 2026}},
+				{ID: "best-match", Vector: []float32{8, 0}, Metadata: map[string]any{"language": "go", "year": 2025}},
+				{ID: "older", Vector: []float32{7, 0}, Metadata: map[string]any{"language": "go", "year": 2022}},
+			} {
+				if _, err := db.Upsert("filtered", record); err != nil {
+					t.Fatal(err)
+				}
+			}
+			filter, err := metadata.Parse(map[string]any{
+				"language": "go", "year": map[string]any{"$gte": 2024},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			results, err := db.SearchFiltered("filtered", "", []float32{1, 0}, 10, filter)
+			if err != nil || len(results) != 1 || results[0].ID != "best-match" {
+				t.Fatalf("filtered search = %#v, %v", results, err)
+			}
+		})
+	}
+}
+
+func TestBatchUpsertReplaysSingleShardWALRecord(t *testing.T) {
+	path := t.TempDir()
+	db, _ := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways})
+	if err := db.CreateCollection(core.CollectionConfig{Name: "batch", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.BatchUpsert("batch", []core.Record{
+		{ID: "one", Vector: []float32{1, 0}},
+		{ID: "two", Vector: []float32{2, 0}},
+		{ID: "three", Vector: []float32{3, 0}},
+	})
+	if err != nil || len(stored) != 3 {
+		t.Fatalf("BatchUpsert() = %#v, %v", stored, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	for _, id := range []string{"one", "two", "three"} {
+		if _, err := reopened.Get("batch", "", id); err != nil {
+			t.Fatalf("batch record %s not recovered: %v", id, err)
+		}
+	}
+}
+
+func TestBatchUpsertValidatesBeforeWriting(t *testing.T) {
+	db, _ := Open(t.TempDir())
+	defer db.Close()
+	_ = db.CreateCollection(core.CollectionConfig{Name: "batch", Dimension: 2, Metric: core.MetricDot, ShardCount: 1})
+	_, err := db.BatchUpsert("batch", []core.Record{
+		{ID: "valid", Vector: []float32{1, 0}},
+		{ID: "invalid", Vector: []float32{1}},
+	})
+	if !errors.Is(err, core.ErrDimensionMismatch) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+	if _, err := db.Get("batch", "", "valid"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("valid prefix was written before validation completed: %v", err)
+	}
+}
+
+func TestRejectsNonFiniteVectors(t *testing.T) {
+	db, _ := Open(t.TempDir())
+	defer db.Close()
+	_ = db.CreateCollection(core.CollectionConfig{Name: "finite", Dimension: 1, Metric: core.MetricDot, ShardCount: 1})
+	if _, err := db.Upsert("finite", core.Record{ID: "nan", Vector: []float32{float32(math.NaN())}}); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("expected non-finite vector rejection, got %v", err)
+	}
+	if _, err := db.Search("finite", "", []float32{float32(math.Inf(1))}, 1); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("expected non-finite query rejection, got %v", err)
+	}
+}
+
+func TestRejectsUnsafeCollectionName(t *testing.T) {
+	db, _ := Open(t.TempDir())
+	err := db.CreateCollection(core.CollectionConfig{Name: "../escape", Dimension: 2, Metric: core.MetricDot, ShardCount: 1})
+	if !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("expected invalid argument, got %v", err)
+	}
+}
+
+func TestHNSWCollectionSurvivesRestart(t *testing.T) {
+	path := t.TempDir()
+	db, _ := Open(path)
+	config := core.CollectionConfig{
+		Name: "approx", Dimension: 2, Metric: core.MetricDot, ShardCount: 2,
+		Index: core.IndexConfig{Type: core.IndexHNSW, M: 4, EFConstruction: 16, EFSearch: 16},
+	}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert("approx", core.Record{ID: "winner", Vector: []float32{2, 0}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert("approx", core.Record{ID: "other", Vector: []float32{0, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := reopened.Search("approx", "", []float32{1, 0}, 1)
+	if err != nil || len(got) != 1 || got[0].ID != "winner" {
+		t.Fatalf("Search() = %#v, %v", got, err)
+	}
+	described, _, _ := reopened.DescribeCollection("approx")
+	if described.Index.Type != core.IndexHNSW {
+		t.Fatalf("index config not restored: %#v", described.Index)
+	}
+}
+
+func TestBatchUpsertShardValidatesRoutingAndRecovers(t *testing.T) {
+	path := t.TempDir()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "distributed", Dimension: 2, Metric: core.MetricDot, ShardCount: 4}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	record := core.Record{ID: "record", Vector: []float32{1, 0}}
+	shardID, err := db.RouteShard(config.Name, "", record.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.BatchUpsertShard(config.Name, (shardID+1)%4, []core.Record{record}); err == nil {
+		t.Fatal("expected wrong-shard rejection")
+	}
+	stored, err := db.BatchUpsertShard(config.Name, shardID, []core.Record{record})
+	if err != nil || len(stored) != 1 || stored[0].Version == 0 {
+		t.Fatalf("stored=%#v err=%v", stored, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.Get(config.Name, "", record.ID)
+	if err != nil || got.Version != stored[0].Version {
+		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}

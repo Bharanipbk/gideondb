@@ -1,0 +1,22 @@
+{
+  "name": "@vectordb/client",
+  "version": "0.0.0",
+  "description": "Experimental TypeScript client for VectorDB",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "import": "./src/index.js"
+    }
+  },
+  "types": "./src/index.d.ts",
+  "files": ["src/index.js", "src/index.d.ts"],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "Apache-2.0"
+}
+
