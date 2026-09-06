@@ -22,12 +22,13 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 		t.Fatalf("redirect=%d %q", redirect.Code, redirect.Header().Get("Location"))
 	}
 	for asset, expected := range map[string][2]string{
-		"/dashboard/":                  {"text/html", "Performance"},
-		"/dashboard/app.js":            {"text/javascript", "parsePrometheus"},
+		"/dashboard/":                  {"text/html", "request-rate-chart"},
+		"/dashboard/app.js":            {"text/javascript", "recordPerformance"},
 		"/dashboard/styles.css":        {"text/css", "--accent"},
-		"/dashboard/performance.css":   {"text/css", ".metric-row"},
+		"/dashboard/performance.css":   {"text/css", ".chart-grid"},
 		"/dashboard/explorer.css":      {"text/css", ".explorer-tools"},
 		"/dashboard/configuration.css": {"text/css", ".configuration-details"},
+		"/dashboard/logs.css":          {"text/css", ".log-row"},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, asset, nil))

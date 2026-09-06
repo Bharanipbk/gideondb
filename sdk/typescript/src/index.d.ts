@@ -33,6 +33,14 @@ export interface VectorRecord {
   namespace?: string;
 }
 
+export interface RecordPage {
+  records: VectorRecord[];
+  next_cursor: string;
+  vectors_included: boolean;
+  metadata_epoch?: number;
+  authoritative_placement?: boolean;
+}
+
 export interface SearchRequest {
   vector: number[];
   topK: number;
@@ -83,6 +91,8 @@ export class VectorDBClient {
   upsert(collection: string, record: VectorRecord, options?: RequestOptions): Promise<VectorRecord>;
   batchUpsert(collection: string, records: VectorRecord[], options?: RequestOptions): Promise<VectorRecord[]>;
   get(collection: string, id: string, options?: RequestOptions & { namespace?: string }): Promise<VectorRecord>;
+  scroll(collection: string, settings?: { namespace?: string; limit?: number; cursor?: string; includeVector?: boolean }, options?: RequestOptions): Promise<RecordPage>;
+  distributedScroll(collection: string, settings?: { namespace?: string; limit?: number; cursor?: string; includeVector?: boolean }, options?: RequestOptions): Promise<RecordPage>;
   delete(collection: string, id: string, options?: RequestOptions & { namespace?: string }): Promise<void>;
   search(collection: string, search: SearchRequest, options?: RequestOptions): Promise<SearchResult[]>;
   distributedSearch(collection: string, search: SearchRequest, options?: RequestOptions): Promise<DistributedSearchResponse>;

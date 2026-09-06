@@ -85,6 +85,21 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             Client("https://db.example", timeout=0)
 
+    def test_scroll_encodes_cursor_namespace_and_vector_choice(self):
+        opener = QueueOpener([Response(body={"records": [{"id": "one"}], "next_cursor": "next/value", "vectors_included": False}),Response(body={"records": [], "next_cursor": "", "vectors_included": False, "metadata_epoch": 7, "authoritative_placement": True})])
+        sdk = Client("https://db.example", opener=opener)
+        page = sdk.scroll("docs", namespace="tenant one", limit=25, cursor="prior/value")
+        self.assertEqual(page["next_cursor"], "next/value")
+        self.assertIn("namespace=tenant+one", opener.requests[0][0].full_url)
+        self.assertIn("cursor=prior%2Fvalue", opener.requests[0][0].full_url)
+        cluster_page = sdk.distributed_scroll("docs", limit=25)
+        self.assertEqual(cluster_page["metadata_epoch"], 7)
+        self.assertIn("/v1/cluster/collections/docs/vectors?", opener.requests[1][0].full_url)
+        with self.assertRaises(ValueError):
+            sdk.scroll("docs", limit=201)
+        with self.assertRaises(ValueError):
+            sdk.distributed_scroll("docs", limit=201)
+
 
 if __name__ == "__main__":
     unittest.main()

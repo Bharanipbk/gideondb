@@ -14,9 +14,13 @@ The current dashboard provides:
 - cluster membership, readiness, and shard-placement views.
 - cumulative HTTP request volume, average latency, in-flight work, and server
   errors by bounded route template;
+- a bounded live time series for request rate, interval mean latency, and
+  server-error rate, sampled every five seconds while the page is visible;
 - follower WAL-sequence lag and replication transport outcomes.
 - read-only effective security, routing, replication, capacity, protocol, and
   per-collection index configuration.
+- severity-filtered recent HTTP operational events with status, latency, and
+  trace correlation identifiers.
 
 If API-key authentication is enabled, select **API key** and enter the same
 Bearer credential used by API clients. The credential is retained only in the
@@ -36,6 +40,16 @@ cluster-wide merged scroll. Operators must explicitly select **Reveal vectors**
 before stored vector values are requested or rendered.
 
 The performance view parses the node's authenticated Prometheus exposition in
-the browser. Values are cumulative snapshots rather than a retained time
-series; Prometheus remains the metrics system of record for alerting, history,
-and cross-node aggregation.
+the browser. It retains at most 120 samples—about ten minutes at the five-second
+interval—in page memory and can pause/resume sampling. Counter resets are
+treated as a new baseline. This history disappears on reload, covers only the
+connected node, and reports interval mean rather than percentile latency.
+Prometheus remains the metrics system of record for durable history, alerting,
+percentiles, and cross-node aggregation.
+
+The Logs view is a bounded troubleshooting aid and currently reads the
+connected node's feed. Production nodes persist the latest 4,096 sanitized HTTP
+completion events under their data directory, and `/v1/cluster/logs` provides a
+bounded cross-node merge with explicit peer failures. Centralized structured
+log collection remains appropriate for longer retention, indexing, alerting,
+and analysis outside the active cluster.

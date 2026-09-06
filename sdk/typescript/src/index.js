@@ -71,6 +71,24 @@ export class VectorDBClient {
     return this.request("GET", recordPath(collection, id, options.namespace), undefined, options);
   }
 
+  async scroll(collection, settings = {}, options) {
+	return this.scrollPath(collectionPath(collection), settings, options);
+  }
+
+  async distributedScroll(collection, settings = {}, options) {
+	return this.scrollPath(clusterCollectionPath(collection), settings, options);
+  }
+
+  async scrollPath(basePath, settings = {}, options) {
+    const limit = settings.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new TypeError("limit must be between 1 and 200");
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (settings.namespace) query.set("namespace", settings.namespace);
+    if (settings.cursor) query.set("cursor", settings.cursor);
+    if (settings.includeVector) query.set("include_vector", "true");
+    return this.request("GET", `${basePath}/vectors?${query}`, undefined, options);
+  }
+
   async delete(collection, id, options = {}) {
     await this.request("DELETE", recordPath(collection, id, options.namespace), undefined, options);
   }

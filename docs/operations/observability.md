@@ -32,6 +32,12 @@ Each completed request emits a structured `http.server.request` log with:
 The log deliberately excludes raw paths, query strings, bodies, collection
 names, namespaces, vector IDs, vectors, metadata, and payloads.
 
+Production nodes also append this same sanitized event shape to a mode-`0600`,
+bounded JSON-lines file in the data directory. The latest 4,096 entries survive
+restart; compaction is atomic. `/v1/cluster/logs` uses authenticated and
+metadata-epoch-fenced peer requests to merge recent entries and reports
+unavailable nodes explicitly.
+
 ## Current boundary
 
 This is a dependency-free tracing foundation, not a complete OpenTelemetry

@@ -11,12 +11,14 @@ runtime behavior is incomplete until the corresponding documentation changes.
 - [Roadmap](roadmap.md)
 - [Glossary](glossary.md)
 
-## Implemented Phase 1 documents
+## Implemented documentation
 
 - [Quickstart](getting-started/quickstart.md)
+- [Staged adoption guide](getting-started/adoption.md)
 - [Phase 1 architecture](architecture/phase-1.md)
 - [REST API](api/rest.md)
 - [OpenAPI description](api/openapi.yaml)
+- [gRPC API contract](api/grpc.md)
 - [Experimental HNSW index](indexing/hnsw.md)
 - [WAL and recovery](architecture/wal.md)
 - [WAL binary format](internals/wal-format.md)
@@ -34,7 +36,15 @@ runtime behavior is incomplete until the corresponding documentation changes.
 - [Python SDK](sdk/python.md)
 - [TypeScript SDK](sdk/typescript.md)
 - [Java SDK](sdk/java.md)
+- [Rust SDK](sdk/rust.md)
+- [.NET SDK](sdk/dotnet.md)
 - [Administration dashboard](operations/dashboard.md)
+- [Ollama semantic-search integration](integrations/ollama.md)
+- [Hugging Face semantic-search integration](integrations/huggingface.md)
+- [OpenAI-compatible semantic-search integration](integrations/openai-compatible.md)
+- [Cohere semantic-search integration](integrations/cohere.md)
+- [LangChain integration](integrations/langchain.md)
+- [LlamaIndex integration](integrations/llamaindex.md)
 
 Implementation-specific guides will be added with the implementation they
 describe. Empty placeholder documents are deliberately avoided because they

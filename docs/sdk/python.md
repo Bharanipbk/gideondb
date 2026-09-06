@@ -42,9 +42,26 @@ For static-routing clusters, use `distributed_search` and
 must inspect `partial` and every shard outcome. Partial search remains opt-in
 with `allow_partial=True`.
 
+Node-local record browsing returns an opaque continuation cursor and omits
+vectors unless explicitly requested:
+
+```python
+page = db.scroll("documents", limit=50)
+next_page = db.scroll(
+    "documents", limit=50, cursor=page["next_cursor"], include_vector=True
+)
+```
+
+`distributed_scroll` accepts the same arguments and traverses one authoritative
+owner per shard. Its response also includes `metadata_epoch` and
+`authoritative_placement`:
+
+```python
+page = db.distributed_scroll("documents", limit=50)
+```
+
 Run the SDK tests from the repository root:
 
 ```bash
 make test-python-sdk
 ```
-

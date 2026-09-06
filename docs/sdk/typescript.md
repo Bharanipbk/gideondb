@@ -38,6 +38,22 @@ MiB, and exposes `VectorDBAPIError` and `VectorDBTransportError`. It deliberatel
 does not retry requests: callers must decide whether a write is safe to replay,
 especially when a distributed result reports partial or unknown outcomes.
 
+`scroll` browses records physically present on one node. Its cursor is opaque,
+and vectors require an explicit opt-in:
+
+```js
+const page = await client.scroll("documents", { limit: 50 });
+const next = await client.scroll("documents", {
+  limit: 50, cursor: page.next_cursor, includeVector: true,
+});
+```
+
+Use `distributedScroll` for a placement-aware page across the cluster:
+
+```js
+const clusterPage = await client.distributedScroll("documents", { limit: 50 });
+```
+
 Run its tests from the repository root:
 
 ```sh

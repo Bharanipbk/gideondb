@@ -28,6 +28,7 @@ type Server struct {
 	logger              *slog.Logger
 	mux                 *http.ServeMux
 	metrics             *metricsRegistry
+	events              *eventLog
 	apiKeyHash          []byte
 	nodeID              string
 	clusterID           string
@@ -64,7 +65,11 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
+	events := newEventLog(256)
+	if options.EventLogPath != "" {
+		events = newPersistentEventLog(options.EventLogPath, 4096)
+	}
+	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
 	if s.replicationFactor == 0 {
 		s.replicationFactor = 1
 	}
@@ -123,6 +128,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("GET /v1/ready", s.ready)
 	s.mux.HandleFunc("GET /metrics", s.protected(s.serveMetrics))
+	s.mux.HandleFunc("GET /v1/logs", s.protected(s.recentLogs))
+	s.mux.HandleFunc("GET /v1/cluster/logs", s.protected(s.clusterLogs))
+	s.mux.HandleFunc("GET /v1/internal/logs", s.protected(s.internalLogs))
 	s.mux.HandleFunc("GET /v1/collections", s.protected(s.listCollections))
 	s.mux.HandleFunc("GET /v1/node", s.protected(s.nodeInfo))
 	s.mux.HandleFunc("GET /v1/cluster/peers", s.protected(s.clusterPeers))
@@ -136,6 +144,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/cluster/backup/recovery-point", s.protected(s.clusterBackupRecoveryPoint))
 	s.mux.HandleFunc("POST /v1/cluster/metadata/epoch", s.protected(s.advanceMetadataEpoch))
 	s.mux.HandleFunc("POST /v1/internal/shards/{collection}/{shard}/search", s.protected(s.internalShardSearch))
+	s.mux.HandleFunc("GET /v1/internal/shards/{collection}/{shard}/vectors", s.protected(s.internalShardScroll))
 	s.mux.HandleFunc("POST /v1/internal/shards/{collection}/{shard}/vectors/batch", s.protected(s.internalShardBatchUpsert))
 	s.mux.HandleFunc("POST /v1/internal/replicas/{collection}/{shard}/append", s.protected(s.internalReplicaAppend))
 	s.mux.HandleFunc("POST /v1/internal/replicas/{collection}/{shard}/snapshot", s.protected(s.internalReplicaSnapshot))
@@ -153,6 +162,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/internal/backup/archive", s.protected(s.internalBackupArchive))
 	s.mux.HandleFunc("POST /v1/internal/backup/release", s.protected(s.internalBackupRelease))
 	s.mux.HandleFunc("POST /v1/cluster/collections/{name}/search", s.protected(s.distributedSearch))
+	s.mux.HandleFunc("GET /v1/cluster/collections/{name}/vectors", s.protected(s.distributedScroll))
 	s.mux.HandleFunc("POST /v1/cluster/collections/{name}/vectors/batch", s.protected(s.distributedBatchUpsert))
 	s.mux.HandleFunc("POST /v1/collections", s.protected(s.createCollection))
 	s.mux.HandleFunc("GET /v1/collections/{name}", s.protected(s.describeCollection))

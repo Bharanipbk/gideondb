@@ -22,6 +22,7 @@ type RaftProtocol interface {
 
 type Options struct {
 	APIKey, NodeID, ClusterID, AdvertiseAddress string
+	EventLogPath                                string
 	MetadataEpoch                               uint64
 	ReplicationFactor                           int
 	PlacementCapacity                           uint32

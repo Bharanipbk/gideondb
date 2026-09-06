@@ -37,6 +37,21 @@ network, interruption, malformed-response, and response-limit failures raise
 `TransportException`. The client never retries implicitly because distributed
 writes can return partial or unknown outcomes.
 
+Node-local browsing accepts an opaque cursor and keeps vectors redacted unless
+the final argument is `true`:
+
+```java
+var page = client.scroll("documents", "", 50, "", false);
+var next = client.scroll(
+    "documents", "", 50, (String) page.get("next_cursor"), true);
+```
+
+Use `distributedScroll` with the same arguments for placement-aware traversal:
+
+```java
+var clusterPage = client.distributedScroll("documents", "", 50, "", false);
+```
+
 Run strict compilation and behavioral tests from the repository root:
 
 ```sh

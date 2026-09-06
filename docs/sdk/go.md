@@ -49,3 +49,19 @@ must use `DistributedSearch` and `DistributedBatchUpsert`. Partial distributed
 search is opt-in through `SearchOptions.AllowPartial`; the default fails closed
 when any shard is unavailable.
 
+`Scroll` browses records physically present on one node. Pass its opaque cursor
+unchanged for the next page; vectors require explicit inclusion:
+
+```go
+page, err := sdk.Scroll(ctx, "documents", client.ScrollOptions{Limit: 50})
+next, err := sdk.Scroll(ctx, "documents", client.ScrollOptions{
+    Limit: 50, Cursor: page.NextCursor, IncludeVector: true,
+})
+```
+
+Use `DistributedScroll` with the same options for a placement-aware page across
+all shards. Its cursor is fenced to the cluster metadata epoch:
+
+```go
+page, err := sdk.DistributedScroll(ctx, "documents", client.ScrollOptions{Limit: 50})
+```

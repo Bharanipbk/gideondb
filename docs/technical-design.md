@@ -407,13 +407,16 @@ control. Status details carry the same stable error codes as REST. Buf lint and
 breaking-change checks run in CI. Internal cluster services use separate
 protos and mandatory mTLS in distributed production mode.
 
+The public `vectordb.v1.VectorDBService` source contract and Buf lint/generation
+policy are implemented. Generated Go bindings and server transport remain
+planned; the REST API remains the only active network surface meanwhile.
+
 ## 35. SDK architecture
 
-Go, Python and TypeScript are first. Generated transport models remain
-internal; handwritten clients provide ergonomic types, retries only for safe
-idempotent calls, deadlines, async/batch APIs and consistent errors. SDKs do
-not generate embeddings in the core package. Java, Rust and .NET wait until the
-API stabilizes and maintainer demand exists.
+Go, Python, TypeScript, Java, Rust, and .NET clients are implemented. Generated
+transport models remain internal; handwritten clients provide ergonomic types,
+bounded responses, deadlines, batch APIs, and consistent errors without unsafe
+automatic retries. SDKs do not generate embeddings in the core package.
 
 ## 36. Dashboard architecture
 

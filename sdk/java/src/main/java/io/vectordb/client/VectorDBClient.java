@@ -80,6 +80,26 @@ public final class VectorDBClient {
         return requestObject("GET", recordPath(collection, id, namespace), null);
     }
 
+    public Map<String, Object> scroll(String collection, String namespace, int limit,
+                                      String cursor, boolean includeVector) {
+        return scrollPath(collectionPath(collection), namespace, limit, cursor, includeVector);
+    }
+
+    public Map<String, Object> distributedScroll(String collection, String namespace, int limit,
+                                                  String cursor, boolean includeVector) {
+        return scrollPath(clusterCollectionPath(collection), namespace, limit, cursor, includeVector);
+    }
+
+    private Map<String, Object> scrollPath(String basePath, String namespace, int limit,
+                                           String cursor, boolean includeVector) {
+        if (limit < 1 || limit > 200) throw new IllegalArgumentException("limit must be between 1 and 200");
+        StringBuilder path = new StringBuilder(basePath).append("/vectors?limit=").append(limit);
+        if (namespace != null && !namespace.isBlank()) path.append("&namespace=").append(encode(namespace));
+        if (cursor != null && !cursor.isBlank()) path.append("&cursor=").append(encode(cursor));
+        if (includeVector) path.append("&include_vector=true");
+        return requestObject("GET", path.toString(), null);
+    }
+
     public void delete(String collection, String id, String namespace) {
         request("DELETE", recordPath(collection, id, namespace), null);
     }

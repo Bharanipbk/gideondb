@@ -69,5 +69,6 @@ func (s *Server) traceMiddleware(next http.Handler) http.Handler {
 			"method", r.Method, "route", route, "status", tracked.status,
 			"duration_ms", float64(time.Since(started).Microseconds())/1000,
 		)
+		s.events.add(httpEvent{Timestamp: time.Now().UTC(), Method: r.Method, Route: route, Status: tracked.status, DurationMS: float64(time.Since(started).Microseconds()) / 1000, TraceID: trace.traceID, SpanID: trace.spanID})
 	})
 }

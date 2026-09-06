@@ -1,0 +1,525 @@
+// VectorDB public API version 1.
+//
+// Clients authenticate with `authorization: Bearer <token>` metadata. Every
+// call should carry a deadline. Collection, record, and search requests are
+// safe to retry only when the caller can prove idempotency; the server does not
+// infer replay safety after an ambiguous transport failure.
+syntax = "proto3";
+
+package vectordb.v1;
+
+import "google/protobuf/struct.proto";
+
+option csharp_namespace = "VectorDB.Api.V1";
+option go_package = "github.com/vectordb/vectordb/gen/vectordb/v1;vectordbv1";
+option java_multiple_files = true;
+option java_package = "io.vectordb.api.v1";
+
+// VectorDB provides the public collection, data, search, cluster, health, and
+// administrative snapshot surface. Internal Raft and replication protocols use
+// a separate API and are intentionally excluded from this service.
+service VectorDBService {
+  // Creates an immutable-schema collection and fails if its name exists.
+  rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
+  // Deletes a collection and all of its records.
+  rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse);
+  // Lists collection configurations in deterministic name order.
+  rpc ListCollections(ListCollectionsRequest) returns (ListCollectionsResponse);
+  // Returns a collection configuration and current logical record count.
+  rpc DescribeCollection(DescribeCollectionRequest) returns (DescribeCollectionResponse);
+
+  // Inserts or replaces one record using its namespace and identifier as key.
+  rpc Upsert(UpsertRequest) returns (UpsertResponse);
+  // Inserts or replaces a bounded batch; cross-shard atomicity is not promised.
+  rpc BatchUpsert(BatchUpsertRequest) returns (BatchUpsertResponse);
+  // Deletes one record identified by collection, namespace, and identifier.
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  // Returns one exact record, including its vector.
+  rpc Get(GetRequest) returns (GetResponse);
+
+  // Searches one node and returns results in deterministic score order.
+  rpc Search(SearchRequest) returns (SearchResponse);
+  // Executes multiple independent searches in request order.
+  rpc BatchSearch(BatchSearchRequest) returns (BatchSearchResponse);
+  // Returns one bounded deterministic page using an opaque cursor.
+  rpc Scroll(ScrollRequest) returns (ScrollResponse);
+
+  // Returns the caller-visible cluster control-plane status.
+  rpc ClusterStatus(ClusterStatusRequest) returns (ClusterStatusResponse);
+  // Lists known nodes without exposing credentials or private key material.
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  // Lists authoritative logical-shard placement for all collections.
+  rpc ListShards(ListShardsRequest) returns (ListShardsResponse);
+
+  // Reports process liveness and readiness without topology details.
+  rpc Health(HealthRequest) returns (HealthResponse);
+  // Reports bounded node and collection counters for operational inspection.
+  rpc Stats(StatsRequest) returns (StatsResponse);
+
+  // Streams a checksum-addressed backup archive from a consistent snapshot.
+  rpc Snapshot(SnapshotRequest) returns (stream SnapshotResponse);
+  // Restores a checksum-addressed archive into an explicitly empty target.
+  rpc Restore(stream RestoreRequest) returns (RestoreResponse);
+}
+
+// DistanceMetric selects vector similarity semantics for a collection.
+enum DistanceMetric {
+  // Unspecified metrics are rejected on collection creation.
+  DISTANCE_METRIC_UNSPECIFIED = 0;
+  // Cosine similarity ranks larger normalized dot products first.
+  DISTANCE_METRIC_COSINE = 1;
+  // Dot-product similarity ranks larger products first.
+  DISTANCE_METRIC_DOT = 2;
+  // Squared Euclidean distance ranks smaller distances first.
+  DISTANCE_METRIC_L2 = 3;
+}
+
+// IndexType selects the per-shard vector index implementation.
+enum IndexType {
+  // Unspecified index type lets the server apply its documented default.
+  INDEX_TYPE_UNSPECIFIED = 0;
+  // Flat performs exact exhaustive search and is the correctness oracle.
+  INDEX_TYPE_FLAT = 1;
+  // HNSW performs experimental approximate nearest-neighbor search.
+  INDEX_TYPE_HNSW = 2;
+}
+
+// Acknowledgement controls replicated-write durability before success returns.
+enum Acknowledgement {
+  // Unspecified acknowledgement lets the server apply its configured default.
+  ACKNOWLEDGEMENT_UNSPECIFIED = 0;
+  // Leader waits only for its own durable append.
+  ACKNOWLEDGEMENT_LEADER = 1;
+  // Quorum waits for a majority of the assigned replica set.
+  ACKNOWLEDGEMENT_QUORUM = 2;
+  // All waits for every assigned replica or fails explicitly.
+  ACKNOWLEDGEMENT_ALL = 3;
+}
+
+// Collection defines immutable vector and shard configuration.
+message Collection {
+  // Name is the unique collection identifier.
+  string name = 1;
+  // Dimension is the exact number of float32 components in every vector.
+  uint32 dimension = 2;
+  // Metric defines how candidates are ranked.
+  DistanceMetric metric = 3;
+  // ShardCount is the immutable number of logical shards.
+  uint32 shard_count = 4;
+  // Index contains flat or HNSW configuration.
+  IndexConfig index = 5;
+}
+
+// IndexConfig contains index selection and HNSW tuning parameters.
+message IndexConfig {
+  // Type selects flat or HNSW indexing.
+  IndexType type = 1;
+  // M controls maximum HNSW graph degree.
+  uint32 m = 2;
+  // EfConstruction controls HNSW construction breadth.
+  uint32 ef_construction = 3;
+  // EfSearch controls default HNSW query breadth.
+  uint32 ef_search = 4;
+}
+
+// Record is the durable vector, metadata, payload, and versioned key.
+message Record {
+  // Id is unique within its namespace and collection.
+  string id = 1;
+  // Vector contains finite float32 components matching collection dimension.
+  repeated float vector = 2;
+  // Metadata contains indexed filterable user fields.
+  google.protobuf.Struct metadata = 3;
+  // Payload contains returned but non-indexed user fields.
+  google.protobuf.Struct payload = 4;
+  // TimestampUnixMillis is an optional application timestamp in Unix millis.
+  int64 timestamp_unix_millis = 5;
+  // Version is the server-assigned monotonic record version.
+  uint64 version = 6;
+  // Namespace partitions identifiers within a collection.
+  string namespace = 7;
+}
+
+// SearchResult is one scored match without its source vector.
+message SearchResult {
+  // Id is the matched record identifier.
+  string id = 1;
+  // Score follows the collection metric's ordering semantics.
+  float score = 2;
+  // Metadata contains indexed user fields.
+  google.protobuf.Struct metadata = 3;
+  // Payload contains non-indexed user fields.
+  google.protobuf.Struct payload = 4;
+  // Namespace is the matched record namespace.
+  string namespace = 5;
+}
+
+// CreateCollectionRequest contains the immutable collection configuration.
+message CreateCollectionRequest {
+  // Collection is the configuration to create.
+  Collection collection = 1;
+}
+
+// CreateCollectionResponse contains the created immutable configuration.
+message CreateCollectionResponse {
+  // Collection is the newly created configuration.
+  Collection collection = 1;
+}
+
+// DeleteCollectionRequest identifies a collection to delete.
+message DeleteCollectionRequest {
+  // Name is the collection identifier.
+  string name = 1;
+}
+
+// DeleteCollectionResponse confirms successful collection deletion.
+message DeleteCollectionResponse {}
+
+// ListCollectionsRequest has no filters; pagination is unnecessary while the
+// server-enforced collection limit remains bounded.
+message ListCollectionsRequest {}
+
+// ListCollectionsResponse contains all collections in name order.
+message ListCollectionsResponse {
+  // Collections contains immutable configurations.
+  repeated Collection collections = 1;
+}
+
+// DescribeCollectionRequest identifies one collection.
+message DescribeCollectionRequest {
+  // Name is the collection identifier.
+  string name = 1;
+}
+
+// DescribeCollectionResponse contains configuration and current record count.
+message DescribeCollectionResponse {
+  // Collection is the immutable configuration.
+  Collection collection = 1;
+  // VectorCount is the logical live-record count.
+  uint64 vector_count = 2;
+}
+
+// UpsertRequest stores one record in a collection.
+message UpsertRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Record is validated completely before mutation.
+  Record record = 2;
+  // Acknowledgement selects distributed durability.
+  Acknowledgement acknowledgement = 3;
+}
+
+// UpsertResponse contains the server-versioned stored record.
+message UpsertResponse {
+  // Record is the committed stored value.
+  Record record = 1;
+}
+
+// BatchUpsertRequest stores between 1 and 10,000 validated records.
+message BatchUpsertRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Records are partitioned by logical shard after complete validation.
+  repeated Record records = 2;
+  // Acknowledgement selects distributed durability.
+  Acknowledgement acknowledgement = 3;
+}
+
+// BatchUpsertResponse reports stored records and explicit per-shard outcomes.
+message BatchUpsertResponse {
+  // Records contains server-versioned records known to have committed.
+  repeated Record records = 1;
+  // Outcomes preserves committed, failed, or unknown shard status.
+  repeated ShardWriteOutcome outcomes = 2;
+  // Partial is true when outcomes are not uniformly committed.
+  bool partial = 3;
+  // MetadataEpoch fences the placement used for coordination.
+  uint64 metadata_epoch = 4;
+}
+
+// DeleteRequest identifies one record to delete.
+message DeleteRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Id is the record identifier.
+  string id = 2;
+  // Namespace is the record namespace.
+  string namespace = 3;
+  // Acknowledgement selects distributed durability.
+  Acknowledgement acknowledgement = 4;
+}
+
+// DeleteResponse confirms successful record deletion.
+message DeleteResponse {}
+
+// GetRequest identifies one exact record.
+message GetRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Id is the record identifier.
+  string id = 2;
+  // Namespace is the record namespace.
+  string namespace = 3;
+}
+
+// GetResponse contains one exact stored record.
+message GetResponse {
+  // Record is the stored value including its vector.
+  Record record = 1;
+}
+
+// SearchRequest contains one dense-vector nearest-neighbor query.
+message SearchRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Vector must contain finite components matching collection dimension.
+  repeated float vector = 2;
+  // TopK is the positive bounded number of results requested.
+  uint32 top_k = 3;
+  // Namespace restricts matches when non-empty.
+  string namespace = 4;
+  // Filter is the metadata-filter AST documented by the filtering guide.
+  google.protobuf.Struct filter = 5;
+  // AllowPartial permits explicit shard failures in distributed mode.
+  bool allow_partial = 6;
+}
+
+// SearchResponse contains ordered matches and distributed execution metadata.
+message SearchResponse {
+  // Results are sorted deterministically by metric score and stable tie-breaks.
+  repeated SearchResult results = 1;
+  // Failures identifies shards omitted only when partial results were allowed.
+  repeated ShardFailure failures = 2;
+  // Partial is true when one or more shards were omitted.
+  bool partial = 3;
+  // MetadataEpoch fences the placement used for coordination.
+  uint64 metadata_epoch = 4;
+  // AuthoritativePlacement is true only for a converged committed view.
+  bool authoritative_placement = 5;
+}
+
+// BatchSearchRequest contains a bounded list of independent searches.
+message BatchSearchRequest {
+  // Searches execute independently and responses preserve this order.
+  repeated SearchRequest searches = 1;
+}
+
+// BatchSearchResponse preserves one response for every input search.
+message BatchSearchResponse {
+  // Responses align by index with BatchSearchRequest.searches.
+  repeated SearchResponse responses = 1;
+}
+
+// ScrollRequest requests one deterministic record page.
+message ScrollRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Namespace restricts records when non-empty.
+  string namespace = 2;
+  // Limit must be between 1 and 200 and defaults to 50 when zero.
+  uint32 limit = 3;
+  // Cursor is an opaque value returned by the preceding page.
+  string cursor = 4;
+  // IncludeVector opts into returning source vectors.
+  bool include_vector = 5;
+  // Distributed merges one authoritative owner for every logical shard.
+  bool distributed = 6;
+}
+
+// ScrollResponse contains one deterministic page and its continuation cursor.
+message ScrollResponse {
+  // Records are ordered by namespace and identifier.
+  repeated Record records = 1;
+  // NextCursor is empty only when no further page exists.
+  string next_cursor = 2;
+  // VectorsIncluded confirms whether source vectors are present.
+  bool vectors_included = 3;
+  // MetadataEpoch fences a distributed cursor and is zero for local pages.
+  uint64 metadata_epoch = 4;
+  // AuthoritativePlacement describes distributed routing confidence.
+  bool authoritative_placement = 5;
+}
+
+// ShardFailure describes one explicit distributed read failure.
+message ShardFailure {
+  // ShardId is the failed logical shard.
+  uint32 shard_id = 1;
+  // NodeId is the selected owner when known.
+  string node_id = 2;
+  // Error is a sanitized stable failure description.
+  string error = 3;
+}
+
+// ShardWriteOutcome describes one distributed mutation outcome.
+message ShardWriteOutcome {
+  // ShardId is the targeted logical shard.
+  uint32 shard_id = 1;
+  // NodeId is the selected leader when known.
+  string node_id = 2;
+  // Status is committed, failed, or unknown.
+  string status = 3;
+  // Error is a sanitized failure description.
+  string error = 4;
+  // ReplicasAcknowledged is the observed durable acknowledgement count.
+  uint32 replicas_acknowledged = 5;
+  // ReplicationFactor is the assigned replica-set size.
+  uint32 replication_factor = 6;
+}
+
+// ClusterStatusRequest has no filters.
+message ClusterStatusRequest {}
+
+// ClusterStatusResponse summarizes authoritative control-plane state.
+message ClusterStatusResponse {
+  // ClusterId is the persistent cluster identity.
+  string cluster_id = 1;
+  // LocalNodeId is the serving node identity.
+  string local_node_id = 2;
+  // MetadataEpoch is the committed placement epoch.
+  uint64 metadata_epoch = 3;
+  // Ready indicates converged routing and active ownership.
+  bool ready = 4;
+  // Authoritative indicates that placement derives from the committed view.
+  bool authoritative = 5;
+  // LeaderNodeId is the current metadata-Raft leader when known.
+  string leader_node_id = 6;
+  // RaftTerm is the current metadata-Raft term.
+  uint64 raft_term = 7;
+}
+
+// ListNodesRequest has no filters.
+message ListNodesRequest {}
+
+// ListNodesResponse contains known nodes in identity order.
+message ListNodesResponse {
+  // Nodes contains local and discovered node status.
+  repeated Node nodes = 1;
+  // MetadataEpoch identifies the serving control-plane view.
+  uint64 metadata_epoch = 2;
+}
+
+// Node describes public operational node state.
+message Node {
+  // NodeId is the persistent node identity.
+  string node_id = 1;
+  // AdvertiseAddress is the configured peer address.
+  string advertise_address = 2;
+  // Health is healthy, suspect, unhealthy, or local.
+  string health = 3;
+  // PlacementCapacity is the committed relative capacity weight.
+  uint32 placement_capacity = 4;
+  // ProtocolVersion is the highest supported cluster protocol version.
+  uint32 protocol_version = 5;
+  // RaftRole is follower, candidate, or leader when known.
+  string raft_role = 6;
+}
+
+// ListShardsRequest optionally restricts placement to one collection.
+message ListShardsRequest {
+  // Collection is empty to list every collection.
+  string collection = 1;
+}
+
+// ListShardsResponse contains logical-shard placement in stable order.
+message ListShardsResponse {
+  // Shards contains authoritative leader and replica assignments.
+  repeated ShardPlacement shards = 1;
+  // MetadataEpoch identifies the committed placement view.
+  uint64 metadata_epoch = 2;
+  // Authoritative is false for preview-only placement.
+  bool authoritative = 3;
+}
+
+// ShardPlacement binds one logical shard to its leader and replicas.
+message ShardPlacement {
+  // Collection is the owning collection name.
+  string collection = 1;
+  // ShardId is the zero-based logical shard identifier.
+  uint32 shard_id = 2;
+  // LeaderNodeId is the mutation coordinator.
+  string leader_node_id = 3;
+  // ReplicaNodeIds contains distinct assigned replicas in canonical order.
+  repeated string replica_node_ids = 4;
+}
+
+// HealthRequest selects whether readiness should also be required.
+message HealthRequest {
+  // RequireReady returns UNAVAILABLE unless this node can receive traffic.
+  bool require_ready = 1;
+}
+
+// HealthResponse reports detail-free process status.
+message HealthResponse {
+  // Healthy indicates process liveness.
+  bool healthy = 1;
+  // Ready indicates traffic readiness.
+  bool ready = 2;
+}
+
+// StatsRequest optionally restricts counters to one collection.
+message StatsRequest {
+  // Collection is empty for node-wide statistics.
+  string collection = 1;
+}
+
+// StatsResponse reports bounded point-in-time operational counters.
+message StatsResponse {
+  // VectorCount is the logical live-record count.
+  uint64 vector_count = 1;
+  // CollectionCount is the number of configured collections.
+  uint64 collection_count = 2;
+  // LogicalShardCount is the configured logical-shard count.
+  uint64 logical_shard_count = 3;
+  // HeapBytes is runtime heap memory attributed to the process.
+  uint64 heap_bytes = 4;
+  // MappedBytes is read-only mapped segment memory.
+  uint64 mapped_bytes = 5;
+  // InFlightRequests is the current admitted request count.
+  uint64 in_flight_requests = 6;
+}
+
+// SnapshotRequest starts a consistent local or coordinated cluster backup.
+message SnapshotRequest {
+  // ClusterWide coordinates all committed voters when true.
+  bool cluster_wide = 1;
+  // ExpectedMetadataEpoch rejects a stale caller view when non-zero.
+  uint64 expected_metadata_epoch = 2;
+}
+
+// SnapshotResponse is an ordered bounded archive fragment.
+message SnapshotResponse {
+  // OperationId identifies one immutable snapshot operation.
+  string operation_id = 1;
+  // Offset is the absolute byte offset of Data.
+  uint64 offset = 2;
+  // Data contains at most 1 MiB of archive bytes.
+  bytes data = 3;
+  // ArchiveSha256 is populated only on the final chunk.
+  bytes archive_sha256 = 4;
+  // Eof marks the final chunk after exact checksum calculation.
+  bool eof = 5;
+}
+
+// RestoreRequest is an ordered bounded fragment for an empty restore target.
+message RestoreRequest {
+  // OperationId binds every chunk to one restore attempt.
+  string operation_id = 1;
+  // Offset must equal the number of bytes already accepted.
+  uint64 offset = 2;
+  // Data contains at most 1 MiB of archive bytes.
+  bytes data = 3;
+  // ArchiveSha256 is required on the final chunk.
+  bytes archive_sha256 = 4;
+  // Eof marks the final chunk and triggers staged verification.
+  bool eof = 5;
+}
+
+// RestoreResponse reports the atomically published restored view.
+message RestoreResponse {
+  // OperationId is the completed restore attempt.
+  string operation_id = 1;
+  // MetadataEpoch is the restored committed epoch.
+  uint64 metadata_epoch = 2;
+  // VectorCount is the restored logical record count.
+  uint64 vector_count = 3;
+}

@@ -65,3 +65,21 @@ test("origin, timeout, cancellation, and response bounds fail safely", async () 
   const oversized = new VectorDBClient("https://db.example", { fetch: queuedFetch([new Response(new Uint8Array((16 << 20) + 1))]) });
   await assert.rejects(oversized.health(), VectorDBTransportError);
 });
+
+test("scroll preserves opaque cursors and explicit vector inclusion", async () => {
+  const requests = [];
+  const client = new VectorDBClient("https://db.example", { fetch: queuedFetch([
+    jsonResponse({ records: [{ id: "one" }], next_cursor: "next/value", vectors_included: false }),
+    jsonResponse({ records: [], next_cursor: "", vectors_included: false, metadata_epoch: 7, authoritative_placement: true }),
+  ], requests) });
+  const page = await client.scroll("docs", { namespace: "tenant one", limit: 25, cursor: "prior/value", includeVector: true });
+  assert.equal(page.next_cursor, "next/value");
+  assert.match(requests[0].url, /namespace=tenant\+one/);
+  assert.match(requests[0].url, /cursor=prior%2Fvalue/);
+  assert.match(requests[0].url, /include_vector=true/);
+  const clusterPage = await client.distributedScroll("docs", { limit: 25 });
+  assert.equal(clusterPage.metadata_epoch, 7);
+  assert.match(requests[1].url, /\/v1\/cluster\/collections\/docs\/vectors\?/);
+  await assert.rejects(client.scroll("docs", { limit: 201 }), TypeError);
+  await assert.rejects(client.distributedScroll("docs", { limit: 201 }), TypeError);
+});

@@ -99,7 +99,7 @@ until maintainers have measured the implementation.
    a CI environment with a container runtime remains before Phase 9 is closed.
    A dedicated, bounded GitHub Actions job now runs that gate on relevant
    changes and retains cluster diagnostics on failure.
-10. **Ecosystem — in progress**: the dependency-free, context-aware Go SDK now
+10. **Ecosystem — complete**: the dependency-free, context-aware Go SDK now
     covers authenticated health/readiness, collection lifecycle, namespaced
     vector CRUD and batches, filtered search, placement-aware distributed
     search/writes, bounded responses, and typed API errors without unsafe
@@ -118,8 +118,32 @@ until maintainers have measured the implementation.
     Explorer adds bounded cursor browsing, exact lookup, insertion, deletion,
     namespace selection, and explicit vector reveal. A read-only Configuration
     section exposes non-secret runtime posture and collection/index settings.
-    Cluster-wide scrolling, time-series charts, log views, Rust and .NET SDKs,
-    integrations, and adoption documentation remain.
+    A bounded operational Logs view adds severity, route, status, latency, and
+    trace correlation without retaining sensitive request data. All six
+    implemented SDKs expose bounded node-local and placement-aware cluster
+    cursor scrolling with explicit vector inclusion. A provider-neutral Python
+    semantic-store layer and
+    dependency-free Ollama, Hugging Face, OpenAI-compatible, and Cohere batch
+    embedding adapters now cover local and hosted external embedding
+    integrations, including retrieval-specific document/query modes.
+    Placement-aware cluster-wide scrolling now merges one owner per shard with
+    fail-closed, metadata-epoch-fenced cursors. The dashboard now retains a
+    bounded ten-minute in-page time series for request rate, interval mean
+    latency, and server-error rate. Bounded sanitized operational events now
+    persist across restart and support authenticated, epoch-fenced cross-node
+    aggregation with explicit partial failures. A synchronous Rust SDK now
+    provides Rustls-backed HTTP, strict origins, whole-call timeouts, bounded
+    responses, typed errors, an injectable transport, and equivalent lifecycle,
+    vector, search, scroll, and distributed-operation coverage. A dependency-
+    free asynchronous .NET 8 SDK provides cancellation-aware requests, bounded
+    streaming responses, typed errors, injectable HTTP transport, and the same
+    operation coverage. A
+    staged adoption guide now
+    covers workload qualification, local evaluation, single-node baselining,
+    security, observability, distributed fault drills, lifecycle rehearsal,
+    and risk-controlled rollout.
+    Optional LangChain and LlamaIndex bridges now cover framework-native
+    ingestion, dense similarity search, filtering, namespaces, and deletion.
 
 The release scope and gates are defined in the [technical
 design](technical-design.md#50-first-usable-release-v010).

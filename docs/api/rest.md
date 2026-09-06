@@ -11,6 +11,7 @@ stable before v0.1.0.
 | Method | Path | Behavior |
 |---|---|---|
 | GET | `/health` | Process health |
+| GET | `/logs` | Newest-first bounded and sanitized in-memory HTTP events |
 | GET | `/node` | Stable node/cluster identity and advertised address |
 | GET | `/cluster/peers` | Bootstrap metadata epoch and local static-peer health view |
 | GET | `/cluster/placement` | Deterministic shard placement and activation status |
@@ -55,6 +56,23 @@ authentication, internal mutual TLS, and static routing are enabled, plus the
 replication factor, placement capacity, and supported cluster protocol range.
 It never returns credential values, certificate material, or data paths.
 
+The authenticated node log feed returns at most 200 events. Production servers
+recover and retain the latest 4,096 sanitized events in
+`operational-events.jsonl` under the data directory; embedded/test servers
+without a persistence path retain 256 in memory. The file is mode `0600`, uses
+append-only JSON lines, and is atomically compacted after reaching twice its
+retention bound. The response reports `durable` and any `persistence_error`.
+Entries contain a timestamp,
+severity, method, bounded route template, status, duration, trace ID, and span
+ID. Raw paths, query values, request/response bodies, collection and record
+identifiers, vectors, metadata, payloads, and credentials are never retained.
+
+`GET /v1/cluster/logs` performs authenticated, metadata-epoch-fenced reads from
+discovered peers and deterministically merges the newest events. Each event is
+tagged with its node ID. Unavailable nodes are returned in `failures` with
+`partial=true`; unlike data pagination, partial operational visibility cannot
+skip or mutate database records.
+
 The optional `namespace` query parameter on get/delete and body field on search
 selects an exact namespace. Omitting it selects only the default empty
 namespace; it never searches every namespace.
@@ -63,8 +81,12 @@ The record-list endpoint orders records by namespace and ID, accepts a bounded
 `limit` from 1 through 200, and returns an opaque `next_cursor`. Without a
 namespace it browses every namespace physically present on the current node.
 Vectors are omitted unless `include_vector=true` is explicitly set.
-In distributed mode this endpoint is node-local and is not a cluster-wide
-scroll coordinator.
+In distributed mode, `GET /v1/cluster/collections/{name}/vectors` queries one
+placement owner per shard, merges records by namespace and ID, and returns an
+epoch-fenced opaque cursor. Any shard failure fails the page because advancing
+a partial cursor could permanently skip records. A metadata-epoch change
+invalidates the cursor, and changing its namespace is rejected. This provides
+deterministic bounded traversal, not snapshot isolation from concurrent writes.
 
 Vectors and search queries must contain exactly the collection dimension and
 only finite float32 values; NaN and positive/negative infinity are rejected.

@@ -537,6 +537,16 @@ func (e *Engine) Get(name, namespace, id string) (core.Record, error) {
 // Scroll returns a deterministic page from the records physically present on
 // this node. The caller supplies the last namespace/ID pair from the prior page.
 func (e *Engine) Scroll(name, namespace, afterNamespace, afterID string, limit int) ([]core.Record, bool, error) {
+	return e.scroll(name, nil, namespace, afterNamespace, afterID, limit)
+}
+
+// ScrollShard returns a deterministic page containing only records routed to
+// shardID. It is used by the placement-aware cluster coordinator.
+func (e *Engine) ScrollShard(name string, shardID uint32, namespace, afterNamespace, afterID string, limit int) ([]core.Record, bool, error) {
+	return e.scroll(name, &shardID, namespace, afterNamespace, afterID, limit)
+}
+
+func (e *Engine) scroll(name string, shardID *uint32, namespace, afterNamespace, afterID string, limit int) ([]core.Record, bool, error) {
 	if limit < 1 || limit > 200 {
 		return nil, false, fmt.Errorf("%w: limit must be between 1 and 200", core.ErrInvalidArgument)
 	}
@@ -550,6 +560,9 @@ func (e *Engine) Scroll(name, namespace, afterNamespace, afterID string, limit i
 	})
 	page := make([]core.Record, 0, limit)
 	for _, record := range records {
+		if shardID != nil && c.RouteShard(record.Namespace, record.ID) != *shardID {
+			continue
+		}
 		if namespace != "" && record.Namespace != namespace {
 			continue
 		}

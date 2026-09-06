@@ -93,6 +93,31 @@ class Client:
             path += "?" + urlencode({"namespace": namespace})
         return self._request("GET", path)
 
+    def scroll(
+        self, collection: str, *, namespace: str = "", limit: int = 50,
+        cursor: str = "", include_vector: bool = False,
+    ) -> dict[str, Any]:
+        return self._scroll(self._collection_path(collection), namespace, limit, cursor, include_vector)
+
+    def distributed_scroll(
+        self, collection: str, *, namespace: str = "", limit: int = 50,
+        cursor: str = "", include_vector: bool = False,
+    ) -> dict[str, Any]:
+        """Scroll one authoritative owner per shard with an epoch-fenced cursor."""
+        return self._scroll(self._cluster_collection_path(collection), namespace, limit, cursor, include_vector)
+
+    def _scroll(self, collection_path: str, namespace: str, limit: int, cursor: str, include_vector: bool) -> dict[str, Any]:
+        if limit < 1 or limit > 200:
+            raise ValueError("limit must be between 1 and 200")
+        query: dict[str, Any] = {"limit": limit}
+        if namespace:
+            query["namespace"] = namespace
+        if cursor:
+            query["cursor"] = cursor
+        if include_vector:
+            query["include_vector"] = "true"
+        return self._request("GET", f"{collection_path}/vectors?{urlencode(query)}")
+
     def delete(self, collection: str, record_id: str, *, namespace: str = "") -> None:
         path = f"{self._collection_path(collection)}/vectors/{quote(record_id, safe='')}"
         if namespace:
@@ -205,4 +230,3 @@ class Client:
         if self._opener is not None:
             return self._opener(request, timeout=self._timeout)
         return urlopen(request, timeout=self._timeout, context=self._ssl_context)
-

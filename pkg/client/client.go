@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -70,6 +71,21 @@ type Record struct {
 	Timestamp int64          `json:"timestamp,omitempty"`
 	Version   uint64         `json:"version,omitempty"`
 	Namespace string         `json:"namespace,omitempty"`
+}
+
+type ScrollOptions struct {
+	Namespace     string
+	Limit         int
+	Cursor        string
+	IncludeVector bool
+}
+
+type RecordPage struct {
+	Records                []Record `json:"records"`
+	NextCursor             string   `json:"next_cursor"`
+	VectorsIncluded        bool     `json:"vectors_included"`
+	MetadataEpoch          uint64   `json:"metadata_epoch,omitempty"`
+	AuthoritativePlacement bool     `json:"authoritative_placement,omitempty"`
 }
 
 type SearchOptions struct {
@@ -185,6 +201,42 @@ func (c *Client) Get(ctx context.Context, collection, namespace, id string) (Rec
 	}
 	err := c.do(ctx, http.MethodGet, path, nil, &record)
 	return record, err
+}
+
+func (c *Client) Scroll(ctx context.Context, collection string, options ScrollOptions) (RecordPage, error) {
+	return c.scroll(ctx, collectionPath(collection)+"/vectors", options)
+}
+
+// DistributedScroll traverses one placement owner per shard using an
+// epoch-fenced cluster cursor.
+func (c *Client) DistributedScroll(ctx context.Context, collection string, options ScrollOptions) (RecordPage, error) {
+	return c.scroll(ctx, clusterCollectionPath(collection)+"/vectors", options)
+}
+
+func (c *Client) scroll(ctx context.Context, basePath string, options ScrollOptions) (RecordPage, error) {
+	if options.Limit < 0 || options.Limit > 200 {
+		return RecordPage{}, fmt.Errorf("vectordb: scroll limit must be between 1 and 200 when set")
+	}
+	query := url.Values{}
+	if options.Namespace != "" {
+		query.Set("namespace", options.Namespace)
+	}
+	if options.Limit != 0 {
+		query.Set("limit", strconv.Itoa(options.Limit))
+	}
+	if options.Cursor != "" {
+		query.Set("cursor", options.Cursor)
+	}
+	if options.IncludeVector {
+		query.Set("include_vector", "true")
+	}
+	path := basePath
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	var page RecordPage
+	err := c.do(ctx, http.MethodGet, path, nil, &page)
+	return page, err
 }
 
 func (c *Client) Delete(ctx context.Context, collection, namespace, id string) error {

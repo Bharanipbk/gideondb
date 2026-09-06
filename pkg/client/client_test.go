@@ -33,7 +33,7 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 	}
 	defer db.Close()
 	const apiKey = "0123456789abcdef"
-	httpClient := inMemoryHTTPClient(rest.NewWithOptions(db, nil, rest.Options{APIKey: apiKey}).Handler())
+	httpClient := inMemoryHTTPClient(rest.NewWithOptions(db, nil, rest.Options{APIKey: apiKey, NodeID: "11111111111111111111111111111111", ClusterID: "22222222222222222222222222222222", AdvertiseAddress: "vectordb.test:6333"}).Handler())
 	sdk, err := client.New("http://vectordb.test", client.Options{APIKey: apiKey, HTTPClient: httpClient})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +52,18 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 	}
 	if _, err := sdk.BatchUpsert(ctx, "docs", []client.Record{{ID: "two", Vector: []float32{0, 1}}}); err != nil {
 		t.Fatal(err)
+	}
+	page, err := sdk.Scroll(ctx, "docs", client.ScrollOptions{Limit: 1})
+	if err != nil || len(page.Records) != 1 || page.NextCursor == "" || len(page.Records[0].Vector) != 0 || page.VectorsIncluded {
+		t.Fatalf("page=%#v err=%v", page, err)
+	}
+	next, err := sdk.Scroll(ctx, "docs", client.ScrollOptions{Limit: 2, Cursor: page.NextCursor, IncludeVector: true})
+	if err != nil || len(next.Records) != 1 || len(next.Records[0].Vector) != 2 || !next.VectorsIncluded {
+		t.Fatalf("next=%#v err=%v", next, err)
+	}
+	clusterPage, err := sdk.DistributedScroll(ctx, "docs", client.ScrollOptions{Limit: 2})
+	if err != nil || len(clusterPage.Records) != 2 || clusterPage.MetadataEpoch == 0 {
+		t.Fatalf("cluster page=%#v err=%v", clusterPage, err)
 	}
 	got, err := sdk.Get(ctx, "docs", "tenant-a", "one")
 	if err != nil || got.ID != "one" || got.Namespace != "tenant-a" {
@@ -79,6 +91,19 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 	}
 	if err := sdk.DeleteCollection(ctx, "docs"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestClientScrollRejectsInvalidLimit(t *testing.T) {
+	sdk, err := client.New("http://vectordb.test", client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sdk.Scroll(context.Background(), "docs", client.ScrollOptions{Limit: 201}); err == nil {
+		t.Fatal("accepted oversized scroll page")
+	}
+	if _, err := sdk.DistributedScroll(context.Background(), "docs", client.ScrollOptions{Limit: 201}); err == nil {
+		t.Fatal("accepted oversized distributed scroll page")
 	}
 }
 

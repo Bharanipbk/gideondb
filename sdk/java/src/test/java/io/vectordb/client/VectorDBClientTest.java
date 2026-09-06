@@ -16,14 +16,20 @@ public final class VectorDBClientTest {
         QueueTransport transport = new QueueTransport();
         transport.add(200, "{\"status\":\"ok\"}");
         transport.add(201, "{\"name\":\"docs\",\"dimension\":2,\"metric\":\"dot\",\"shard_count\":2}");
+        transport.add(200, "{\"records\":[{\"id\":\"one\"}],\"next_cursor\":\"next/value\",\"vectors_included\":false}");
+        transport.add(200, "{\"records\":[],\"next_cursor\":\"\",\"vectors_included\":false,\"metadata_epoch\":7,\"authoritative_placement\":true}");
         transport.add(200, "{\"id\":\"a/b\",\"vector\":[1,0],\"version\":1}");
         transport.add(200, "{\"results\":[{\"id\":\"a/b\",\"score\":1.0}]}");
         VectorDBClient client = new VectorDBClient("https://db.example/", "secret", Duration.ofSeconds(2), transport);
         client.health(); client.createCollection(Map.of("name","docs","dimension",2,"metric","dot","shard_count",2));
+        check("next/value".equals(client.scroll("docs", "tenant one", 25, "prior/value", true).get("next_cursor")), "scroll cursor");
+        check(((Number)client.distributedScroll("docs", "", 25, "", false).get("metadata_epoch")).intValue() == 7, "distributed scroll epoch");
         check(((Number)client.get("docs", "a/b", "tenant one").get("version")).longValue() == 1, "record version");
         check("a/b".equals(client.search("docs", List.of(1,0), 1, null, "").get(0).get("id")), "search result");
-        check(transport.requests.get(2).uri().toString().endsWith("a%2Fb?namespace=tenant%20one"), "encoded path");
-        check("secret".equals(transport.requests.get(2).apiKey()), "API key");
+        check(transport.requests.get(2).uri().toString().contains("cursor=prior%2Fvalue"), "encoded cursor");
+        check(transport.requests.get(4).uri().toString().endsWith("a%2Fb?namespace=tenant%20one"), "encoded path");
+        check(transport.requests.get(3).uri().toString().contains("/v1/cluster/collections/docs/vectors"), "cluster scroll path");
+        check("secret".equals(transport.requests.get(4).apiKey()), "API key");
     }
     private static void distributedAndErrors() {
         QueueTransport transport = new QueueTransport();

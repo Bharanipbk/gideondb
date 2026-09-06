@@ -1,4 +1,6 @@
-.PHONY: build test test-python-sdk test-typescript-sdk test-java-sdk test-dashboard race benchmark vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-proto-contract test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard race benchmark vet fmt run docker validate-single-node validate-kubernetes
+
+DOTNET ?= dotnet
 
 build:
 	go build -trimpath -ldflags "-X main.version=$${VERSION:-dev} -X main.commit=$${COMMIT:-unknown} -X main.buildDate=$${BUILD_DATE:-unknown}" ./cmd/vectordb
@@ -14,19 +16,36 @@ validate-kubernetes:
 
 test:
 	go test ./...
+	$(MAKE) test-proto-contract
 	$(MAKE) test-python-sdk
+	$(MAKE) test-python-integrations
 	$(MAKE) test-typescript-sdk
 	$(MAKE) test-java-sdk
+	$(MAKE) test-rust-sdk
+	$(MAKE) test-dotnet-sdk
 	$(MAKE) test-dashboard
+
+test-proto-contract:
+	python3 scripts/check-proto-contract.py
 
 test-python-sdk:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v
+
+test-python-integrations:
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src:integrations/python python3 -m unittest discover -s integrations/python/tests -v
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src:integrations/python python3 -m py_compile examples/ollama_semantic_search.py examples/huggingface_semantic_search.py examples/openai_compatible_semantic_search.py examples/cohere_semantic_search.py
 
 test-typescript-sdk:
 	npm test --prefix sdk/typescript
 
 test-java-sdk:
 	cd sdk/java && sh test.sh
+
+test-rust-sdk:
+	cargo test --manifest-path sdk/rust/Cargo.toml --locked
+
+test-dotnet-sdk:
+	DOTNET_CLI_TELEMETRY_OPTOUT=1 $(DOTNET) run --project sdk/dotnet/tests/VectorDB.Client.Tests/VectorDB.Client.Tests.csproj --configuration Release
 
 test-dashboard:
 	node --check internal/api/rest/dashboard/app.js

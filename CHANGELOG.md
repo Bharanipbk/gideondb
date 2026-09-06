@@ -7,6 +7,11 @@ describe unreleased experimental work.
 
 ### Added
 
+- A versioned, fully documented `vectordb.v1` public protobuf contract covering
+  18 collection, record, search, cluster, health, statistics, snapshot, and
+  restore RPCs; Buf v2 lint/generation policy and a dependency-free structural
+  contract gate are included ahead of Go server wiring.
+
 - An embedded, responsive administration dashboard with node and cluster
   overview, collection creation and confirmation-gated deletion, a redacted
   vector-search playground, membership and placement views, session-scoped API
@@ -16,9 +21,47 @@ describe unreleased experimental work.
   cursor browsing, exact-ID lookup, insertion, confirmation-gated deletion,
   namespace selection, and explicit vector reveal. A read-only Configuration
   section displays non-secret security, routing, replication, capacity,
-  protocol, and collection/index settings.
+  protocol, and collection/index settings. A severity-filtered Logs view shows
+  recent sanitized node-local HTTP events with trace correlation.
+- An authenticated bounded in-memory operational-event API retaining only
+  route templates, status, duration, severity, timestamps, and trace/span IDs.
 - A deterministic node-local record-scroll API with opaque cursors, namespace
   filtering, a hard 200-record page limit, and vectors redacted by default.
+- Node-local cursor scrolling across the Go, Python, TypeScript, Java, Rust, and .NET SDKs,
+  including page-limit validation and explicit vector inclusion.
+- A provider-neutral Python semantic ingestion/search helper, dependency-free
+  Ollama batch embedding adapter, and runnable local semantic-search example
+  with bounded and strictly validated embedding responses.
+- A dependency-free Hugging Face feature-extraction adapter and runnable hosted
+  semantic-search example with HTTPS-only endpoints, Bearer authentication,
+  and strict sentence-level embedding validation.
+- A dependency-free OpenAI-compatible embeddings adapter and runnable semantic-
+  search example with authenticated custom endpoints, response index ordering,
+  and strict batch and dimension validation.
+- A dependency-free Cohere v2 embedding adapter with distinct document/query
+  retrieval modes, documented batch limits, and a runnable semantic-search
+  example; the provider-neutral store now honors specialized embedding modes.
+- An optional, lazily loaded LangChain `VectorStore` bridge with text ingestion,
+  similarity search, scores, metadata filters, namespaces, and ID deletion.
+- An optional LlamaIndex vector-store bridge with embedded-node ingestion,
+  dense queries, exact-match filters, namespaces, sync/async operations, and
+  session-aware reference-document deletion.
+- A staged adoption guide with measurable gates from workload qualification
+  through local evaluation, production hardening, distributed fault drills,
+  lifecycle rehearsal, and risk-controlled rollout; the root project status
+  now reflects the implemented system and remaining pre-alpha gaps.
+- Placement-aware cluster-wide record scrolling with deterministic global
+  ordering, one owner per shard, bounded pages, vector redaction, fail-closed
+  shard errors, and namespace- plus metadata-epoch-fenced opaque cursors.
+- Cluster-wide scrolling support in the Go, Python, TypeScript, Java, Rust, and .NET SDKs,
+  reusing each SDK's bounded scroll options and exposing cluster epoch and
+  authoritative-placement response metadata.
+- Bounded dashboard time-series charts for request rate, interval mean latency,
+  and server-error rate, with five-second visible-page sampling, pause/resume,
+  counter-reset handling, and a 120-sample memory ceiling.
+- Bounded durable sanitized operational events using mode-`0600` append-only
+  JSON lines with restart recovery and atomic compaction, plus authenticated,
+  epoch-fenced cluster log aggregation with explicit per-node failures.
 - An experimental dependency-free Go SDK with context-aware authenticated
   requests, bounded responses, typed API errors, collection and vector CRUD,
   batches, filtered search, and placement-aware distributed search/writes.
@@ -32,6 +75,13 @@ describe unreleased experimental work.
 - An experimental dependency-free Java 17 SDK using the JDK HTTP client with
   strict origin and timeout handling, bounded responses, typed API/transport
   errors, namespaced CRUD, search, batches, and distributed operations.
+- An experimental synchronous Rust SDK using Rustls-backed HTTP, whole-call
+  timeouts, bounded responses, typed failures, an injectable transport, and the
+  same lifecycle, vector, search, scroll, and distributed-operation coverage.
+- An experimental dependency-free .NET 8 SDK with cancellation-aware
+  asynchronous operations, bounded streaming responses, typed failures,
+  injectable HTTP transport, and equivalent lifecycle, vector, search, scroll,
+  and distributed-operation coverage.
 - A hardened three-node Kubernetes StatefulSet base with stable per-node PVCs,
   headless and readiness-gated Services, credential and private-CA TLS Secrets,
   quorum-preserving disruption policy, host anti-affinity, restricted ingress,

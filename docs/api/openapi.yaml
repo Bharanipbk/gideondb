@@ -45,6 +45,67 @@ paths:
                 properties:
                   status: {type: string}
                 required: [status]
+  /logs:
+    get:
+      operationId: recentOperationalLogs
+      description: Read newest-first, bounded, sanitized HTTP events from this node; production events persist in the data directory.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+      responses:
+        "200":
+          description: Recent events and fixed retention capacity.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  retention: {type: integer, minimum: 1}
+                  durable: {type: boolean}
+                  persistence_error: {type: string}
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sequence: {type: integer, format: uint64}
+                        timestamp: {type: string, format: date-time}
+                        level: {type: string, enum: [info, warn, error]}
+                        event: {type: string, enum: [http.server.request]}
+                        method: {type: string}
+                        route: {type: string}
+                        status: {type: integer}
+                        duration_ms: {type: number}
+                        trace_id: {type: string, pattern: "^[0-9a-f]{32}$"}
+                        span_id: {type: string, pattern: "^[0-9a-f]{16}$"}
+                      required: [sequence, timestamp, level, event, method, route, status, duration_ms, trace_id, span_id]
+                required: [events, retention, durable, persistence_error]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+  /cluster/logs:
+    get:
+      operationId: clusterOperationalLogs
+      description: Merge bounded sanitized event pages from all discovered nodes; peer failures are explicit.
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
+        - {name: level, in: query, schema: {type: string, enum: [info, warn, error]}}
+      responses:
+        "200":
+          description: Newest-first cluster events and per-node failures.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events: {type: array, items: {type: object}}
+                  failures: {type: array, items: {type: object}}
+                  partial: {type: boolean}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  per_node_retention: {type: integer, minimum: 1}
+                required: [events, failures, partial, metadata_epoch, per_node_retention]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /ready:
     get:
       operationId: readiness
@@ -728,6 +789,36 @@ paths:
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
+  /cluster/collections/{name}/vectors:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    get:
+      operationId: distributedScrollVectors
+      description: Deterministically merge one authoritative page per shard; fails rather than returning a partial page.
+      parameters:
+        - {name: namespace, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: include_vector, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: Globally ordered, metadata-epoch-fenced record page.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records: {type: array, items: {$ref: "#/components/schemas/RecordSummary"}}
+                  next_cursor: {type: string}
+                  vectors_included: {type: boolean}
+                  metadata_epoch: {type: integer, minimum: 1}
+                  authoritative_placement: {type: boolean}
+                required: [records, next_cursor, vectors_included, metadata_epoch, authoritative_placement]
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
   /cluster/collections/{name}/vectors/batch:
     parameters:
