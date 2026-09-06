@@ -16,6 +16,11 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	handler := New(db, nil).Handler()
+	rootRedirect := httptest.NewRecorder()
+	handler.ServeHTTP(rootRedirect, httptest.NewRequest(http.MethodGet, "/", nil))
+	if rootRedirect.Code != http.StatusTemporaryRedirect || rootRedirect.Header().Get("Location") != "/dashboard/" {
+		t.Fatalf("root redirect=%d %q", rootRedirect.Code, rootRedirect.Header().Get("Location"))
+	}
 	redirect := httptest.NewRecorder()
 	handler.ServeHTTP(redirect, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
 	if redirect.Code != http.StatusTemporaryRedirect || redirect.Header().Get("Location") != "/dashboard/" {

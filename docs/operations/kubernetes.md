@@ -121,9 +121,7 @@ identity, deploys the exact Kustomize base, and verifies:
 The cluster is deleted on exit. Set `KEEP_CLUSTER=true` to retain a failed
 environment for investigation and `KIND_CLUSTER_NAME` to choose its name.
 
-The `Kubernetes gate` GitHub Actions workflow installs pinned kind and kubectl
-versions, runs this same command on relevant pull requests and `main`, and can
-also be started manually. It serializes runs per ref, enforces a 30-minute
-timeout, uploads seven-day pod/resource/cluster diagnostics on failure, and
-always removes the disposable cluster. The job has read-only repository
-permissions and uses only generated one-day test credentials.
+Automatic GitHub execution is currently deferred. Run the gate manually before
+Kubernetes-related releases or after changes to the server, Docker image,
+manifests, or gate script. Restoring an appropriately scoped CI job is tracked
+in [pending development](../../PENDING_DEVELOPMENT.md).

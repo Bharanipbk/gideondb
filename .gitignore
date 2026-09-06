@@ -1,0 +1,42 @@
+# VectorDB runtime state
+/data/
+
+# Go build and test artifacts
+/vectordb
+*.test
+*.out
+coverage.*
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# JavaScript / TypeScript artifacts
+node_modules/
+dist/
+
+# Java artifacts
+*.class
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# IDE and operating-system metadata
+.DS_Store
+.idea/
+.vscode/

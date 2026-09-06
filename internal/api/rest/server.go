@@ -123,6 +123,9 @@ func (s *Server) drainMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) routes() {
+	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/dashboard/", http.StatusTemporaryRedirect)
+	})
 	s.mux.HandleFunc("GET /dashboard", s.dashboard)
 	s.mux.HandleFunc("GET /dashboard/", s.dashboard)
 	s.mux.HandleFunc("GET /v1/health", s.health)

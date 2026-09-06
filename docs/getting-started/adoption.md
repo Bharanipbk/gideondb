@@ -83,8 +83,9 @@ test leader termination, follower recovery, replica repair, and capacity-aware
 movement while traffic continues.
 
 The checked-in kind gate is disposable validation, not evidence that a specific
-production cluster, storage class, ingress, or disruption policy is safe. The
-external kind CI execution remains an outstanding Phase 9 release gate.
+production cluster, storage class, ingress, or disruption policy is safe.
+Automatic external execution is deferred; run it manually and track the release
+gate in [pending development](../../PENDING_DEVELOPMENT.md).
 
 **Exit gate:** repeated fault drills meet acknowledged-write safety, recovery,
 availability, and replica-lag objectives on the target platform.

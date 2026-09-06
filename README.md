@@ -32,7 +32,8 @@ Rust, and .NET SDKs; Python embedding/framework integrations; and a web dashboar
 
 Known release gaps include the external Kubernetes gate, gRPC server transport, and final
 open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
-for the authoritative phase status.
+for phase status and [pending development](PENDING_DEVELOPMENT.md) for the
+maintained implementation checklist.
 
 ## Run locally
 

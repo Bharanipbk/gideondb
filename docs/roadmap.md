@@ -96,9 +96,9 @@ until maintainers have measured the implementation.
    reproducible kind gate now builds and deploys the real image, checks
    three-node convergence and PDB state, terminates the elected leader, verifies
    replacement leadership, and waits for full readiness recovery. Execution in
-   a CI environment with a container runtime remains before Phase 9 is closed.
-   A dedicated, bounded GitHub Actions job now runs that gate on relevant
-   changes and retains cluster diagnostics on failure.
+   an external CI environment is intentionally deferred; the gate remains
+   available for manual execution before Phase 9 is closed. Remaining work is
+   maintained in [pending development](../PENDING_DEVELOPMENT.md).
 10. **Ecosystem — complete**: the dependency-free, context-aware Go SDK now
     covers authenticated health/readiness, collection lifecycle, namespaced
     vector CRUD and batches, filtered search, placement-aware distributed
