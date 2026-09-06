@@ -3,6 +3,7 @@ FROM golang:1.26-bookworm AS build
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
+COPY docs ./docs
 COPY internal ./internal
 ARG VERSION=dev
 ARG COMMIT=unknown

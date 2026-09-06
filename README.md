@@ -74,6 +74,11 @@ Open the administration dashboard at
 a vector, and run a search. Stop the server with `Ctrl+C`; the contents of
 `./data` remain available for the next run.
 
+Browse all project documentation in the embedded reader at
+[http://127.0.0.1:6333/docs/](http://127.0.0.1:6333/docs/). It groups the
+Markdown guides by topic and provides navigation and filtering without a
+separate documentation server.
+
 To build and run a standalone binary instead:
 
 ```bash

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="VectorDB documentation">
+  <title>VectorDB Docs</title>
+  <link rel="stylesheet" href="/docs/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/docs/" aria-label="VectorDB documentation home">
+      <span class="mark" aria-hidden="true">V</span>
+      <span>VectorDB <strong>Docs</strong></span>
+    </a>
+    <div class="top-actions">
+      <label class="search">
+        <span aria-hidden="true">⌕</span>
+        <span class="sr-only">Filter documentation</span>
+        <input id="search" type="search" placeholder="Find a document…" autocomplete="off">
+        <kbd>/</kbd>
+      </label>
+      <a class="dashboard-link" href="/dashboard/">Dashboard</a>
+    </div>
+  </header>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-heading">Documentation</div>
+      <nav id="navigation" aria-label="Documentation"></nav>
+    </aside>
+    <main class="reader">
+      <button class="menu-button" id="menu-button" type="button" aria-expanded="false" aria-controls="sidebar">Browse docs</button>
+      <div class="document-meta">
+        <span id="section">Overview</span>
+        <span aria-hidden="true">/</span>
+        <span id="path">README.md</span>
+      </div>
+      <article class="markdown" id="content" aria-live="polite">
+        <h1>Loading documentation…</h1>
+      </article>
+      <footer>
+        <span>VectorDB is pre-alpha software.</span>
+        <a href="/v1/health">API health</a>
+      </footer>
+    </main>
+    <aside class="toc" aria-label="On this page">
+      <div class="toc-heading">On this page</div>
+      <nav id="toc"></nav>
+    </aside>
+  </div>
+  <script type="module" src="/docs/app.js"></script>
+</body>
+</html>

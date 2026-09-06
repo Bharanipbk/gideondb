@@ -126,6 +126,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/dashboard/", http.StatusTemporaryRedirect)
 	})
+	s.mux.HandleFunc("GET /docs", s.docsWeb)
+	s.mux.HandleFunc("GET /docs/", s.docsWeb)
+	s.mux.HandleFunc("GET /docs/_index", s.docsIndex)
+	s.mux.HandleFunc("GET /docs/_content/{path...}", s.docsContent)
 	s.mux.HandleFunc("GET /dashboard", s.dashboard)
 	s.mux.HandleFunc("GET /dashboard/", s.dashboard)
 	s.mux.HandleFunc("GET /v1/health", s.health)
