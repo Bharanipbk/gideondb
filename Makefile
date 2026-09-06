@@ -3,13 +3,13 @@
 DOTNET ?= dotnet
 
 build:
-	go build -trimpath -ldflags "-X main.version=$${VERSION:-dev} -X main.commit=$${COMMIT:-unknown} -X main.buildDate=$${BUILD_DATE:-unknown}" ./cmd/vectordb
+	go build -trimpath -ldflags "-X main.version=$${VERSION:-dev} -X main.commit=$${COMMIT:-unknown} -X main.buildDate=$${BUILD_DATE:-unknown}" ./cmd/gideondb
 
 docker:
-	docker build --build-arg VERSION="$${VERSION:-dev}" --build-arg COMMIT="$${COMMIT:-unknown}" --build-arg BUILD_DATE="$${BUILD_DATE:-unknown}" -t "$${IMAGE:-vectordb:dev}" .
+	docker build --build-arg VERSION="$${VERSION:-dev}" --build-arg COMMIT="$${COMMIT:-unknown}" --build-arg BUILD_DATE="$${BUILD_DATE:-unknown}" -t "$${IMAGE:-gideondb:dev}" .
 
 validate-single-node:
-	go run ./cmd/vectordb-loadtest -vectors "$${VECTORS:-100000}" -dimension "$${DIMENSION:-128}" -shards "$${SHARDS:-8}" -queries "$${QUERIES:-200}" -concurrency "$${CONCURRENCY:-8}" -wal-sync "$${WAL_SYNC:-always}"
+	go run ./cmd/gideondb-loadtest -vectors "$${VECTORS:-100000}" -dimension "$${DIMENSION:-128}" -shards "$${SHARDS:-8}" -queries "$${QUERIES:-200}" -concurrency "$${CONCURRENCY:-8}" -wal-sync "$${WAL_SYNC:-always}"
 
 validate-kubernetes:
 	./scripts/kubernetes-gate.sh
@@ -45,7 +45,7 @@ test-rust-sdk:
 	cargo test --manifest-path sdk/rust/Cargo.toml --locked
 
 test-dotnet-sdk:
-	DOTNET_CLI_TELEMETRY_OPTOUT=1 $(DOTNET) run --project sdk/dotnet/tests/VectorDB.Client.Tests/VectorDB.Client.Tests.csproj --configuration Release
+	DOTNET_CLI_TELEMETRY_OPTOUT=1 $(DOTNET) run --project sdk/dotnet/tests/GideonDB.Client.Tests/GideonDB.Client.Tests.csproj --configuration Release
 
 test-dashboard:
 	node --check internal/api/rest/dashboard/app.js
@@ -63,4 +63,4 @@ fmt:
 	gofmt -w cmd internal pkg
 
 run:
-	go run ./cmd/vectordb -data-path ./data -http-address 127.0.0.1:6333
+	go run ./cmd/gideondb -data-path ./data -http-address 127.0.0.1:6333

@@ -1,6 +1,6 @@
 # Operational CLI
 
-The `vectordb` binary serves the database by default and also provides bounded
+The `gideondb` binary serves the database by default and also provides bounded
 one-shot operational modes:
 
 ```text

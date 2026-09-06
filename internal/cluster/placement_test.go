@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 func TestPlacementIsDeterministicAndKeepsUnhealthyKnownNodes(t *testing.T) {

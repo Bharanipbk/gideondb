@@ -1,10 +1,10 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: vectordb
+  name: gideondb
 spec:
   minAvailable: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: vectordb
+      app.kubernetes.io/name: gideondb
 

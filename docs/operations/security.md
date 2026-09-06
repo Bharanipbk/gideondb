@@ -9,7 +9,7 @@ Place a random token containing at least 16 characters in a file readable only
 by its owner or the process's effective/supplementary group, then run:
 
 ```bash
-vectordb -api-key-file /run/secrets/vectordb-api-key \
+gideondb -api-key-file /run/secrets/gideondb-api-key \
   -tls-cert-file /run/tls/tls.crt -tls-key-file /run/tls/tls.key \
   -tls-ca-file /run/tls/ca.crt \
   -http-address 0.0.0.0:6333

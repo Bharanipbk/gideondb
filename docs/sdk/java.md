@@ -6,14 +6,14 @@ namespaced vector CRUD, filtered search, and placement-aware distributed
 operations.
 
 ```java
-import io.vectordb.client.VectorDBClient;
+import io.gideondb.client.GideonDBClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
-var client = new VectorDBClient(
+var client = new GideonDBClient(
     "https://vectors.example.com",
-    System.getenv("VECTORDB_API_KEY"),
+    System.getenv("GIDEONDB_API_KEY"),
     Duration.ofSeconds(30));
 
 client.createCollection(Map.of(

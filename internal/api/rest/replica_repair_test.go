@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestReplicaRepairDetectsLagAndInstallsSnapshot(t *testing.T) {
@@ -83,7 +83,7 @@ func TestReplicaRepairDetectsLagAndInstallsSnapshot(t *testing.T) {
 	}
 	metrics := httptest.NewRecorder()
 	leader.serveMetrics(metrics, httptest.NewRequest(http.MethodGet, "/metrics", nil))
-	if !strings.Contains(metrics.Body.String(), `vectordb_replication_operations_total{operation="repair",result="success"} 1`) {
+	if !strings.Contains(metrics.Body.String(), `gideondb_replication_operations_total{operation="repair",result="success"} 1`) {
 		t.Fatalf("repair metric missing: %s", metrics.Body.String())
 	}
 }

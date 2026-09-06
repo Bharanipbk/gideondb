@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/metadata"
-	"github.com/vectordb/vectordb/internal/wal"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
 func TestPersistenceAndSearch(t *testing.T) {

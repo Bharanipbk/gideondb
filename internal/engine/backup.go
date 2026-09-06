@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
 )
 
 const backupFormat = 1
@@ -85,7 +85,7 @@ func (e *Engine) backup(destination string, recoveryPoint *NodeRecoveryPoint) er
 	if err := os.MkdirAll(filepath.Dir(absDestination), 0o750); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(absDestination), ".vectordb-backup-*")
+	temporary, err := os.CreateTemp(filepath.Dir(absDestination), ".gideondb-backup-*")
 	if err != nil {
 		return err
 	}
@@ -202,7 +202,7 @@ func RestoreBackup(source, destination string) error {
 	if err := os.MkdirAll(parent, 0o750); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(parent, ".vectordb-restore-*")
+	staging, err := os.MkdirTemp(parent, ".gideondb-restore-*")
 	if err != nil {
 		return err
 	}

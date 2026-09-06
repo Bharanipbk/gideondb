@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestDocumentationWebsite(t *testing.T) {
@@ -25,7 +25,7 @@ func TestDocumentationWebsite(t *testing.T) {
 	}
 
 	for target, marker := range map[string]string{
-		"/docs/":           "VectorDB Docs",
+		"/docs/":           "GideonDB Docs",
 		"/docs/styles.css": "--accent",
 		"/docs/app.js":     "loadDocument",
 	} {
@@ -47,6 +47,24 @@ func TestDocumentationWebsite(t *testing.T) {
 	if indexResponse.Code != http.StatusOK || len(index.Documents) < 10 {
 		t.Fatalf("index status=%d documents=%d", indexResponse.Code, len(index.Documents))
 	}
+	expectedSections := []string{"Overview", "Getting Started", "API", "SDK", "Integrations", "Indexing", "Architecture", "Operations"}
+	sections := make([]string, 0, len(expectedSections))
+	for _, document := range index.Documents {
+		if len(sections) == 0 || sections[len(sections)-1] != document.Section {
+			sections = append(sections, document.Section)
+		}
+	}
+	if strings.Join(sections, ",") != strings.Join(expectedSections, ",") {
+		t.Fatalf("section order=%v", sections)
+	}
+	if index.Documents[0].Path != "README.md" || index.Documents[1].Path != "glossary.md" {
+		t.Fatalf("overview order=%v", index.Documents[:2])
+	}
+	for _, document := range index.Documents {
+		if !publicDocument(document.Path) {
+			t.Fatalf("internal document exposed in public index: %s", document.Path)
+		}
+	}
 
 	content := httptest.NewRecorder()
 	handler.ServeHTTP(content, httptest.NewRequest(http.MethodGet, "/docs/_content/getting-started/quickstart.md", nil))
@@ -58,5 +76,11 @@ func TestDocumentationWebsite(t *testing.T) {
 	handler.ServeHTTP(missing, httptest.NewRequest(http.MethodGet, "/docs/_content/missing.md", nil))
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing status=%d", missing.Code)
+	}
+
+	internal := httptest.NewRecorder()
+	handler.ServeHTTP(internal, httptest.NewRequest(http.MethodGet, "/docs/_content/design/decisions/README.md", nil))
+	if internal.Code != http.StatusNotFound {
+		t.Fatalf("internal document status=%d", internal.Code)
 	}
 }

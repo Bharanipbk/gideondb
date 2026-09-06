@@ -8,8 +8,8 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestScrollIsStableBoundedAndRedactedByDefault(t *testing.T) {

@@ -1,7 +1,7 @@
 # LlamaIndex integration
 
 `create_llamaindex_vector_store` creates a LlamaIndex-compatible vector store
-backed by an existing VectorDB collection. The optional package is imported
+backed by an existing GideonDB collection. The optional package is imported
 lazily, so the base SDK remains dependency-free.
 
 ```sh
@@ -10,8 +10,8 @@ pip install llama-index-core
 
 ```python
 from llama_index.core import StorageContext, VectorStoreIndex
-from vectordb import Client
-from vectordb_integrations import create_llamaindex_vector_store
+from gideondb import Client
+from gideondb_integrations import create_llamaindex_vector_store
 
 db = Client("http://127.0.0.1:6333", api_key="...")
 store = create_llamaindex_vector_store(db, "documents", namespace="tenant-a")

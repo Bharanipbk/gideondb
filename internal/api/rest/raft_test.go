@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestLeaderMetadataEpochProposalUsesCanonicalView(t *testing.T) {
@@ -139,8 +139,8 @@ func TestRaftRPCAuthenticationClusterFenceAndLiveEpoch(t *testing.T) {
 	command := cluster.MetadataCommand{Type: "advance_epoch", Epoch: 2, MembershipDigest: strings.Repeat("a", 64), CatalogDigest: strings.Repeat("b", 64), PlacementDigest: strings.Repeat("c", 64)}
 	appendRequest := cluster.AppendEntriesRequest{Term: 1, LeaderID: leaderID, Entries: []cluster.RaftEntry{{Term: 1, Command: command}}, LeaderCommit: 1}
 	response = raftRPC(t, handler, "/v1/internal/raft/append-entries", appendRequest, apiKey, clusterID)
-	if response.Code != http.StatusOK || response.Header().Get("X-VectorDB-Metadata-Epoch") != "2" {
-		t.Fatalf("append status=%d epoch=%q body=%s", response.Code, response.Header().Get("X-VectorDB-Metadata-Epoch"), response.Body.String())
+	if response.Code != http.StatusOK || response.Header().Get("X-GideonDB-Metadata-Epoch") != "2" {
+		t.Fatalf("append status=%d epoch=%q body=%s", response.Code, response.Header().Get("X-GideonDB-Metadata-Epoch"), response.Body.String())
 	}
 	nodeRequest := httptest.NewRequest(http.MethodGet, "/v1/node", nil)
 	nodeRequest.Header.Set("Authorization", "Bearer "+apiKey)
@@ -205,8 +205,8 @@ func TestThreeNodeRaftRPCReplicationAndQuorumCommit(t *testing.T) {
 	}
 	for index := 1; index < 3; index++ {
 		response := raftRPC(t, handlers[index], "/v1/internal/raft/append-entries", cluster.AppendEntriesRequest{Term: vote.Term, LeaderID: ids[0], PrevLogIndex: 1, PrevLogTerm: vote.Term, LeaderCommit: 1}, apiKey, clusterID)
-		if response.Code != http.StatusOK || response.Header().Get("X-VectorDB-Metadata-Epoch") != "2" {
-			t.Fatalf("node %d commit status=%d epoch=%q", index, response.Code, response.Header().Get("X-VectorDB-Metadata-Epoch"))
+		if response.Code != http.StatusOK || response.Header().Get("X-GideonDB-Metadata-Epoch") != "2" {
+			t.Fatalf("node %d commit status=%d epoch=%q", index, response.Code, response.Header().Get("X-GideonDB-Metadata-Epoch"))
 		}
 	}
 	for index := range stores {
@@ -225,7 +225,7 @@ func raftRPC(t *testing.T, handler http.Handler, path string, body any, apiKey, 
 	}
 	request := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-VectorDB-Cluster-ID", clusterID)
+	request.Header.Set("X-GideonDB-Cluster-ID", clusterID)
 	if apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+apiKey)
 	}

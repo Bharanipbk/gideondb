@@ -1,12 +1,12 @@
 # Rust SDK
 
-The experimental `vectordb-client` crate provides a synchronous Rust client
-for VectorDB's versioned REST API. It supports collection lifecycle operations,
+The experimental `gideondb-client` crate provides a synchronous Rust client
+for GideonDB's versioned REST API. It supports collection lifecycle operations,
 namespaced vector CRUD, filtered search, node-local and cluster-wide cursor
 scrolling, and placement-aware distributed search and batch writes.
 
 ```rust
-use vectordb_client::{Client, CollectionConfig, Record};
+use gideondb_client::{Client, CollectionConfig, Record};
 
 let client = Client::new("https://vectors.example.com")?;
 client.create_collection(&CollectionConfig {
@@ -26,7 +26,7 @@ client.upsert("documents", &Record {
     version: None,
     namespace: None,
 })?;
-# Ok::<(), vectordb_client::Error>(())
+# Ok::<(), gideondb_client::Error>(())
 ```
 
 `Client::with_options` accepts a bearer API key and a positive whole-request

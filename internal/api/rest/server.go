@@ -15,10 +15,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
-	"github.com/vectordb/vectordb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
 )
 
 const maxBodyBytes = 16 << 20
@@ -663,13 +663,13 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) validateInternalFence(w http.ResponseWriter, r *http.Request) bool {
-	w.Header().Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
-	epoch, err := strconv.ParseUint(r.Header.Get("X-VectorDB-Metadata-Epoch"), 10, 64)
+	w.Header().Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	epoch, err := strconv.ParseUint(r.Header.Get("X-GideonDB-Metadata-Epoch"), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_epoch", Message: "X-VectorDB-Metadata-Epoch must be an unsigned integer"})
+		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_epoch", Message: "X-GideonDB-Metadata-Epoch must be an unsigned integer"})
 		return false
 	}
-	if err := cluster.ValidateFence(s.clusterID, s.nodeID, s.currentMetadataEpoch(), r.Header.Get("X-VectorDB-Cluster-ID"), r.Header.Get("X-VectorDB-Target-Node-ID"), epoch); err != nil {
+	if err := cluster.ValidateFence(s.clusterID, s.nodeID, s.currentMetadataEpoch(), r.Header.Get("X-GideonDB-Cluster-ID"), r.Header.Get("X-GideonDB-Target-Node-ID"), epoch); err != nil {
 		fence := err.(*cluster.FenceError)
 		status := http.StatusConflict
 		if fence.Kind == cluster.FenceFutureEpoch {

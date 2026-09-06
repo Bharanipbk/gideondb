@@ -8,11 +8,11 @@ CRUD and batches, filtered search, and placement-aware distributed search and
 writes.
 
 ```python
-from vectordb import Client
+from gideondb import Client
 
 db = Client(
-    "https://vectordb.example.com",
-    api_key=os.environ["VECTORDB_API_KEY"],
+    "https://gideondb.example.com",
+    api_key=os.environ["GIDEONDB_API_KEY"],
     timeout=5,
 )
 

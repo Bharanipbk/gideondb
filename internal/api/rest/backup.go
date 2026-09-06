@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
-const backupOperationHeader = "X-VectorDB-Backup-Operation"
+const backupOperationHeader = "X-GideonDB-Backup-Operation"
 
 func (s *Server) backupBarrierMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -108,7 +108,7 @@ func (s *Server) internalBackupArchive(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &point) {
 		return
 	}
-	temporary, err := os.CreateTemp("", ".vectordb-node-backup-*.tar.gz")
+	temporary, err := os.CreateTemp("", ".gideondb-node-backup-*.tar.gz")
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, apiError{Code: "backup_archive_failed", Message: err.Error()})
 		return
@@ -263,9 +263,9 @@ func (s *Server) remoteBackupCall(ctx context.Context, peer cluster.Peer, method
 	if err != nil {
 		return err
 	}
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
 	request.Header.Set(backupOperationHeader, operation)
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)

@@ -8,7 +8,7 @@ physical ownership constraint and must pass the destination cluster's normal
 convergence and ownership activation checks.
 
 ```bash
-vectordb -data-path ./data -backup-to /backups/vectordb-2026-09-03.tar.gz
+gideondb -data-path ./data -backup-to /backups/gideondb-2026-09-03.tar.gz
 ```
 
 Backup opens the engine, takes its write lock, checkpoints every logical shard,
@@ -80,8 +80,8 @@ history. A failed or forged plan leaves no destination behind.
 Stop any server using the target path, then run:
 
 ```bash
-vectordb -data-path ./restored-data \
-  -restore-from /backups/vectordb-2026-09-03.tar.gz
+gideondb -data-path ./restored-data \
+  -restore-from /backups/gideondb-2026-09-03.tar.gz
 ```
 
 Restore requires a nonexistent destination. It validates the format header,

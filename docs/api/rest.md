@@ -104,9 +104,9 @@ request from a future metadata epoch returns `503`. These routes are transport
 primitives and are not a stable public client API.
 
 Metadata Raft peers use authenticated `request-vote` and `append-entries`
-internal endpoints. Both require `X-VectorDB-Cluster-ID`; a mismatched cluster
+internal endpoints. Both require `X-GideonDB-Cluster-ID`; a mismatched cluster
 is rejected before the body reaches the Raft state machine. Append responses
-publish the node's live committed epoch in `X-VectorDB-Metadata-Epoch`.
+publish the node's live committed epoch in `X-GideonDB-Metadata-Epoch`.
 Lagging followers use the similarly protected `install-snapshot` endpoint when
 their next required index has already been compacted by the leader.
 
@@ -163,8 +163,8 @@ acknowledges, so an incomplete abort is safe to retry.
 The internal follower endpoint
 `POST /v1/internal/replicas/{collection}/{shard}/append` accepts an exact WAL
 sequence, replication factor, and leader-prepared records. It requires the
-normal cluster/target/epoch headers plus `X-VectorDB-Leader-Node-ID` and
-`X-VectorDB-Leader-Term`. Gaps, conflicting retries, stale terms, wrong leaders,
+normal cluster/target/epoch headers plus `X-GideonDB-Leader-Node-ID` and
+`X-GideonDB-Leader-Term`. Gaps, conflicting retries, stale terms, wrong leaders,
 and non-replica targets fail explicitly.
 An append response with `replication_gap` or
 `replication_sequence_compacted` causes the leader to install a complete shard
@@ -217,7 +217,7 @@ The internal coordinated-backup protocol uses
 `GET /v1/internal/backup/recovery-point`, and
 `POST /v1/internal/backup/archive`, and
 `POST /v1/internal/backup/release`. All four require normal internal
-cluster/node/epoch headers plus `X-VectorDB-Backup-Operation`. Freeze and
+cluster/node/epoch headers plus `X-GideonDB-Backup-Operation`. Freeze and
 release are idempotent only for the matching operation; a different operation
 receives `409`.
 

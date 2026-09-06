@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
 )
 
 type clusterHTTPEvent struct {
@@ -86,9 +86,9 @@ func (s *Server) remoteLogs(ctx context.Context, peer cluster.Peer, limit int, l
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}

@@ -7,8 +7,8 @@ lifecycle, vector CRUD and batches, filtered search, and placement-aware
 distributed search and writes.
 
 ```go
-sdk, err := client.New("https://vectordb.example.com", client.Options{
-    APIKey: os.Getenv("VECTORDB_API_KEY"),
+sdk, err := client.New("https://gideondb.example.com", client.Options{
+    APIKey: os.Getenv("GIDEONDB_API_KEY"),
 })
 if err != nil {
     log.Fatal(err)

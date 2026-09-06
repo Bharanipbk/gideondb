@@ -1,12 +1,17 @@
-# VectorDB
+# GideonDB
 
-VectorDB is an experimental open-source, shard-aware vector database written
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Repository](https://img.shields.io/badge/GitHub-Bharanipbk%2Fgideondb-181717.svg)](https://github.com/Bharanipbk/gideondb)
+
+GideonDB is an experimental open-source, shard-aware vector database written
 primarily in Go. It includes single-node storage and recovery, flat and HNSW
 search, metadata filtering, static distributed placement, Raft metadata
 coordination, replication and repair, capacity-aware rebalancing, operational
 hardening, multi-language SDKs, and an embedded administration dashboard.
 It remains pre-alpha: APIs and persistent formats may change, and deployment at
 scale requires workload-specific validation.
+
+Source repository: [github.com/Bharanipbk/gideondb](https://github.com/Bharanipbk/gideondb)
 
 The foundational data model is:
 
@@ -43,7 +48,14 @@ maintained implementation checklist.
 - `make` (optional; the equivalent Go commands are shown below)
 - `curl` to run the health check and quickstart requests
 
-From the repository root, start the development server with:
+Clone the project and enter its repository directory:
+
+```bash
+git clone https://github.com/Bharanipbk/gideondb.git
+cd gideondb
+```
+
+Start the development server with:
 
 ```bash
 make run
@@ -52,14 +64,14 @@ make run
 The equivalent command, including the default durability settings, is:
 
 ```bash
-go run ./cmd/vectordb \
+go run ./cmd/gideondb \
   -data-path ./data \
   -http-address 127.0.0.1:6333 \
   -wal-sync always \
   -checkpoint-every 1000
 ```
 
-VectorDB listens at `http://127.0.0.1:6333` and persists its data in `./data`.
+GideonDB listens at `http://127.0.0.1:6333` and persists its data in `./data`.
 The directory is created automatically. Check that the server is ready from a
 second terminal:
 
@@ -83,7 +95,7 @@ To build and run a standalone binary instead:
 
 ```bash
 make build
-./vectordb -data-path ./data -http-address 127.0.0.1:6333
+./gideondb -data-path ./data -http-address 127.0.0.1:6333
 ```
 
 Run the Go and SDK test suites with `make test`, or the benchmarks with
@@ -99,24 +111,24 @@ Run the Go and SDK test suites with `make test`, or the benchmarks with
 Build the non-root, multi-stage image from the repository root:
 
 ```bash
-make docker IMAGE=vectordb:dev
+make docker IMAGE=gideondb:dev
 ```
 
 Without `make`, use:
 
 ```bash
-docker build -t vectordb:dev .
+docker build -t gideondb:dev .
 ```
 
 Create and start a container with port `6333` published and data stored in a
 named Docker volume:
 
 ```bash
-docker run --name vectordb --detach \
+docker run --name gideondb --detach \
   --publish 6333:6333 \
-  --volume vectordb-data:/var/lib/vectordb \
-  vectordb:dev \
-  -data-path /var/lib/vectordb \
+  --volume gideondb-data:/var/lib/gideondb \
+  gideondb:dev \
+  -data-path /var/lib/gideondb \
   -http-address 0.0.0.0:6333 \
   -allow-unauthenticated
 ```
@@ -128,8 +140,8 @@ local development only.
 Check the container and API:
 
 ```bash
-docker ps --filter name=vectordb
-docker logs vectordb
+docker ps --filter name=gideondb
+docker logs gideondb
 curl -fsS http://127.0.0.1:6333/v1/health
 curl -fsS http://127.0.0.1:6333/v1/ready
 ```
@@ -142,13 +154,13 @@ the container.
 Stop and remove the container with:
 
 ```bash
-docker stop vectordb
-docker rm vectordb
+docker stop gideondb
+docker rm gideondb
 ```
 
-The `vectordb-data` volume is not removed, so a new container using the same
+The `gideondb-data` volume is not removed, so a new container using the same
 volume resumes with the existing data. To run the container in the foreground
-and remove it automatically when stopped, omit `--name vectordb --detach` and
+and remove it automatically when stopped, omit `--name gideondb --detach` and
 add `--rm`.
 
 For an authenticated/TLS-enabled container, host bind mounts, and production
@@ -169,7 +181,7 @@ Create a consistent archive with `-backup-to`, and restore it into a nonexistent
 data path with `-restore-from`. See the [backup and restore guide](docs/operations/backup-restore.md).
 
 Runtime settings can be layered through a strict JSON `-config` file,
-`VECTORDB_*` environment variables, and explicit CLI overrides. See
+`GIDEONDB_*` environment variables, and explicit CLI overrides. See
 [configuration management](docs/operations/configuration.md).
 
 The project includes a non-root multi-stage [Docker image](docs/operations/docker.md)
@@ -178,5 +190,8 @@ health checks, backup, restore, and build-version reporting.
 
 ## License
 
-Apache-2.0 is the proposed license; the license file is pending maintainer
-identity and copyright confirmation.
+GideonDB is open-source software licensed under the
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). You may use,
+modify, and distribute the project in accordance with that license. Unless
+required by applicable law or agreed to in writing, the software is provided
+without warranties or conditions of any kind.

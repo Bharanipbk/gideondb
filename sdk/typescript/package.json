@@ -1,7 +1,12 @@
 {
-  "name": "@vectordb/client",
+  "name": "@gideondb/client",
   "version": "0.0.0",
-  "description": "Experimental TypeScript client for VectorDB",
+  "description": "Experimental TypeScript client for GideonDB",
+  "homepage": "https://github.com/Bharanipbk/gideondb",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Bharanipbk/gideondb.git"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -19,4 +24,3 @@
   },
   "license": "Apache-2.0"
 }
-

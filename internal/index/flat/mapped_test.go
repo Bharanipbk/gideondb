@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/index"
-	"github.com/vectordb/vectordb/internal/storage/segmentfile"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/storage/segmentfile"
 )
 
 func TestMappedIndexMatchesHeapFlat(t *testing.T) {

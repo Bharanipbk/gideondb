@@ -7,7 +7,7 @@ describe unreleased experimental work.
 
 ### Added
 
-- A versioned, fully documented `vectordb.v1` public protobuf contract covering
+- A versioned, fully documented `gideondb.v1` public protobuf contract covering
   18 collection, record, search, cluster, health, statistics, snapshot, and
   restore RPCs; Buf v2 lint/generation policy and a dependency-free structural
   contract gate are included ahead of Go server wiring.

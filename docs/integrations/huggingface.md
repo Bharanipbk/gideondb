@@ -12,7 +12,7 @@ Bearer token with inference permission, limits responses to 16 MiB, and rejects
 mismatched batches, token-level tensors, inconsistent dimensions, non-numeric
 values, and non-finite values.
 
-Create a VectorDB collection whose dimension matches the selected model, then
+Create a GideonDB collection whose dimension matches the selected model, then
 run:
 
 ```sh
@@ -24,5 +24,5 @@ PYTHONPATH=sdk/python/src:integrations/python \
 ```
 
 The model used to ingest documents must also be used for queries. Provider
-inference and VectorDB writes are separate failure boundaries; use stable
+inference and GideonDB writes are separate failure boundaries; use stable
 record IDs and retry them deliberately.

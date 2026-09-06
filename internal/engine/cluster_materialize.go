@@ -9,8 +9,8 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 // MaterializeClusterRestore builds fresh target node data paths from a restore
@@ -55,7 +55,7 @@ func MaterializeClusterRestore(restoredClusterPath, destination string, plan Clu
 	if err := os.MkdirAll(parent, 0o750); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(parent, ".vectordb-remap-*")
+	staging, err := os.MkdirTemp(parent, ".gideondb-remap-*")
 	if err != nil {
 		return err
 	}

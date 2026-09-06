@@ -5,10 +5,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 
-namespace VectorDB.Client;
+namespace GideonDB.Client;
 
-/// <summary>Asynchronous client for VectorDB's experimental REST API.</summary>
-public sealed class VectorDBClient : IDisposable
+/// <summary>Asynchronous client for GideonDB's experimental REST API.</summary>
+public sealed class GideonDBClient : IDisposable
 {
     private const int MaxResponseBytes = 16 << 20;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -22,14 +22,14 @@ public sealed class VectorDBClient : IDisposable
     private readonly HttpClient httpClient;
     private readonly bool ownsClient;
 
-    public VectorDBClient(string baseUrl, string? apiKey = null, TimeSpan? timeout = null)
+    public GideonDBClient(string baseUrl, string? apiKey = null, TimeSpan? timeout = null)
         : this(baseUrl, apiKey, timeout, new HttpClient(), true) { }
 
     /// <summary>Creates a client using a caller-owned HTTP client.</summary>
-    public VectorDBClient(string baseUrl, HttpClient httpClient, string? apiKey = null, TimeSpan? timeout = null)
+    public GideonDBClient(string baseUrl, HttpClient httpClient, string? apiKey = null, TimeSpan? timeout = null)
         : this(baseUrl, apiKey, timeout, httpClient, false) { }
 
-    private VectorDBClient(string baseUrl, string? apiKey, TimeSpan? timeout, HttpClient httpClient, bool ownsClient)
+    private GideonDBClient(string baseUrl, string? apiKey, TimeSpan? timeout, HttpClient httpClient, bool ownsClient)
     {
         origin = ValidateOrigin(baseUrl);
         this.timeout = timeout ?? TimeSpan.FromSeconds(30);
@@ -108,7 +108,7 @@ public sealed class VectorDBClient : IDisposable
         using var linkedSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutSource.Token);
         using var request = new HttpRequestMessage(method, new Uri(origin, path));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        request.Headers.TryAddWithoutValidation("X-VectorDB-Client", "dotnet/dev");
+        request.Headers.TryAddWithoutValidation("X-GideonDB-Client", "dotnet/dev");
         if (!string.IsNullOrEmpty(apiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         if (body is not null) request.Content = JsonContent.Create(body, options: JsonOptions);
 
@@ -121,29 +121,29 @@ public sealed class VectorDBClient : IDisposable
                 ApiErrorBody? detail = null;
                 try { detail = JsonSerializer.Deserialize<ApiErrorBody>(bytes, JsonOptions); }
                 catch (JsonException) { }
-                throw new VectorDBApiException((int)response.StatusCode, detail?.Code ?? string.Empty, detail?.Message ?? string.Empty);
+                throw new GideonDBApiException((int)response.StatusCode, detail?.Code ?? string.Empty, detail?.Message ?? string.Empty);
             }
             if (bytes.Length == 0)
             {
                 if (typeof(T) == typeof(JsonElement)) return (T)(object)default(JsonElement);
-                throw new VectorDBResponseException("Successful response body is empty.");
+                throw new GideonDBResponseException("Successful response body is empty.");
             }
             return JsonSerializer.Deserialize<T>(bytes, JsonOptions)
-                ?? throw new VectorDBResponseException("Successful response contains JSON null.");
+                ?? throw new GideonDBResponseException("Successful response contains JSON null.");
         }
-        catch (VectorDBException) { throw; }
+        catch (GideonDBException) { throw; }
         catch (OperationCanceledException exception) when (timeoutSource.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
-            throw new VectorDBTransportException("Request timed out.", exception);
+            throw new GideonDBTransportException("Request timed out.", exception);
         }
         catch (OperationCanceledException) { throw; }
-        catch (HttpRequestException exception) { throw new VectorDBTransportException("Request failed.", exception); }
-        catch (JsonException exception) { throw new VectorDBResponseException("Response is not valid JSON.", exception); }
+        catch (HttpRequestException exception) { throw new GideonDBTransportException("Request failed.", exception); }
+        catch (JsonException exception) { throw new GideonDBResponseException("Response is not valid JSON.", exception); }
     }
 
     private static async Task<byte[]> ReadBoundedAsync(HttpContent content, CancellationToken cancellationToken)
     {
-        if (content.Headers.ContentLength > MaxResponseBytes) throw new VectorDBResponseTooLargeException();
+        if (content.Headers.ContentLength > MaxResponseBytes) throw new GideonDBResponseTooLargeException();
         await using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         using var output = new MemoryStream();
         var buffer = new byte[81920];
@@ -151,7 +151,7 @@ public sealed class VectorDBClient : IDisposable
         {
             var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
             if (read == 0) break;
-            if (output.Length + read > MaxResponseBytes) throw new VectorDBResponseTooLargeException();
+            if (output.Length + read > MaxResponseBytes) throw new GideonDBResponseTooLargeException();
             output.Write(buffer, 0, read);
         }
         return output.ToArray();
@@ -198,33 +198,33 @@ public sealed class VectorDBClient : IDisposable
     private sealed record ApiErrorBody([property: JsonPropertyName("code")] string? Code, [property: JsonPropertyName("message")] string? Message);
 }
 
-public abstract class VectorDBException : Exception
+public abstract class GideonDBException : Exception
 {
-    protected VectorDBException(string message, Exception? innerException = null) : base($"vectordb: {message}", innerException) { }
+    protected GideonDBException(string message, Exception? innerException = null) : base($"gideondb: {message}", innerException) { }
 }
 
-public sealed class VectorDBApiException : VectorDBException
+public sealed class GideonDBApiException : GideonDBException
 {
     public int StatusCode { get; }
     public string Code { get; }
-    public VectorDBApiException(int statusCode, string code, string message)
+    public GideonDBApiException(int statusCode, string code, string message)
         : base(string.IsNullOrEmpty(code) ? $"HTTP {statusCode}" : $"{code} (HTTP {statusCode}): {message}")
     { StatusCode = statusCode; Code = code; }
 }
 
-public sealed class VectorDBTransportException : VectorDBException
+public sealed class GideonDBTransportException : GideonDBException
 {
-    public VectorDBTransportException(string message, Exception innerException) : base(message, innerException) { }
+    public GideonDBTransportException(string message, Exception innerException) : base(message, innerException) { }
 }
 
-public class VectorDBResponseException : VectorDBException
+public class GideonDBResponseException : GideonDBException
 {
-    public VectorDBResponseException(string message, Exception? innerException = null) : base(message, innerException) { }
+    public GideonDBResponseException(string message, Exception? innerException = null) : base(message, innerException) { }
 }
 
-public sealed class VectorDBResponseTooLargeException : VectorDBResponseException
+public sealed class GideonDBResponseTooLargeException : GideonDBResponseException
 {
-    public VectorDBResponseTooLargeException() : base("Response exceeds 16 MiB.") { }
+    public GideonDBResponseTooLargeException() : base("Response exceeds 16 MiB.") { }
 }
 
 public sealed record IndexConfig

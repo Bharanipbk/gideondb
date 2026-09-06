@@ -1,4 +1,4 @@
-"""Dependency-free synchronous client for the experimental VectorDB REST API."""
+"""Dependency-free synchronous client for the experimental GideonDB REST API."""
 
 from __future__ import annotations
 
@@ -19,11 +19,11 @@ class APIError(Exception):
         self.code = code
         self.message = message
         detail = f"{code}: {message}" if code else "request failed"
-        super().__init__(f"vectordb: {detail} (HTTP {status_code})")
+        super().__init__(f"gideondb: {detail} (HTTP {status_code})")
 
 
 class TransportError(Exception):
-    """The request did not produce a valid bounded VectorDB response."""
+    """The request did not produce a valid bounded GideonDB response."""
 
 
 OpenFunction = Callable[..., Any]
@@ -195,7 +195,7 @@ class Client:
 
     def _request(self, method: str, path: str, body: Any = None) -> Any:
         encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
-        headers = {"Accept": "application/json", "User-Agent": "vectordb-python/dev"}
+        headers = {"Accept": "application/json", "User-Agent": "gideondb-python/dev"}
         if encoded is not None:
             headers["Content-Type"] = "application/json"
         if self._api_key:

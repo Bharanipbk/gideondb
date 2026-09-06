@@ -53,7 +53,7 @@ func (t *HTTPRaftTransport) call(ctx context.Context, peer RaftPeer, path string
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-VectorDB-Cluster-ID", t.ClusterID)
+	request.Header.Set("X-GideonDB-Cluster-ID", t.ClusterID)
 	if t.APIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+t.APIKey)
 	}

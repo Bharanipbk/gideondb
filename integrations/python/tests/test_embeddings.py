@@ -2,7 +2,7 @@ import json
 import math
 import unittest
 
-from vectordb_integrations import CohereEmbedder, Document, HuggingFaceEmbedder, OllamaEmbedder, OpenAICompatibleEmbedder, SemanticStore
+from gideondb_integrations import CohereEmbedder, Document, HuggingFaceEmbedder, OllamaEmbedder, OpenAICompatibleEmbedder, SemanticStore
 
 
 class Response:
@@ -17,7 +17,7 @@ class Opener:
     def __call__(self, request, *, timeout): self.requests.append((request, timeout)); return self.responses.pop(0)
 
 
-class FakeVectorDB:
+class FakeGideonDB:
     def __init__(self): self.batch, self.query = None, None
     def batch_upsert(self, collection, records): self.batch=(collection,records); return records
     def search(self, collection, vector, top_k, **options): self.query=(collection,vector,top_k,options); return [{"id":"one","score":1}]
@@ -42,7 +42,7 @@ class EmbeddingIntegrationTest(unittest.TestCase):
     def test_provider_neutral_ingest_and_search(self):
         class Embedder:
             def embed(self,texts): return [[float(len(text)),1.0] for text in texts]
-        client=FakeVectorDB(); store=SemanticStore(client,"docs",Embedder())
+        client=FakeGideonDB(); store=SemanticStore(client,"docs",Embedder())
         stored=store.upsert_documents([Document("one","hello",{"kind":"guide"},namespace="tenant")])
         self.assertEqual(stored[0]["payload"]["text"],"hello"); self.assertEqual(client.batch[1][0]["namespace"],"tenant")
         self.assertEqual(store.search("query",3,filter={"kind":"guide"})[0]["id"],"one")
@@ -97,7 +97,7 @@ class EmbeddingIntegrationTest(unittest.TestCase):
         first,second=opener.requests
         self.assertEqual(first[0].full_url,"https://api.cohere.com/v2/embed")
         self.assertEqual(first[0].get_header("Authorization"),"Bearer secret")
-        self.assertEqual(first[0].get_header("X-client-name"),"vectordb")
+        self.assertEqual(first[0].get_header("X-client-name"),"gideondb")
         self.assertEqual(first[1],8)
         self.assertEqual(json.loads(first[0].data),{"model":"embed-v4.0","texts":["one","two"],"input_type":"search_document","embedding_types":["float"],"truncate":"NONE","output_dimension":256})
         self.assertEqual(json.loads(second[0].data)["input_type"],"search_query")
@@ -114,7 +114,7 @@ class EmbeddingIntegrationTest(unittest.TestCase):
             def embed(self,_texts): raise AssertionError("generic mode should not be used")
             def embed_documents(self,texts): return [[1.0,0.0] for _ in texts]
             def embed_query(self,_text): return [0.0,1.0]
-        client=FakeVectorDB(); store=SemanticStore(client,"docs",RetrievalEmbedder())
+        client=FakeGideonDB(); store=SemanticStore(client,"docs",RetrievalEmbedder())
         store.upsert_documents([Document("one","document")]); store.search("query",1)
         self.assertEqual(client.batch[1][0]["vector"],[1.0,0.0])
         self.assertEqual(client.query[1],[0.0,1.0])

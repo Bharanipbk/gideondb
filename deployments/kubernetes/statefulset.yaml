@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: vectordb
+  name: gideondb
 spec:
-  serviceName: vectordb-headless
+  serviceName: gideondb-headless
   replicas: 3
   podManagementPolicy: Parallel
   updateStrategy:
     type: RollingUpdate
   selector:
     matchLabels:
-      app.kubernetes.io/name: vectordb
+      app.kubernetes.io/name: gideondb
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: vectordb
+        app.kubernetes.io/name: gideondb
     spec:
       terminationGracePeriodSeconds: 60
       securityContext:
@@ -29,30 +29,30 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
                 matchLabels:
-                  app.kubernetes.io/name: vectordb
+                  app.kubernetes.io/name: gideondb
               topologyKey: kubernetes.io/hostname
       containers:
-        - name: vectordb
-          image: vectordb:dev
+        - name: gideondb
+          image: gideondb:dev
           imagePullPolicy: IfNotPresent
           args:
             - -advertise-address=$(POD_IP):6333
-            - -api-key-file=/run/secrets/vectordb/api-key
+            - -api-key-file=/run/secrets/gideondb/api-key
             - -tls-cert-file=/run/tls/tls.crt
             - -tls-key-file=/run/tls/tls.key
             - -tls-ca-file=/run/tls/ca.crt
           envFrom:
             - configMapRef:
-                name: vectordb
+                name: gideondb
           env:
             - name: POD_IP
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
-            - name: VECTORDB_CLUSTER_ID
+            - name: GIDEONDB_CLUSTER_ID
               valueFrom:
                 secretKeyRef:
-                  name: vectordb-credentials
+                  name: gideondb-credentials
                   key: cluster-id
           ports:
             - name: https
@@ -94,9 +94,9 @@ spec:
               drop: ["ALL"]
           volumeMounts:
             - name: data
-              mountPath: /var/lib/vectordb
+              mountPath: /var/lib/gideondb
             - name: credentials
-              mountPath: /run/secrets/vectordb
+              mountPath: /run/secrets/gideondb
               readOnly: true
             - name: tls
               mountPath: /run/tls
@@ -104,11 +104,11 @@ spec:
       volumes:
         - name: credentials
           secret:
-            secretName: vectordb-credentials
+            secretName: gideondb-credentials
             defaultMode: 256
         - name: tls
           secret:
-            secretName: vectordb-tls
+            secretName: gideondb-tls
             defaultMode: 256
   volumeClaimTemplates:
     - metadata:

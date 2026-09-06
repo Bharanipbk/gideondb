@@ -3,9 +3,9 @@ package flat
 import (
 	"fmt"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/distance"
-	"github.com/vectordb/vectordb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/distance"
+	"github.com/Bharanipbk/gideondb/internal/index"
 )
 
 type MappedSource interface {

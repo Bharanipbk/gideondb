@@ -7,9 +7,9 @@ in-flight request gauge, collection count, and live vectors by collection.
 Request labels use bounded HTTP route templates. The endpoint shares the REST
 listener and currently has no independent authentication.
 
-Replication adds `vectordb_replication_operations_total`, labeled only by the
+Replication adds `gideondb_replication_operations_total`, labeled only by the
 bounded `append|snapshot` operation and `success|failure` result, plus
-`vectordb_replication_lag_sequences`. The lag gauge reports the difference
+`gideondb_replication_lag_sequences`. The lag gauge reports the difference
 between the leader WAL sequence and the last acknowledged sequence for each
 configured collection, shard, and follower node. A zero value means the
 follower has acknowledged the current leader sequence; it does not independently

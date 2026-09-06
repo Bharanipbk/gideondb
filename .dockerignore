@@ -3,5 +3,5 @@
 data
 *.tar.gz
 *.test
-vectordb
+gideondb
 docs

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestRESTLifecycle(t *testing.T) {
@@ -77,8 +77,8 @@ func TestMetricsUseRoutePatternsAndExposeEngineGauges(t *testing.T) {
 	body := response.Body.String()
 	for _, want := range []string{
 		`route="GET /v1/collections/{name}/vectors/{id}"`,
-		`vectordb_collections 1`,
-		`vectordb_vectors{collection="metrics"} 1`,
+		`gideondb_collections 1`,
+		`gideondb_vectors{collection="metrics"} 1`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("metrics missing %q:\n%s", want, body)

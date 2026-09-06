@@ -1,4 +1,4 @@
-# VectorDB comprehensive technical design
+# GideonDB comprehensive technical design
 
 **Status:** Proposed  
 **Scope:** Architecture before implementation  
@@ -400,14 +400,14 @@ deadlines and maximum body/vector/batch sizes are enforced.
 
 ## 34. gRPC API
 
-Protobuf packages are versioned (`vectordb.v1`) and every public field and RPC
+Protobuf packages are versioned (`gideondb.v1`) and every public field and RPC
 is commented. Unary RPCs cover collection and record operations; streaming is
 reserved for bounded batch ingestion, shard transfer and snapshots with flow
 control. Status details carry the same stable error codes as REST. Buf lint and
 breaking-change checks run in CI. Internal cluster services use separate
 protos and mandatory mTLS in distributed production mode.
 
-The public `vectordb.v1.VectorDBService` source contract and Buf lint/generation
+The public `gideondb.v1.GideonDBService` source contract and Buf lint/generation
 policy are implemented. Generated Go bindings and server transport remain
 planned; the REST API remains the only active network surface meanwhile.
 
@@ -467,7 +467,7 @@ and leadership. Anti-affinity spreads replicas across failure domains.
 
 ## 41. Repository structure
 
-Use `cmd/vectordb`, `internal/{api,engine,collection,shard,segment,storage,wal,
+Use `cmd/gideondb`, `internal/{api,engine,collection,shard,segment,storage,wal,
 index,metadata,query,cluster,resource,metrics,security,config}`, `proto`, `pkg/
 client`, `sdk`, `dashboard`, `benchmarks`, `deployments`, `examples`, `tests`
 and `docs`. Improvements over the proposed tree are:

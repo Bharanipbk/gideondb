@@ -1,17 +1,17 @@
 # .NET SDK
 
-The experimental `VectorDB.Client` library targets .NET 8 and provides an
-asynchronous, dependency-free client for VectorDB's versioned REST API. It
+The experimental `GideonDB.Client` library targets .NET 8 and provides an
+asynchronous, dependency-free client for GideonDB's versioned REST API. It
 supports collection lifecycle operations, namespaced vector CRUD, batches,
 filtered search, node-local and cluster-wide scrolling, distributed search,
 and placement-aware distributed writes.
 
 ```csharp
-using VectorDB.Client;
+using GideonDB.Client;
 
-using var client = new VectorDBClient(
+using var client = new GideonDBClient(
     "https://vectors.example.com",
-    Environment.GetEnvironmentVariable("VECTORDB_API_KEY"));
+    Environment.GetEnvironmentVariable("GIDEONDB_API_KEY"));
 
 await client.CreateCollectionAsync(new CollectionConfig
 {

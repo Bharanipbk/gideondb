@@ -12,7 +12,7 @@ Bearer authentication, limits responses to 16 MiB, and rejects missing or
 duplicate indices, mismatched batches, inconsistent dimensions, non-numeric
 values, and non-finite values.
 
-Create a VectorDB collection whose dimension matches the selected model, then
+Create a GideonDB collection whose dimension matches the selected model, then
 run:
 
 ```sh
@@ -26,5 +26,5 @@ PYTHONPATH=sdk/python/src:integrations/python \
 ```
 
 Use the same model and dimensions for ingestion and queries. Provider inference
-and VectorDB writes are separate failure boundaries; use stable record IDs and
+and GideonDB writes are separate failure boundaries; use stable record IDs and
 retry them deliberately.

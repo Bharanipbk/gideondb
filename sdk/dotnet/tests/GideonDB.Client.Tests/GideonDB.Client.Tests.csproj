@@ -7,6 +7,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../../src/VectorDB.Client/VectorDB.Client.csproj" />
+    <ProjectReference Include="../../src/GideonDB.Client/GideonDB.Client.csproj" />
   </ItemGroup>
 </Project>

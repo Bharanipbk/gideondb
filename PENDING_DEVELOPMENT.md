@@ -12,14 +12,15 @@ automated tests, and user-facing documentation are all finished.
   resumes. It must deploy the three-node StatefulSet, verify readiness and TLS,
   replace the elected leader, and return the cluster to three ready members.
 - [ ] **Implement the gRPC server transport.** Generate the Go bindings from
-  `api/proto/vectordb/v1/vectordb.proto`, expose the documented RPCs, map REST
+  `api/proto/gideondb/v1/gideondb.proto`, expose the documented RPCs, map REST
   error semantics to gRPC status codes, enforce authentication/deadlines/stream
   limits, and add interoperability and compatibility tests. REST is currently
   the only active public transport. See [the gRPC contract](docs/api/grpc.md).
 - [ ] **Complete open-source release files and policy.** Add the final
   `LICENSE`, contribution guide, code of conduct, security policy, issue and PR
-  templates, and select/document DCO or CLA handling. The license currently
-  awaits maintainer identity and copyright confirmation.
+  templates, and select/document DCO or CLA handling. The README and package
+  metadata declare Apache-2.0; add the canonical repository license text and
+  maintainer attribution before the first public release.
 - [ ] **Establish the full CI baseline.** Add appropriately scoped formatting,
   vet/lint, unit, race, integration, fuzz-smoke, documentation/link,
   OpenAPI/protobuf compatibility, and reproducible-build checks before a public

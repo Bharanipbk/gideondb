@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {

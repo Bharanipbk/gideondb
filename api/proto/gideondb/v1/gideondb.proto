@@ -1,4 +1,4 @@
-// VectorDB public API version 1.
+// GideonDB public API version 1.
 //
 // Clients authenticate with `authorization: Bearer <token>` metadata. Every
 // call should carry a deadline. Collection, record, and search requests are
@@ -6,19 +6,19 @@
 // infer replay safety after an ambiguous transport failure.
 syntax = "proto3";
 
-package vectordb.v1;
+package gideondb.v1;
 
 import "google/protobuf/struct.proto";
 
-option csharp_namespace = "VectorDB.Api.V1";
-option go_package = "github.com/vectordb/vectordb/gen/vectordb/v1;vectordbv1";
+option csharp_namespace = "GideonDB.Api.V1";
+option go_package = "github.com/Bharanipbk/gideondb/gen/gideondb/v1;gideondbv1";
 option java_multiple_files = true;
-option java_package = "io.vectordb.api.v1";
+option java_package = "io.gideondb.api.v1";
 
-// VectorDB provides the public collection, data, search, cluster, health, and
+// GideonDB provides the public collection, data, search, cluster, health, and
 // administrative snapshot surface. Internal Raft and replication protocols use
 // a separate API and are intentionally excluded from this service.
-service VectorDBService {
+service GideonDBService {
   // Creates an immutable-schema collection and fails if its name exists.
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse);
   // Deletes a collection and all of its records.

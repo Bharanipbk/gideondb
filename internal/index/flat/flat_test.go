@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/index"
 )
 
 func TestTypedCandidateHeapSelectsDeterministicTopK(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
 )
 
 type raftProposer interface {

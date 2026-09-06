@@ -3,12 +3,15 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vectordb-client"
+name = "gideondb-client"
 version = "0.0.0"
-description = "Experimental Python client for VectorDB"
+description = "Experimental Python client for GideonDB"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 
+[project.urls]
+Homepage = "https://github.com/Bharanipbk/gideondb"
+Repository = "https://github.com/Bharanipbk/gideondb.git"
+
 [tool.setuptools.packages.find]
 where = ["src"]
-

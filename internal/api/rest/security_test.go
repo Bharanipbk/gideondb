@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 type staticPeerProvider []cluster.Peer
@@ -231,7 +231,7 @@ func TestClusterPeersAndMetricsExposeMembershipHealth(t *testing.T) {
 	for target, fragment := range map[string]string{
 		"/v1/cluster/peers":     `"healthy":true`,
 		"/v1/cluster/placement": `"authoritative":false`,
-		"/metrics":              `vectordb_cluster_peer_healthy{seed="http://peer-a:6333",node_id="11223344556677889900aabbccddeeff"} 1`,
+		"/metrics":              `gideondb_cluster_peer_healthy{seed="http://peer-a:6333",node_id="11223344556677889900aabbccddeeff"} 1`,
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))
@@ -293,9 +293,9 @@ func TestClusterReadinessRequiresConvergedHealthyViews(t *testing.T) {
 		t.Fatal("test placement has no remote-owned shard")
 	}
 	request = httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/internal/shards/docs/%d/search", remoteShard), strings.NewReader(`{"vector":[1,0],"top_k":1}`))
-	request.Header.Set("X-VectorDB-Cluster-ID", clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", localNode)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", "3")
+	request.Header.Set("X-GideonDB-Cluster-ID", clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", localNode)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", "3")
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "wrong_owner") {
@@ -355,9 +355,9 @@ func TestInternalShardSearchRequiresExactFence(t *testing.T) {
 	call := func(shard int, requestCluster, target, epoch string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/internal/shards/docs/%d/search", shard), strings.NewReader(`{"vector":[1,0],"top_k":10}`))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-VectorDB-Cluster-ID", requestCluster)
-		request.Header.Set("X-VectorDB-Target-Node-ID", target)
-		request.Header.Set("X-VectorDB-Metadata-Epoch", epoch)
+		request.Header.Set("X-GideonDB-Cluster-ID", requestCluster)
+		request.Header.Set("X-GideonDB-Target-Node-ID", target)
+		request.Header.Set("X-GideonDB-Metadata-Epoch", epoch)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response
@@ -402,9 +402,9 @@ func TestInternalShardSearchRequiresExactFence(t *testing.T) {
 	body := fmt.Sprintf(`{"records":[{"id":%q,"vector":[0,1]}]}`, writeID)
 	writeRequest := httptest.NewRequest(http.MethodPost, "/v1/internal/shards/docs/0/vectors/batch", strings.NewReader(body))
 	writeRequest.Header.Set("Content-Type", "application/json")
-	writeRequest.Header.Set("X-VectorDB-Cluster-ID", clusterID)
-	writeRequest.Header.Set("X-VectorDB-Target-Node-ID", nodeID)
-	writeRequest.Header.Set("X-VectorDB-Metadata-Epoch", "7")
+	writeRequest.Header.Set("X-GideonDB-Cluster-ID", clusterID)
+	writeRequest.Header.Set("X-GideonDB-Target-Node-ID", nodeID)
+	writeRequest.Header.Set("X-GideonDB-Metadata-Epoch", "7")
 	writeResponse := httptest.NewRecorder()
 	handler.ServeHTTP(writeResponse, writeRequest)
 	if writeResponse.Code != http.StatusOK {

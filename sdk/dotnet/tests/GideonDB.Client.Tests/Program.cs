@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using VectorDB.Client;
+using GideonDB.Client;
 
 await LifecycleAndEncoding();
 await DistributedAndErrors();
@@ -15,7 +15,7 @@ static async Task LifecycleAndEncoding()
     handler.Add(HttpStatusCode.OK, "{\"records\":[],\"next_cursor\":\"\",\"vectors_included\":false,\"metadata_epoch\":7,\"authoritative_placement\":true}");
     handler.Add(HttpStatusCode.OK, "{\"id\":\"a/b\",\"vector\":[1,0]}");
     using var http = new HttpClient(handler);
-    using var client = new VectorDBClient("https://db.example/", http, "secret", TimeSpan.FromSeconds(2));
+    using var client = new GideonDBClient("https://db.example/", http, "secret", TimeSpan.FromSeconds(2));
     await client.HealthAsync();
     var page = await client.ScrollAsync("docs", new ScrollOptions { Namespace = "tenant one", Limit = 25, Cursor = "prior/value", IncludeVector = true });
     Check(page.NextCursor == "next/value", "scroll cursor");
@@ -32,25 +32,25 @@ static async Task DistributedAndErrors()
     var handler = new QueueHandler();
     handler.Add((HttpStatusCode)207, "{\"outcomes\":[{\"shard_id\":0,\"status\":\"unknown\"}],\"partial\":true,\"metadata_epoch\":2,\"authoritative_placement\":true}");
     handler.Add(HttpStatusCode.NotFound, "{\"code\":\"not_found\",\"message\":\"missing\"}");
-    using var client = new VectorDBClient("http://db.example", new HttpClient(handler));
+    using var client = new GideonDBClient("http://db.example", new HttpClient(handler));
     var response = await client.DistributedBatchUpsertAsync("docs", new[] { new VectorRecord { Id = "one", Vector = new[] { 1f, 0f } } }, "all");
     Check(response.Partial, "partial response");
     try { await client.DescribeCollectionAsync("missing"); throw new Exception("Expected API exception"); }
-    catch (VectorDBApiException exception) { Check(exception.StatusCode == 404 && exception.Code == "not_found", "typed API error"); }
+    catch (GideonDBApiException exception) { Check(exception.StatusCode == 404 && exception.Code == "not_found", "typed API error"); }
 }
 
 static async Task ValidationCancellationAndBounds()
 {
-    try { _ = new VectorDBClient("ftp://db.example"); throw new Exception("Expected origin error"); }
+    try { _ = new GideonDBClient("ftp://db.example"); throw new Exception("Expected origin error"); }
     catch (ArgumentException) { }
-    try { _ = new VectorDBClient("https://db.example/path"); throw new Exception("Expected path error"); }
+    try { _ = new GideonDBClient("https://db.example/path"); throw new Exception("Expected path error"); }
     catch (ArgumentException) { }
 
     var handler = new QueueHandler();
     handler.Add(HttpStatusCode.OK, new byte[(16 << 20) + 1]);
-    using var client = new VectorDBClient("https://db.example", new HttpClient(handler));
+    using var client = new GideonDBClient("https://db.example", new HttpClient(handler));
     try { await client.HealthAsync(); throw new Exception("Expected response bound error"); }
-    catch (VectorDBResponseTooLargeException) { }
+    catch (GideonDBResponseTooLargeException) { }
 
     using var cancelled = new CancellationTokenSource();
     cancelled.Cancel();

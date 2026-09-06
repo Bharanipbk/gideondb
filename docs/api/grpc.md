@@ -3,7 +3,7 @@
 Maturity: **contract implemented; server transport planned**.
 
 The versioned public protobuf contract is
-[`vectordb.v1.VectorDBService`](../../api/proto/vectordb/v1/vectordb.proto).
+[`gideondb.v1.GideonDBService`](../../api/proto/gideondb/v1/gideondb.proto).
 It covers the 18 operations required by the technical design:
 
 - collection creation, deletion, listing, and description;

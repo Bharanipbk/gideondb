@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 type rebalanceSnapshotRequest struct {
@@ -101,11 +101,11 @@ func (m *distributedRebalanceDataMover) execute(ctx context.Context, movement cl
 
 func (s *Server) setRebalanceHeaders(request *http.Request, target string, term uint64) {
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", target)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
-	request.Header.Set("X-VectorDB-Coordinator-Node-ID", s.nodeID)
-	request.Header.Set("X-VectorDB-Leader-Term", strconv.FormatUint(term, 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", target)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Coordinator-Node-ID", s.nodeID)
+	request.Header.Set("X-GideonDB-Leader-Term", strconv.FormatUint(term, 10))
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}
@@ -129,8 +129,8 @@ func (s *Server) internalRebalanceAction(w http.ResponseWriter, r *http.Request)
 	}); ok {
 		role, leaderID, term = provider.Status()
 	}
-	coordinator := r.Header.Get("X-VectorDB-Coordinator-Node-ID")
-	requestTerm, err := strconv.ParseUint(r.Header.Get("X-VectorDB-Leader-Term"), 10, 64)
+	coordinator := r.Header.Get("X-GideonDB-Coordinator-Node-ID")
+	requestTerm, err := strconv.ParseUint(r.Header.Get("X-GideonDB-Leader-Term"), 10, 64)
 	if err != nil || requestTerm != term || coordinator == "" || (role != cluster.RaftLeader && leaderID != coordinator) || (role == cluster.RaftLeader && coordinator != s.nodeID) {
 		writeJSON(w, http.StatusConflict, apiError{Code: "rebalance_coordinator_fence", Message: "request is not from the current Raft leader and term"})
 		return
@@ -257,8 +257,8 @@ func (s *Server) internalRebalanceAbort(w http.ResponseWriter, r *http.Request) 
 	}); ok {
 		role, leaderID, term = provider.Status()
 	}
-	coordinator := r.Header.Get("X-VectorDB-Coordinator-Node-ID")
-	requestTerm, err := strconv.ParseUint(r.Header.Get("X-VectorDB-Leader-Term"), 10, 64)
+	coordinator := r.Header.Get("X-GideonDB-Coordinator-Node-ID")
+	requestTerm, err := strconv.ParseUint(r.Header.Get("X-GideonDB-Leader-Term"), 10, 64)
 	if err != nil || requestTerm != term || coordinator == "" || (role != cluster.RaftLeader && leaderID != coordinator) || (role == cluster.RaftLeader && coordinator != s.nodeID) {
 		writeJSON(w, http.StatusConflict, apiError{Code: "rebalance_coordinator_fence", Message: "abort is not from the current Raft leader and term"})
 		return
@@ -363,7 +363,7 @@ func (s *Server) releaseRebalanceBarriers(ctx context.Context, plan cluster.Reba
 			continue
 		}
 		s.setRebalanceHeaders(request, source, term)
-		request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(epoch, 10))
+		request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(epoch, 10))
 		response, err := s.internalClient.Do(request)
 		if err != nil {
 			failures = append(failures, source+": "+err.Error())
@@ -435,11 +435,11 @@ func (s *Server) remoteRebalanceSnapshot(ctx context.Context, peer cluster.Peer,
 		return err
 	}
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
-	request.Header.Set("X-VectorDB-Leader-Node-ID", movement.SourceLeaderID)
-	request.Header.Set("X-VectorDB-Leader-Term", strconv.FormatUint(term, 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Leader-Node-ID", movement.SourceLeaderID)
+	request.Header.Set("X-GideonDB-Leader-Term", strconv.FormatUint(term, 10))
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}
@@ -468,11 +468,11 @@ func (s *Server) internalRebalanceSnapshot(w http.ResponseWriter, r *http.Reques
 	if !decode(w, r, &request) {
 		return
 	}
-	if request.Change.ExpectedEpoch != s.currentMetadataEpoch() || request.SourceID != r.Header.Get("X-VectorDB-Leader-Node-ID") {
+	if request.Change.ExpectedEpoch != s.currentMetadataEpoch() || request.SourceID != r.Header.Get("X-GideonDB-Leader-Node-ID") {
 		writeJSON(w, http.StatusConflict, apiError{Code: "rebalance_fence_mismatch", Message: "rebalance epoch or source identity differs"})
 		return
 	}
-	leaderTerm, termErr := strconv.ParseUint(r.Header.Get("X-VectorDB-Leader-Term"), 10, 64)
+	leaderTerm, termErr := strconv.ParseUint(r.Header.Get("X-GideonDB-Leader-Term"), 10, 64)
 	statusProvider, statusAvailable := s.raftProtocol.(interface {
 		Status() (cluster.RaftRole, string, uint64)
 	})

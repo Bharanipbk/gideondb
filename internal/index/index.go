@@ -1,7 +1,7 @@
 // Package index defines the local vector index contract.
 package index
 
-import "github.com/vectordb/vectordb/internal/core"
+import "github.com/Bharanipbk/gideondb/internal/core"
 
 type Candidate struct {
 	ID    uint64

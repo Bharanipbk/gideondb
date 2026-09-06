@@ -6,11 +6,11 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/index"
-	"github.com/vectordb/vectordb/internal/index/flat"
-	"github.com/vectordb/vectordb/internal/index/hnsw"
-	"github.com/vectordb/vectordb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/index/flat"
+	"github.com/Bharanipbk/gideondb/internal/index/hnsw"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
 )
 
 // Segment is the Phase 1 mutable segment. Immutable segments and tombstone

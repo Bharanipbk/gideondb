@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import sys
 
-PROTO = Path(__file__).resolve().parents[1] / "api/proto/vectordb/v1/vectordb.proto"
+PROTO = Path(__file__).resolve().parents[1] / "api/proto/gideondb/v1/gideondb.proto"
 REQUIRED_RPCS = {
     "CreateCollection", "DeleteCollection", "ListCollections", "DescribeCollection",
     "Upsert", "BatchUpsert", "Delete", "Get", "Search", "BatchSearch", "Scroll",
@@ -19,10 +19,10 @@ def fail(message: str) -> None:
 
 
 text = PROTO.read_text(encoding="utf-8")
-if 'syntax = "proto3";' not in text or "package vectordb.v1;" not in text:
-    fail("must use proto3 package vectordb.v1")
-if "service VectorDBService" not in text:
-    fail("must define VectorDBService")
+if 'syntax = "proto3";' not in text or "package gideondb.v1;" not in text:
+    fail("must use proto3 package gideondb.v1")
+if "service GideonDBService" not in text:
+    fail("must define GideonDBService")
 
 rpcs = set(re.findall(r"^\s*rpc\s+(\w+)\s*\(", text, re.MULTILINE))
 if missing := sorted(REQUIRED_RPCS - rpcs):

@@ -5,7 +5,7 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 func TestScore(t *testing.T) {

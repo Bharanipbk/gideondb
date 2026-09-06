@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 type fixedRaftStatus struct{ term uint64 }
@@ -92,11 +92,11 @@ func TestFollowerReplicaAppendTransportFencesAndAppliesOrderedBatch(t *testing.T
 	call := func(term string, body []byte) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/v1/internal/replicas/%s/%d/append", config.Name, shardID), bytes.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-VectorDB-Cluster-ID", clusterID)
-		request.Header.Set("X-VectorDB-Target-Node-ID", localID)
-		request.Header.Set("X-VectorDB-Metadata-Epoch", "1")
-		request.Header.Set("X-VectorDB-Leader-Node-ID", leaderID)
-		request.Header.Set("X-VectorDB-Leader-Term", term)
+		request.Header.Set("X-GideonDB-Cluster-ID", clusterID)
+		request.Header.Set("X-GideonDB-Target-Node-ID", localID)
+		request.Header.Set("X-GideonDB-Metadata-Epoch", "1")
+		request.Header.Set("X-GideonDB-Leader-Node-ID", leaderID)
+		request.Header.Set("X-GideonDB-Leader-Term", term)
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response

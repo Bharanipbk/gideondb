@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 type replicaRepairRetry struct {
@@ -205,9 +205,9 @@ func (s *Server) remoteReplicaSequence(ctx context.Context, peer cluster.Peer, c
 	if err != nil {
 		return 0, err
 	}
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}

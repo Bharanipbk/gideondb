@@ -3,7 +3,7 @@ import json
 import unittest
 from urllib.error import HTTPError
 
-from vectordb import APIError, Client
+from gideondb import APIError, Client
 
 
 class Response:

@@ -1,4 +1,4 @@
-package io.vectordb.client;
+package io.gideondb.client;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -7,7 +7,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-public final class VectorDBClientTest {
+public final class GideonDBClientTest {
     public static void main(String[] args) {
         lifecycleAndEncoding(); distributedAndErrors(); validationAndBounds();
         System.out.println("Java SDK tests passed");
@@ -20,7 +20,7 @@ public final class VectorDBClientTest {
         transport.add(200, "{\"records\":[],\"next_cursor\":\"\",\"vectors_included\":false,\"metadata_epoch\":7,\"authoritative_placement\":true}");
         transport.add(200, "{\"id\":\"a/b\",\"vector\":[1,0],\"version\":1}");
         transport.add(200, "{\"results\":[{\"id\":\"a/b\",\"score\":1.0}]}");
-        VectorDBClient client = new VectorDBClient("https://db.example/", "secret", Duration.ofSeconds(2), transport);
+        GideonDBClient client = new GideonDBClient("https://db.example/", "secret", Duration.ofSeconds(2), transport);
         client.health(); client.createCollection(Map.of("name","docs","dimension",2,"metric","dot","shard_count",2));
         check("next/value".equals(client.scroll("docs", "tenant one", 25, "prior/value", true).get("next_cursor")), "scroll cursor");
         check(((Number)client.distributedScroll("docs", "", 25, "", false).get("metadata_epoch")).intValue() == 7, "distributed scroll epoch");
@@ -35,22 +35,22 @@ public final class VectorDBClientTest {
         QueueTransport transport = new QueueTransport();
         transport.add(207, "{\"outcomes\":[{\"shard_id\":0,\"status\":\"unknown\"}],\"partial\":true,\"metadata_epoch\":2,\"authoritative_placement\":true}");
         transport.add(404, "{\"code\":\"not_found\",\"message\":\"missing\"}");
-        VectorDBClient client = new VectorDBClient("http://db.example", "", Duration.ofSeconds(2), transport);
+        GideonDBClient client = new GideonDBClient("http://db.example", "", Duration.ofSeconds(2), transport);
         check(Boolean.TRUE.equals(client.distributedBatchUpsert("docs", List.of(Map.of("id","one","vector",List.of(1,0))), "all").get("partial")), "partial result");
         try { client.describeCollection("missing"); throw new AssertionError("expected API error"); }
-        catch (VectorDBClient.ApiException e) { check(e.statusCode()==404 && "not_found".equals(e.code()), "typed API error"); }
+        catch (GideonDBClient.ApiException e) { check(e.statusCode()==404 && "not_found".equals(e.code()), "typed API error"); }
     }
     private static void validationAndBounds() {
-        QueueTransport transport = new QueueTransport(); transport.responses.add(new VectorDBClient.Response(200, new byte[(16 << 20) + 1]));
-        VectorDBClient client = new VectorDBClient("https://db.example", "", Duration.ofSeconds(1), transport);
-        try { client.health(); throw new AssertionError("expected bounded response error"); } catch (VectorDBClient.TransportException expected) {}
-        try { new VectorDBClient("ftp://db.example"); throw new AssertionError("expected origin error"); } catch (IllegalArgumentException expected) {}
-        try { new VectorDBClient("https://db.example/path"); throw new AssertionError("expected path error"); } catch (IllegalArgumentException expected) {}
+        QueueTransport transport = new QueueTransport(); transport.responses.add(new GideonDBClient.Response(200, new byte[(16 << 20) + 1]));
+        GideonDBClient client = new GideonDBClient("https://db.example", "", Duration.ofSeconds(1), transport);
+        try { client.health(); throw new AssertionError("expected bounded response error"); } catch (GideonDBClient.TransportException expected) {}
+        try { new GideonDBClient("ftp://db.example"); throw new AssertionError("expected origin error"); } catch (IllegalArgumentException expected) {}
+        try { new GideonDBClient("https://db.example/path"); throw new AssertionError("expected path error"); } catch (IllegalArgumentException expected) {}
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
-    private static final class QueueTransport implements VectorDBClient.Transport {
-        final ArrayDeque<VectorDBClient.Response> responses = new ArrayDeque<>(); final List<VectorDBClient.Request> requests = new ArrayList<>();
-        void add(int status, String body) { responses.add(new VectorDBClient.Response(status, body.getBytes(StandardCharsets.UTF_8))); }
-        public VectorDBClient.Response send(VectorDBClient.Request request) { requests.add(request); return responses.remove(); }
+    private static final class QueueTransport implements GideonDBClient.Transport {
+        final ArrayDeque<GideonDBClient.Response> responses = new ArrayDeque<>(); final List<GideonDBClient.Request> requests = new ArrayList<>();
+        void add(int status, String body) { responses.add(new GideonDBClient.Response(status, body.getBytes(StandardCharsets.UTF_8))); }
+        public GideonDBClient.Response send(GideonDBClient.Request request) { requests.add(request); return responses.remove(); }
     }
 }

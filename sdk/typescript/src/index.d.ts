@@ -72,15 +72,15 @@ export interface DistributedWriteResponse {
   authoritative_placement: boolean;
 }
 
-export class VectorDBAPIError extends Error {
+export class GideonDBAPIError extends Error {
   readonly statusCode: number;
   readonly code: string;
   constructor(statusCode: number, code?: string, message?: string);
 }
 
-export class VectorDBTransportError extends Error {}
+export class GideonDBTransportError extends Error {}
 
-export class VectorDBClient {
+export class GideonDBClient {
   constructor(baseURL: string, options?: ClientOptions);
   health(options?: RequestOptions): Promise<void>;
   ready(options?: RequestOptions): Promise<void>;

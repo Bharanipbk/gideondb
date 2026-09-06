@@ -1,4 +1,4 @@
-// Command vectordb-loadtest runs a reproducible single-node validation workload.
+// Command gideondb-loadtest runs a reproducible single-node validation workload.
 package main
 
 import (
@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
-	"github.com/vectordb/vectordb/internal/wal"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
 type report struct {
@@ -59,7 +59,7 @@ func main() {
 	path := *dataPath
 	if path == "" {
 		var err error
-		path, err = os.MkdirTemp("", "vectordb-loadtest-*")
+		path, err = os.MkdirTemp("", "gideondb-loadtest-*")
 		if err != nil {
 			fail(err)
 		}
@@ -196,4 +196,4 @@ func percentile(values []time.Duration, quantile float64) time.Duration {
 	return values[position]
 }
 func millis(value time.Duration) float64 { return float64(value.Microseconds()) / 1000 }
-func fail(err error)                     { fmt.Fprintln(os.Stderr, "vectordb-loadtest:", err); os.Exit(1) }
+func fail(err error)                     { fmt.Fprintln(os.Stderr, "gideondb-loadtest:", err); os.Exit(1) }

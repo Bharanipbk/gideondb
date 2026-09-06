@@ -4,9 +4,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <PackageId>VectorDB.Client</PackageId>
+    <PackageId>GideonDB.Client</PackageId>
     <Version>0.1.0</Version>
-    <Description>Experimental .NET client for VectorDB.</Description>
+    <Description>Experimental .NET client for GideonDB.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Bharanipbk/gideondb</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Bharanipbk/gideondb.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 </Project>

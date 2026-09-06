@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestLeaderFanoutRequiresQuorumAndPreservesPreparedRecord(t *testing.T) {
@@ -113,7 +113,7 @@ func TestLeaderFanoutRequiresQuorumAndPreservesPreparedRecord(t *testing.T) {
 	}
 	var metrics bytes.Buffer
 	leader.metrics.writeTo(&metrics, leader)
-	lagLabel := fmt.Sprintf(`vectordb_replication_lag_sequences{collection="replicated",shard="%d",node_id="%s"}`, leaderShard, followerID)
+	lagLabel := fmt.Sprintf(`gideondb_replication_lag_sequences{collection="replicated",shard="%d",node_id="%s"}`, leaderShard, followerID)
 	if !strings.Contains(metrics.String(), lagLabel+" 1") {
 		t.Fatalf("missing failed-fanout lag metric:\n%s", metrics.String())
 	}
@@ -131,7 +131,7 @@ func TestLeaderFanoutRequiresQuorumAndPreservesPreparedRecord(t *testing.T) {
 	}
 	metrics.Reset()
 	leader.metrics.writeTo(&metrics, leader)
-	if !strings.Contains(metrics.String(), lagLabel+" 0") || !strings.Contains(metrics.String(), `vectordb_replication_operations_total{operation="snapshot",result="success"} 1`) {
+	if !strings.Contains(metrics.String(), lagLabel+" 0") || !strings.Contains(metrics.String(), `gideondb_replication_operations_total{operation="snapshot",result="success"} 1`) {
 		t.Fatalf("missing recovery metrics:\n%s", metrics.String())
 	}
 

@@ -1,4 +1,4 @@
-"""LLM-agnostic text embedding and VectorDB ingestion helpers."""
+"""LLM-agnostic text embedding and GideonDB ingestion helpers."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ class OllamaEmbedder:
         body: dict[str, Any] = {"model": self._model, "input": values, "truncate": self._truncate}
         if self._dimensions is not None:
             body["dimensions"] = self._dimensions
-        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "User-Agent":"vectordb-ollama/dev"}, method="POST")
+        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "User-Agent":"gideondb-ollama/dev"}, method="POST")
         try:
             response = self._open(request)
             with response:
@@ -139,7 +139,7 @@ class HuggingFaceEmbedder:
         body: dict[str, Any] = {"inputs": values, "normalize": self._normalize, "truncate": self._truncate}
         if self._prompt_name:
             body["prompt_name"] = self._prompt_name
-        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._token}", "User-Agent":"vectordb-huggingface/dev"}, method="POST")
+        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._token}", "User-Agent":"gideondb-huggingface/dev"}, method="POST")
         try:
             response = self._open(request)
             with response:
@@ -221,7 +221,7 @@ class OpenAICompatibleEmbedder:
             body["dimensions"] = self._dimensions
         if self._user:
             body["user"] = self._user
-        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._api_key}", "User-Agent":"vectordb-openai-compatible/dev"}, method="POST")
+        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._api_key}", "User-Agent":"gideondb-openai-compatible/dev"}, method="POST")
         try:
             response = self._open(request)
             with response:
@@ -316,7 +316,7 @@ class CohereEmbedder:
         body: dict[str, Any] = {"model": self._model, "texts": values, "input_type": input_type, "embedding_types": ["float"], "truncate": self._truncate}
         if self._output_dimension is not None:
             body["output_dimension"] = self._output_dimension
-        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._api_key}", "X-Client-Name":"vectordb", "User-Agent":"vectordb-cohere/dev"}, method="POST")
+        request = Request(self._url, data=json.dumps(body, separators=(",", ":")).encode(), headers={"Accept":"application/json", "Content-Type":"application/json", "Authorization":f"Bearer {self._api_key}", "X-Client-Name":"gideondb", "User-Agent":"gideondb-cohere/dev"}, method="POST")
         try:
             response = self._open(request)
             with response:
@@ -359,7 +359,7 @@ class CohereEmbedder:
 
 
 class SemanticStore:
-    """Combines any Embedder with the stable VectorDB Python client surface."""
+    """Combines any Embedder with the stable GideonDB Python client surface."""
 
     def __init__(self, client: Any, collection: str, embedder: Embedder) -> None:
         if not collection:

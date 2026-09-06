@@ -1,6 +1,6 @@
 # Single-node validation
 
-The `vectordb-loadtest` command creates deterministic vectors, ingests them in
+The `gideondb-loadtest` command creates deterministic vectors, ingests them in
 shard-grouped batches, checkpoints, closes and reopens the engine, verifies the
 recovered count and sampled records, then runs concurrent exact searches that
 must return their source IDs. It emits one JSON report with environment,

@@ -7,7 +7,7 @@ Requirements: Go 1.26 or newer.
 Start the server:
 
 ```bash
-go run ./cmd/vectordb -data-path ./data -http-address 127.0.0.1:6333 \
+go run ./cmd/gideondb -data-path ./data -http-address 127.0.0.1:6333 \
   -wal-sync always -checkpoint-every 1000
 ```
 

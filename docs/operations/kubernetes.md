@@ -1,7 +1,7 @@
 # Kubernetes deployment
 
 The manifests in `deployments/kubernetes` run a three-node experimental
-VectorDB cluster. They use one StatefulSet PVC per durable node identity, a
+GideonDB cluster. They use one StatefulSet PVC per durable node identity, a
 headless Service for peer discovery, a readiness-gated client Service,
 credential and private-CA TLS Secrets, mandatory host anti-affinity, a quorum-preserving
 PodDisruptionBudget, and restricted ingress.
@@ -11,11 +11,11 @@ PodDisruptionBudget, and restricted ingress.
 - Kubernetes 1.27 or newer
 - three schedulable worker nodes (required by host anti-affinity)
 - a default StorageClass providing `ReadWriteOnce` volumes
-- a VectorDB image available to every node
+- a GideonDB image available to every node
 - a private CA and node certificate whose SANs cover all three stable pod DNS
-  names under `vectordb-headless.vectordb.svc.cluster.local`
+  names under `gideondb-headless.gideondb.svc.cluster.local`
 
-The checked-in image is `vectordb:dev`. Change it with a Kustomize image
+The checked-in image is `gideondb:dev`. Change it with a Kustomize image
 override or load that local tag into every development-cluster node.
 
 ## Create required Secrets
@@ -26,10 +26,10 @@ a random bearer token of at least 16 characters, and the CA-signed identity:
 
 ```bash
 kubectl apply -f deployments/kubernetes/namespace.yaml
-kubectl -n vectordb create secret generic vectordb-credentials \
+kubectl -n gideondb create secret generic gideondb-credentials \
   --from-literal=cluster-id=0123456789abcdef0123456789abcdef \
   --from-literal=api-key='replace-with-a-random-production-token'
-kubectl -n vectordb create secret generic vectordb-tls \
+kubectl -n gideondb create secret generic gideondb-tls \
   --from-file=ca.crt=./ca.crt --from-file=tls.crt=./tls.crt \
   --from-file=tls.key=./tls.key
 kubectl apply -k deployments/kubernetes
@@ -85,11 +85,11 @@ rollback until the leave and backup checks pass.
 
 ## Network access
 
-The NetworkPolicy allows port 6333 between VectorDB pods and from namespaces
+The NetworkPolicy allows port 6333 between GideonDB pods and from namespaces
 labelled for client access:
 
 ```bash
-kubectl label namespace my-application vectordb-client-access=true
+kubectl label namespace my-application gideondb-client-access=true
 ```
 
 Your CNI must enforce NetworkPolicy. Egress remains unrestricted so cluster DNS
@@ -109,7 +109,7 @@ the base are safe examples, not universal sizing recommendations.
 
 Run `make validate-kubernetes` on a host with Docker, kind, kubectl, OpenSSL,
 and jq. The gate creates a disposable four-node kind environment, builds and
-loads the current VectorDB image, generates a short-lived private CA and node
+loads the current GideonDB image, generates a short-lived private CA and node
 identity, deploys the exact Kustomize base, and verifies:
 
 - all three StatefulSet members converge and become ready;

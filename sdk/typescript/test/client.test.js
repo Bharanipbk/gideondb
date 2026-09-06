@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { VectorDBAPIError, VectorDBClient, VectorDBTransportError } from "../src/index.js";
+import { GideonDBAPIError, GideonDBClient, GideonDBTransportError } from "../src/index.js";
 
 function queuedFetch(responses, requests = []) {
   return async (url, options) => {
@@ -20,7 +20,7 @@ function jsonResponse(value, status = 200) {
 
 test("authenticated lifecycle requests encode path and namespace", async () => {
   const requests = [];
-  const client = new VectorDBClient("https://db.example/", {
+  const client = new GideonDBClient("https://db.example/", {
     apiKey: "secret",
     fetch: queuedFetch([
       jsonResponse({ status: "ok" }),
@@ -42,7 +42,7 @@ test("authenticated lifecycle requests encode path and namespace", async () => {
 });
 
 test("distributed multi-status and API errors remain explicit", async () => {
-  const client = new VectorDBClient("http://db.example", {
+  const client = new GideonDBClient("http://db.example", {
     fetch: queuedFetch([
       jsonResponse({ results: [], partial: true, failures: [{ shard_id: 1 }], metadata_epoch: 2, authoritative_placement: true }),
       jsonResponse({ outcomes: [{ shard_id: 0, status: "unknown" }], partial: true, metadata_epoch: 2, authoritative_placement: true }, 207),
@@ -51,24 +51,24 @@ test("distributed multi-status and API errors remain explicit", async () => {
   });
   assert.equal((await client.distributedSearch("docs", { vector: [1, 0], topK: 3, allowPartial: true })).partial, true);
   assert.equal((await client.distributedBatchUpsert("docs", [{ id: "one", vector: [1, 0] }], { acknowledgement: "all" })).outcomes[0].status, "unknown");
-  await assert.rejects(client.describeCollection("missing"), error => error instanceof VectorDBAPIError && error.statusCode === 404 && error.code === "not_found");
+  await assert.rejects(client.describeCollection("missing"), error => error instanceof GideonDBAPIError && error.statusCode === 404 && error.code === "not_found");
 });
 
 test("origin, timeout, cancellation, and response bounds fail safely", async () => {
-  assert.throws(() => new VectorDBClient("ftp://db.example"), TypeError);
-  assert.throws(() => new VectorDBClient("https://db.example/path"), TypeError);
-  assert.throws(() => new VectorDBClient("https://db.example", { timeoutMs: 0 }), TypeError);
+  assert.throws(() => new GideonDBClient("ftp://db.example"), TypeError);
+  assert.throws(() => new GideonDBClient("https://db.example/path"), TypeError);
+  assert.throws(() => new GideonDBClient("https://db.example", { timeoutMs: 0 }), TypeError);
   const controller = new AbortController();
   controller.abort();
-  const cancelled = new VectorDBClient("https://db.example", { fetch: async (_url, options) => { options.signal.throwIfAborted(); } });
-  await assert.rejects(cancelled.health({ signal: controller.signal }), VectorDBTransportError);
-  const oversized = new VectorDBClient("https://db.example", { fetch: queuedFetch([new Response(new Uint8Array((16 << 20) + 1))]) });
-  await assert.rejects(oversized.health(), VectorDBTransportError);
+  const cancelled = new GideonDBClient("https://db.example", { fetch: async (_url, options) => { options.signal.throwIfAborted(); } });
+  await assert.rejects(cancelled.health({ signal: controller.signal }), GideonDBTransportError);
+  const oversized = new GideonDBClient("https://db.example", { fetch: queuedFetch([new Response(new Uint8Array((16 << 20) + 1))]) });
+  await assert.rejects(oversized.health(), GideonDBTransportError);
 });
 
 test("scroll preserves opaque cursors and explicit vector inclusion", async () => {
   const requests = [];
-  const client = new VectorDBClient("https://db.example", { fetch: queuedFetch([
+  const client = new GideonDBClient("https://db.example", { fetch: queuedFetch([
     jsonResponse({ records: [{ id: "one" }], next_cursor: "next/value", vectors_included: false }),
     jsonResponse({ records: [], next_cursor: "", vectors_included: false, metadata_epoch: 7, authoritative_placement: true }),
   ], requests) });

@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
 )
 
 type distributedSearchRequest struct {
@@ -143,9 +143,9 @@ func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, colle
 		return nil, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	httpRequest.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	httpRequest.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	httpRequest.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	httpRequest.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	httpRequest.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
 	if s.peerAPIKey != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}

@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/distance"
-	"github.com/vectordb/vectordb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/distance"
+	"github.com/Bharanipbk/gideondb/internal/index"
 )
 
 // Index stores vectors contiguously and maps stable caller IDs to ordinals.

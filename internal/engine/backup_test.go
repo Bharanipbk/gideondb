@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 func TestBackupRestoreRoundTrip(t *testing.T) {

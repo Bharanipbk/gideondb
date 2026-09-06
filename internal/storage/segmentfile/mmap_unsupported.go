@@ -5,7 +5,7 @@ package segmentfile
 import (
 	"fmt"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 // MappedVectors keeps the public internal contract buildable on platforms

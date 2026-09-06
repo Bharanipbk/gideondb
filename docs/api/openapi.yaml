@@ -1,8 +1,10 @@
 openapi: 3.1.0
 info:
-  title: VectorDB experimental API
+  title: GideonDB experimental API
   version: 0.0.1
   description: Phase 1 API; compatibility is not yet promised.
+  contact:
+    url: https://github.com/Bharanipbk/gideondb
 servers:
   - url: http://127.0.0.1:6333/v1
 paths:
@@ -488,9 +490,9 @@ paths:
     parameters:
       - {name: collection, in: path, required: true, schema: {type: string}}
       - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
-      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
     post:
       operationId: internalShardSearch
       description: Internal transport primitive; not a stable public client API.
@@ -510,7 +512,7 @@ paths:
         "200":
           description: Results from exactly one local logical shard.
           headers:
-            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+            X-GideonDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
@@ -520,9 +522,9 @@ paths:
     parameters:
       - {name: collection, in: path, required: true, schema: {type: string}}
       - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
-      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
     post:
       operationId: internalShardBatchUpsert
       description: Fenced internal WAL-backed mutation of exactly one logical shard.
@@ -560,11 +562,11 @@ paths:
     parameters:
       - {name: collection, in: path, required: true, schema: {type: string}}
       - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
-      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
-      - {name: X-VectorDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
     post:
       operationId: internalReplicaAppend
       description: Ordered, fenced follower WAL append; internal Phase 7 transport.
@@ -591,11 +593,11 @@ paths:
     parameters:
       - {name: collection, in: path, required: true, schema: {type: string}}
       - {name: shard, in: path, required: true, schema: {type: integer, minimum: 0}}
-      - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
-      - {name: X-VectorDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
-      - {name: X-VectorDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Target-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Metadata-Epoch, in: header, required: true, schema: {type: integer, minimum: 1}}
+      - {name: X-GideonDB-Leader-Node-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+      - {name: X-GideonDB-Leader-Term, in: header, required: true, schema: {type: integer, minimum: 1}}
     post:
       operationId: internalReplicaSnapshot
       description: Fenced complete-shard catch-up after a follower sequence gap or compaction.
@@ -623,7 +625,7 @@ paths:
       operationId: internalRaftRequestVote
       description: Authenticated internal metadata-Raft vote RPC.
       parameters:
-        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+        - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
       requestBody:
         required: true
         content:
@@ -668,7 +670,7 @@ paths:
       operationId: internalRaftAppendEntries
       description: Authenticated internal metadata-Raft replication and heartbeat RPC.
       parameters:
-        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+        - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
       requestBody:
         required: true
         content:
@@ -688,7 +690,7 @@ paths:
         "200":
           description: Current term, prefix-match result, and match index.
           headers:
-            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+            X-GideonDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
@@ -698,7 +700,7 @@ paths:
       operationId: internalRaftInstallSnapshot
       description: Authenticated installation of a compacted metadata-Raft prefix.
       parameters:
-        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+        - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
       requestBody:
         required: true
         content:
@@ -724,7 +726,7 @@ paths:
         "200":
           description: Snapshot installation result and retained match index.
           headers:
-            X-VectorDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
+            X-GideonDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
@@ -734,7 +736,7 @@ paths:
       operationId: internalRaftTimeoutNow
       description: Mutual-TLS-protected request for a caught-up voter to campaign immediately during graceful leader shutdown.
       parameters:
-        - {name: X-VectorDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
+        - {name: X-GideonDB-Cluster-ID, in: header, required: true, schema: {type: string, pattern: "^[0-9a-f]{32}$"}}
       requestBody:
         required: true
         content:

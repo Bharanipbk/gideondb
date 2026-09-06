@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/index/flat"
-	"github.com/vectordb/vectordb/internal/metadata"
-	"github.com/vectordb/vectordb/internal/segment"
-	"github.com/vectordb/vectordb/internal/shard"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/index/flat"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/segment"
+	"github.com/Bharanipbk/gideondb/internal/shard"
 )
 
 type Collection struct {

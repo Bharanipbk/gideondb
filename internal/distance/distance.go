@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 // Score returns a similarity score where larger is always better.

@@ -4,8 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 type replicaAppendRequest struct {
@@ -32,8 +32,8 @@ func (s *Server) internalReplicaAppend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_shard", Message: "shard must be an unsigned 32-bit integer"})
 		return
 	}
-	leaderID := r.Header.Get("X-VectorDB-Leader-Node-ID")
-	leaderTerm, err := strconv.ParseUint(r.Header.Get("X-VectorDB-Leader-Term"), 10, 64)
+	leaderID := r.Header.Get("X-GideonDB-Leader-Node-ID")
+	leaderTerm, err := strconv.ParseUint(r.Header.Get("X-GideonDB-Leader-Term"), 10, 64)
 	if !cluster.ValidNodeID(leaderID) || err != nil || leaderTerm == 0 {
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_replication_leader", Message: "valid leader node ID and term are required"})
 		return
@@ -108,8 +108,8 @@ func (s *Server) internalReplicaSnapshot(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_shard", Message: "shard must be an unsigned 32-bit integer"})
 		return
 	}
-	leaderID := r.Header.Get("X-VectorDB-Leader-Node-ID")
-	leaderTerm, err := strconv.ParseUint(r.Header.Get("X-VectorDB-Leader-Term"), 10, 64)
+	leaderID := r.Header.Get("X-GideonDB-Leader-Node-ID")
+	leaderTerm, err := strconv.ParseUint(r.Header.Get("X-GideonDB-Leader-Term"), 10, 64)
 	if !cluster.ValidNodeID(leaderID) || err != nil || leaderTerm == 0 {
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_replication_leader", Message: "valid leader node ID and term are required"})
 		return

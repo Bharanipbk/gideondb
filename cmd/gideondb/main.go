@@ -15,11 +15,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/api/rest"
-	"github.com/vectordb/vectordb/internal/cluster"
-	appconfig "github.com/vectordb/vectordb/internal/config"
-	"github.com/vectordb/vectordb/internal/engine"
-	"github.com/vectordb/vectordb/internal/wal"
+	"github.com/Bharanipbk/gideondb/internal/api/rest"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	appconfig "github.com/Bharanipbk/gideondb/internal/config"
+	"github.com/Bharanipbk/gideondb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
 var version, commit, buildDate = "dev", "unknown", "unknown"
@@ -53,7 +53,7 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if *showVersion {
-		fmt.Printf("vectordb %s commit=%s built=%s\n", version, commit, buildDate)
+		fmt.Printf("gideondb %s commit=%s built=%s\n", version, commit, buildDate)
 		return
 	}
 	if *healthcheckURL != "" {

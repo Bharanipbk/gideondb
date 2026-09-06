@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 func TestClusterBackupPackageRestoresManifestBoundNodeArchives(t *testing.T) {

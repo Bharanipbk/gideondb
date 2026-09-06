@@ -13,12 +13,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/vectordb/vectordb/internal/collection"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/metadata"
-	"github.com/vectordb/vectordb/internal/storage"
-	"github.com/vectordb/vectordb/internal/storage/segmentfile"
-	"github.com/vectordb/vectordb/internal/wal"
+	"github.com/Bharanipbk/gideondb/internal/collection"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/storage"
+	"github.com/Bharanipbk/gideondb/internal/storage/segmentfile"
+	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
 var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)

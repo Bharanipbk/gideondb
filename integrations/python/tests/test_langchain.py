@@ -2,7 +2,7 @@ import sys
 import types
 import unittest
 
-from vectordb_integrations import create_langchain_vector_store
+from gideondb_integrations import create_langchain_vector_store
 
 
 class FakeDocument:

@@ -1,6 +1,6 @@
 # Ollama semantic-search integration
 
-The optional Python integration keeps embedding generation outside VectorDB's
+The optional Python integration keeps embedding generation outside GideonDB's
 storage core. `SemanticStore` accepts any object implementing the small
 `Embedder` protocol, while `OllamaEmbedder` provides a dependency-free adapter
 for Ollama's native `POST /api/embed` endpoint.
@@ -10,7 +10,7 @@ Ollama documents that the endpoint accepts either one string or an array in
 inputs, verifies response count and vector dimensions, rejects non-finite
 values, and limits responses to 16 MiB. See the official [Ollama embedding API](https://docs.ollama.com/api/embed).
 
-Start VectorDB and Ollama, pull an embedding model, create a matching
+Start GideonDB and Ollama, pull an embedding model, create a matching
 collection, and run the example:
 
 ```sh
@@ -30,11 +30,11 @@ creating the collection. Indexing and querying must use the same model.
 The generic integration surface is deliberately small:
 
 ```python
-store = SemanticStore(vectordb_client, "documents", my_embedder)
+store = SemanticStore(gideondb_client, "documents", my_embedder)
 store.upsert_documents([Document("id", "text", {"kind": "guide"})])
 results = store.search("recovery behavior", 5, filter={"kind": "guide"})
 ```
 
 Document text is stored in payload under `text`; metadata remains available
-for filters. Provider calls and VectorDB writes are separate operations, so
+for filters. Provider calls and GideonDB writes are separate operations, so
 applications should use stable IDs and retry each boundary deliberately.

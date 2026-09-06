@@ -5,9 +5,9 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/metadata"
-	"github.com/vectordb/vectordb/internal/segment"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/segment"
 )
 
 type Shard struct {

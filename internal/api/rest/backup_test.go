@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 type backupLeaderStatus struct{ fixedRaftStatus }
@@ -33,9 +33,9 @@ func TestAuthenticatedBackupFreezeCaptureAndRelease(t *testing.T) {
 	server := NewWithOptions(db, nil, Options{NodeID: nodeID, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 1})
 	call := func(method, path, operation string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, nil)
-		request.Header.Set("X-VectorDB-Cluster-ID", clusterID)
-		request.Header.Set("X-VectorDB-Target-Node-ID", nodeID)
-		request.Header.Set("X-VectorDB-Metadata-Epoch", "1")
+		request.Header.Set("X-GideonDB-Cluster-ID", clusterID)
+		request.Header.Set("X-GideonDB-Target-Node-ID", nodeID)
+		request.Header.Set("X-GideonDB-Metadata-Epoch", "1")
 		request.Header.Set(backupOperationHeader, operation)
 		response := httptest.NewRecorder()
 		server.Handler().ServeHTTP(response, request)

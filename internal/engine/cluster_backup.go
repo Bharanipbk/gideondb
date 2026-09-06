@@ -38,7 +38,7 @@ func CreateClusterBackup(destination string, manifest ClusterRecoveryPoint, arch
 	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(destination), ".vectordb-cluster-backup-*")
+	temporary, err := os.CreateTemp(filepath.Dir(destination), ".gideondb-cluster-backup-*")
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func RestoreClusterBackup(source, destination string) error {
 	if err := os.MkdirAll(parent, 0o750); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(parent, ".vectordb-cluster-restore-*")
+	staging, err := os.MkdirTemp(parent, ".gideondb-cluster-restore-*")
 	if err != nil {
 		return err
 	}

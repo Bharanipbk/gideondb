@@ -10,7 +10,7 @@ supports the documented v4 output dimensions, limits responses to 16 MiB, and
 rejects mismatched batches, inconsistent dimensions, and invalid numeric data.
 Custom servers require HTTPS, except for loopback development endpoints.
 
-Create a VectorDB collection whose dimension matches the model, then run:
+Create a GideonDB collection whose dimension matches the model, then run:
 
 ```sh
 export COHERE_API_KEY=...
@@ -21,5 +21,5 @@ PYTHONPATH=sdk/python/src:integrations/python \
   python3 examples/cohere_semantic_search.py
 ```
 
-Provider inference and VectorDB writes are separate failure boundaries. Use
+Provider inference and GideonDB writes are separate failure boundaries. Use
 stable record IDs and retry failed operations deliberately.

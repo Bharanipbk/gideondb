@@ -23,7 +23,7 @@ def create_langchain_vector_store(
     except ImportError as error:
         raise ImportError("LangChain integration requires the optional 'langchain-core' package") from error
 
-    class VectorDBVectorStore(VectorStore):
+    class GideonDBVectorStore(VectorStore):
         def __init__(self) -> None:
             self._client = client
             self._collection = collection
@@ -85,7 +85,7 @@ def create_langchain_vector_store(
             for result in results:
                 payload = result.get("payload") or {}
                 metadata = dict(result.get("metadata") or {})
-                metadata["vectordb_id"] = result.get("id", "")
+                metadata["gideondb_id"] = result.get("id", "")
                 documents.append((Document(page_content=str(payload.get("text", "")), metadata=metadata, id=result.get("id")), float(result["score"])))
             return documents
 
@@ -99,4 +99,4 @@ def create_langchain_vector_store(
                 self._client.delete(self._collection, record_id, namespace=delete_namespace)
             return True
 
-    return VectorDBVectorStore()
+    return GideonDBVectorStore()

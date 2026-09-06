@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 type distributedScrollCursor struct {
@@ -207,9 +207,9 @@ func (s *Server) remoteShardScroll(ctx context.Context, peer cluster.Peer, colle
 	if err != nil {
 		return nil, false, err
 	}
-	request.Header.Set("X-VectorDB-Cluster-ID", s.clusterID)
-	request.Header.Set("X-VectorDB-Target-Node-ID", peer.NodeID)
-	request.Header.Set("X-VectorDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}

@@ -1,6 +1,6 @@
 # Administration dashboard
 
-VectorDB embeds an experimental administration dashboard in the server binary.
+GideonDB embeds an experimental administration dashboard in the server binary.
 Open `/dashboard/` on a running node; for the default development address this
 is `http://127.0.0.1:6333/dashboard/`.
 

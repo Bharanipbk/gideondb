@@ -1,8 +1,8 @@
-# VectorDB runtime state
+# GideonDB runtime state
 /data/
 
 # Go build and test artifacts
-/vectordb
+/gideondb
 *.test
 *.out
 coverage.*

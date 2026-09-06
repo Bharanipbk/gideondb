@@ -2,10 +2,10 @@
 
 import os
 
-from vectordb import Client
-from vectordb_integrations import Document, HuggingFaceEmbedder, SemanticStore
+from gideondb import Client
+from gideondb_integrations import Document, HuggingFaceEmbedder, SemanticStore
 
-db = Client(os.getenv("VECTORDB_URL", "http://127.0.0.1:6333"), api_key=os.getenv("VECTORDB_API_KEY", ""))
+db = Client(os.getenv("GIDEONDB_URL", "http://127.0.0.1:6333"), api_key=os.getenv("GIDEONDB_API_KEY", ""))
 embedder = HuggingFaceEmbedder(
     os.getenv("HF_EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
     os.environ["HF_TOKEN"],
@@ -13,7 +13,7 @@ embedder = HuggingFaceEmbedder(
 store = SemanticStore(db, "documents", embedder)
 
 store.upsert_documents([
-    Document("quickstart", "VectorDB stores and searches dense vectors.", {"kind": "guide"}),
+    Document("quickstart", "GideonDB stores and searches dense vectors.", {"kind": "guide"}),
     Document("durability", "The write-ahead log provides durable recovery.", {"kind": "architecture"}),
 ])
 

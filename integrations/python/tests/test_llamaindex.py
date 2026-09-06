@@ -3,7 +3,7 @@ import sys
 import types
 import unittest
 
-from vectordb_integrations import create_llamaindex_vector_store
+from gideondb_integrations import create_llamaindex_vector_store
 
 
 class MetadataMode: NONE="none"

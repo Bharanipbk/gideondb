@@ -1,4 +1,4 @@
-"""Optional, provider-neutral integration helpers for VectorDB."""
+"""Optional, provider-neutral integration helpers for GideonDB."""
 
 from .embeddings import CohereEmbedder, Document, Embedder, HuggingFaceEmbedder, OllamaEmbedder, OpenAICompatibleEmbedder, SemanticStore
 from .langchain import create_langchain_vector_store

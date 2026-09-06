@@ -4,7 +4,7 @@ Configuration is resolved in this order, with later layers winning:
 
 1. Built-in defaults
 2. Strict JSON file selected by `-config`
-3. `VECTORDB_*` environment variables
+3. `GIDEONDB_*` environment variables
 4. Explicitly supplied CLI flags
 
 Omitted CLI flags do not overwrite file or environment values. Unknown JSON
@@ -19,12 +19,12 @@ modes, and incomplete TLS certificate/key pairs fail startup.
   "advertise_address": "node-a.internal:6333",
   "cluster_id": "1234567890abcdef1234567890abcdef",
   "peers": ["https://node-b.internal:6333", "https://node-c.internal:6333"],
-  "data_path": "/var/lib/vectordb",
+  "data_path": "/var/lib/gideondb",
   "wal_sync": "always",
   "checkpoint_every": 1000,
   "replication_factor": 2,
   "placement_capacity": 1,
-  "api_key_file": "/run/secrets/vectordb-api-key",
+  "api_key_file": "/run/secrets/gideondb-api-key",
   "allow_unauthenticated": false,
   "allow_insecure_http": false,
   "enable_static_routing": false,
@@ -37,27 +37,27 @@ modes, and incomplete TLS certificate/key pairs fail startup.
 Start with:
 
 ```bash
-vectordb -config /etc/vectordb/config.json
+gideondb -config /etc/gideondb/config.json
 ```
 
 ## Environment variables
 
-- `VECTORDB_HTTP_ADDRESS`
-- `VECTORDB_ADVERTISE_ADDRESS`
-- `VECTORDB_CLUSTER_ID`
-- `VECTORDB_PEERS` (comma-separated HTTP(S) base URLs)
-- `VECTORDB_DATA_PATH`
-- `VECTORDB_WAL_SYNC`
-- `VECTORDB_CHECKPOINT_EVERY`
-- `VECTORDB_REPLICATION_FACTOR`
-- `VECTORDB_PLACEMENT_CAPACITY`
-- `VECTORDB_API_KEY_FILE`
-- `VECTORDB_ALLOW_UNAUTHENTICATED`
-- `VECTORDB_ALLOW_INSECURE_HTTP`
-- `VECTORDB_ENABLE_STATIC_ROUTING`
-- `VECTORDB_TLS_CERT_FILE`
-- `VECTORDB_TLS_KEY_FILE`
-- `VECTORDB_TLS_CA_FILE`
+- `GIDEONDB_HTTP_ADDRESS`
+- `GIDEONDB_ADVERTISE_ADDRESS`
+- `GIDEONDB_CLUSTER_ID`
+- `GIDEONDB_PEERS` (comma-separated HTTP(S) base URLs)
+- `GIDEONDB_DATA_PATH`
+- `GIDEONDB_WAL_SYNC`
+- `GIDEONDB_CHECKPOINT_EVERY`
+- `GIDEONDB_REPLICATION_FACTOR`
+- `GIDEONDB_PLACEMENT_CAPACITY`
+- `GIDEONDB_API_KEY_FILE`
+- `GIDEONDB_ALLOW_UNAUTHENTICATED`
+- `GIDEONDB_ALLOW_INSECURE_HTTP`
+- `GIDEONDB_ENABLE_STATIC_ROUTING`
+- `GIDEONDB_TLS_CERT_FILE`
+- `GIDEONDB_TLS_KEY_FILE`
+- `GIDEONDB_TLS_CA_FILE`
 
 Environment booleans use Go boolean syntax such as `true` or `false`.
 

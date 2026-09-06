@@ -2,11 +2,11 @@
 
 import os
 
-from vectordb import Client
-from vectordb_integrations import CohereEmbedder, Document, SemanticStore
+from gideondb import Client
+from gideondb_integrations import CohereEmbedder, Document, SemanticStore
 
 dimension = os.getenv("COHERE_EMBED_DIMENSION", "")
-db = Client(os.getenv("VECTORDB_URL", "http://127.0.0.1:6333"), api_key=os.getenv("VECTORDB_API_KEY", ""))
+db = Client(os.getenv("GIDEONDB_URL", "http://127.0.0.1:6333"), api_key=os.getenv("GIDEONDB_API_KEY", ""))
 embedder = CohereEmbedder(
     os.getenv("COHERE_EMBED_MODEL", "embed-v4.0"),
     os.environ["COHERE_API_KEY"],
@@ -15,7 +15,7 @@ embedder = CohereEmbedder(
 store = SemanticStore(db, "documents", embedder)
 
 store.upsert_documents([
-    Document("quickstart", "VectorDB stores and searches dense vectors.", {"kind": "guide"}),
+    Document("quickstart", "GideonDB stores and searches dense vectors.", {"kind": "guide"}),
     Document("durability", "The write-ahead log provides durable recovery.", {"kind": "architecture"}),
 ])
 

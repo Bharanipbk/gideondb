@@ -7,9 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/api/rest"
-	"github.com/vectordb/vectordb/internal/engine"
-	"github.com/vectordb/vectordb/pkg/client"
+	"github.com/Bharanipbk/gideondb/internal/api/rest"
+	"github.com/Bharanipbk/gideondb/internal/engine"
+	"github.com/Bharanipbk/gideondb/pkg/client"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -33,8 +33,8 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 	}
 	defer db.Close()
 	const apiKey = "0123456789abcdef"
-	httpClient := inMemoryHTTPClient(rest.NewWithOptions(db, nil, rest.Options{APIKey: apiKey, NodeID: "11111111111111111111111111111111", ClusterID: "22222222222222222222222222222222", AdvertiseAddress: "vectordb.test:6333"}).Handler())
-	sdk, err := client.New("http://vectordb.test", client.Options{APIKey: apiKey, HTTPClient: httpClient})
+	httpClient := inMemoryHTTPClient(rest.NewWithOptions(db, nil, rest.Options{APIKey: apiKey, NodeID: "11111111111111111111111111111111", ClusterID: "22222222222222222222222222222222", AdvertiseAddress: "gideondb.test:6333"}).Handler())
+	sdk, err := client.New("http://gideondb.test", client.Options{APIKey: apiKey, HTTPClient: httpClient})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 }
 
 func TestClientScrollRejectsInvalidLimit(t *testing.T) {
-	sdk, err := client.New("http://vectordb.test", client.Options{})
+	sdk, err := client.New("http://gideondb.test", client.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestClientDistributedEndpointsAndValidation(t *testing.T) {
 		NodeID: "11111111111111111111111111111111", ClusterID: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		AdvertiseAddress: "node-a:6333", MetadataEpoch: 1,
 	}).Handler())
-	sdk, err := client.New("http://vectordb.test", client.Options{HTTPClient: httpClient})
+	sdk, err := client.New("http://gideondb.test", client.Options{HTTPClient: httpClient})
 	if err != nil {
 		t.Fatal(err)
 	}

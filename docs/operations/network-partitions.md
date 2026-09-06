@@ -1,6 +1,6 @@
 # Network partition behavior
 
-VectorDB metadata uses majority Raft quorum. In a three-voter cluster, the
+GideonDB metadata uses majority Raft quorum. In a three-voter cluster, the
 two-node side of a partition can elect a leader and commit metadata changes.
 An isolated voter cannot commit placement, membership, or capacity changes and
 steps down when it cannot renew quorum.

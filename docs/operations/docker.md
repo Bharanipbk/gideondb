@@ -3,11 +3,11 @@
 Build the multi-stage image:
 
 ```bash
-make docker IMAGE=vectordb:dev
+make docker IMAGE=gideondb:dev
 ```
 
 The runtime image is distroless, statically linked, and runs as UID/GID 65532.
-It contains only the server binary, an owned `/var/lib/vectordb` directory, and
+It contains only the server binary, an owned `/var/lib/gideondb` directory, and
 CA/runtime files supplied by the distroless base. The built-in health check uses
 the binary's own HTTP health client, so no shell or curl package is required.
 
@@ -15,8 +15,8 @@ The secure default binds to container loopback. For explicitly unauthenticated
 local development exposure:
 
 ```bash
-docker run --rm -p 6333:6333 -v vectordb-data:/var/lib/vectordb \
-  vectordb:dev -data-path /var/lib/vectordb \
+docker run --rm -p 6333:6333 -v gideondb-data:/var/lib/gideondb \
+  gideondb:dev -data-path /var/lib/gideondb \
   -http-address 0.0.0.0:6333 -allow-unauthenticated
 ```
 

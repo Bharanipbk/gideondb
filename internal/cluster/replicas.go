@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 type ShardReplicaPlacement struct {

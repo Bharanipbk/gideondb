@@ -1,4 +1,4 @@
-package io.vectordb.client;
+package io.gideondb.client;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -13,24 +13,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Dependency-free Java 17 client for VectorDB's versioned HTTP API. */
-public final class VectorDBClient {
+/** Dependency-free Java 17 client for GideonDB's versioned HTTP API. */
+public final class GideonDBClient {
     private static final int MAX_RESPONSE_BYTES = 16 << 20;
     private final URI origin;
     private final String apiKey;
     private final Duration timeout;
     private final Transport transport;
 
-    public VectorDBClient(String baseUrl) {
+    public GideonDBClient(String baseUrl) {
         this(baseUrl, "", Duration.ofSeconds(30));
     }
 
-    public VectorDBClient(String baseUrl, String apiKey, Duration timeout) {
+    public GideonDBClient(String baseUrl, String apiKey, Duration timeout) {
         this(baseUrl, apiKey, timeout, defaultTransport(timeout));
     }
 
     /** Advanced constructor for custom transports, testing, and controlled runtimes. */
-    public VectorDBClient(String baseUrl, String apiKey, Duration timeout, Transport transport) {
+    public GideonDBClient(String baseUrl, String apiKey, Duration timeout, Transport transport) {
         URI parsed;
         try { parsed = URI.create(Objects.requireNonNull(baseUrl).trim()); }
         catch (RuntimeException e) { throw new IllegalArgumentException("baseUrl must be an HTTP(S) origin", e); }
@@ -205,7 +205,7 @@ public final class VectorDBClient {
         private static final long serialVersionUID = 1L;
         private final int statusCode; private final String code;
         public ApiException(int statusCode, String code, String message) {
-            super("vectordb: " + (code.isBlank() ? "HTTP " + statusCode : code + " (HTTP " + statusCode + "): " + message));
+            super("gideondb: " + (code.isBlank() ? "HTTP " + statusCode : code + " (HTTP " + statusCode + "): " + message));
             this.statusCode = statusCode; this.code = code;
         }
         public int statusCode() { return statusCode; }
@@ -213,8 +213,8 @@ public final class VectorDBClient {
     }
     public static final class TransportException extends RuntimeException {
         private static final long serialVersionUID = 1L;
-        public TransportException(String message) { super("vectordb: " + message); }
-        public TransportException(String message, Throwable cause) { super("vectordb: " + message, cause); }
+        public TransportException(String message) { super("gideondb: " + message); }
+        public TransportException(String message, Throwable cause) { super("gideondb: " + message, cause); }
     }
 
     private static final class JdkTransport implements Transport {
@@ -222,7 +222,7 @@ public final class VectorDBClient {
         private JdkTransport(HttpClient client) { this.client = client; }
         public Response send(Request request) throws IOException, InterruptedException {
             HttpRequest.Builder builder = HttpRequest.newBuilder(request.uri()).timeout(request.timeout())
-                    .header("Accept", "application/json").header("X-VectorDB-Client", "java/dev");
+                    .header("Accept", "application/json").header("X-GideonDB-Client", "java/dev");
             if (!request.apiKey().isBlank()) builder.header("Authorization", "Bearer " + request.apiKey());
             if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
             else builder.header("Content-Type", "application/json").method(request.method(), HttpRequest.BodyPublishers.ofString(request.body()));

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 func TestRecentLogsAreAuthenticatedBoundedAndSanitized(t *testing.T) {
@@ -71,7 +71,7 @@ func TestClusterLogsMergePeersAndReportPartialFailures(t *testing.T) {
 	fail := false
 	peer := cluster.Peer{SeedURL: "http://peer-b:6333", NodeID: remoteID, AdvertiseAddress: "peer-b:6333", Healthy: true}
 	client := &http.Client{Transport: restRoundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.Header.Get("X-VectorDB-Target-Node-ID") != remoteID || request.Header.Get("Authorization") != "Bearer 0123456789abcdef" {
+		if request.Header.Get("X-GideonDB-Target-Node-ID") != remoteID || request.Header.Get("Authorization") != "Bearer 0123456789abcdef" {
 			t.Errorf("missing peer authentication headers")
 		}
 		if fail {

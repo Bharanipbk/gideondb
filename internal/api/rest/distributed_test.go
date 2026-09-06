@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/cluster"
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
 type restRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -55,7 +55,7 @@ func TestDistributedSearchFanoutFencingAndPartialFailures(t *testing.T) {
 	var calls atomic.Int64
 	client := &http.Client{Transport: restRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 		calls.Add(1)
-		for name, want := range map[string]string{"Authorization": "Bearer 0123456789abcdef", "X-VectorDB-Cluster-ID": clusterID, "X-VectorDB-Target-Node-ID": remoteNode, "X-VectorDB-Metadata-Epoch": "7"} {
+		for name, want := range map[string]string{"Authorization": "Bearer 0123456789abcdef", "X-GideonDB-Cluster-ID": clusterID, "X-GideonDB-Target-Node-ID": remoteNode, "X-GideonDB-Metadata-Epoch": "7"} {
 			if got := request.Header.Get(name); got != want {
 				return nil, fmt.Errorf("%s=%q, want %q", name, got, want)
 			}
@@ -156,7 +156,7 @@ func TestDistributedBatchWriteOutcomesAndValidation(t *testing.T) {
 		if ambiguous.Load() {
 			return nil, errors.New("response lost")
 		}
-		if request.Header.Get("X-VectorDB-Metadata-Epoch") != "9" || request.Header.Get("X-VectorDB-Target-Node-ID") != remoteNode {
+		if request.Header.Get("X-GideonDB-Metadata-Epoch") != "9" || request.Header.Get("X-GideonDB-Target-Node-ID") != remoteNode {
 			return nil, errors.New("missing write fence")
 		}
 		var incoming internalShardBatchRequest

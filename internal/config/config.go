@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/vectordb/vectordb/internal/wal"
+	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
 type Config struct {
@@ -62,47 +62,47 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 		name   string
 		target *string
 	}{
-		{"VECTORDB_HTTP_ADDRESS", &value.HTTPAddress}, {"VECTORDB_DATA_PATH", &value.DataPath},
-		{"VECTORDB_ADVERTISE_ADDRESS", &value.AdvertiseAddress},
-		{"VECTORDB_CLUSTER_ID", &value.ClusterID},
-		{"VECTORDB_WAL_SYNC", &value.WALSync}, {"VECTORDB_API_KEY_FILE", &value.APIKeyFile},
-		{"VECTORDB_TLS_CERT_FILE", &value.TLSCertFile}, {"VECTORDB_TLS_KEY_FILE", &value.TLSKeyFile}, {"VECTORDB_TLS_CA_FILE", &value.TLSCAFile},
+		{"GIDEONDB_HTTP_ADDRESS", &value.HTTPAddress}, {"GIDEONDB_DATA_PATH", &value.DataPath},
+		{"GIDEONDB_ADVERTISE_ADDRESS", &value.AdvertiseAddress},
+		{"GIDEONDB_CLUSTER_ID", &value.ClusterID},
+		{"GIDEONDB_WAL_SYNC", &value.WALSync}, {"GIDEONDB_API_KEY_FILE", &value.APIKeyFile},
+		{"GIDEONDB_TLS_CERT_FILE", &value.TLSCertFile}, {"GIDEONDB_TLS_KEY_FILE", &value.TLSKeyFile}, {"GIDEONDB_TLS_CA_FILE", &value.TLSCAFile},
 	}
 	for _, item := range strings {
 		if raw, ok := getenv(item.name); ok {
 			*item.target = raw
 		}
 	}
-	if raw, ok := getenv("VECTORDB_CHECKPOINT_EVERY"); ok {
+	if raw, ok := getenv("GIDEONDB_CHECKPOINT_EVERY"); ok {
 		parsed, err := strconv.ParseUint(raw, 10, 64)
 		if err != nil {
-			return Config{}, fmt.Errorf("VECTORDB_CHECKPOINT_EVERY: %w", err)
+			return Config{}, fmt.Errorf("GIDEONDB_CHECKPOINT_EVERY: %w", err)
 		}
 		value.CheckpointEvery = parsed
 	}
-	if raw, ok := getenv("VECTORDB_REPLICATION_FACTOR"); ok {
+	if raw, ok := getenv("GIDEONDB_REPLICATION_FACTOR"); ok {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil {
-			return Config{}, fmt.Errorf("VECTORDB_REPLICATION_FACTOR: %w", err)
+			return Config{}, fmt.Errorf("GIDEONDB_REPLICATION_FACTOR: %w", err)
 		}
 		value.ReplicationFactor = parsed
 	}
-	if raw, ok := getenv("VECTORDB_PLACEMENT_CAPACITY"); ok {
+	if raw, ok := getenv("GIDEONDB_PLACEMENT_CAPACITY"); ok {
 		parsed, err := strconv.ParseUint(raw, 10, 32)
 		if err != nil {
-			return Config{}, fmt.Errorf("VECTORDB_PLACEMENT_CAPACITY: %w", err)
+			return Config{}, fmt.Errorf("GIDEONDB_PLACEMENT_CAPACITY: %w", err)
 		}
 		value.PlacementCapacity = uint32(parsed)
 	}
-	if raw, ok := getenv("VECTORDB_PEERS"); ok {
+	if raw, ok := getenv("GIDEONDB_PEERS"); ok {
 		value.Peers = splitPeers(raw)
 	}
 	booleans := []struct {
 		name   string
 		target *bool
 	}{
-		{"VECTORDB_ALLOW_UNAUTHENTICATED", &value.AllowUnauthenticated}, {"VECTORDB_ALLOW_INSECURE_HTTP", &value.AllowInsecureHTTP},
-		{"VECTORDB_ENABLE_STATIC_ROUTING", &value.EnableStaticRouting},
+		{"GIDEONDB_ALLOW_UNAUTHENTICATED", &value.AllowUnauthenticated}, {"GIDEONDB_ALLOW_INSECURE_HTTP", &value.AllowInsecureHTTP},
+		{"GIDEONDB_ENABLE_STATIC_ROUTING", &value.EnableStaticRouting},
 	}
 	for _, item := range booleans {
 		if raw, ok := getenv(item.name); ok {

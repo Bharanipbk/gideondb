@@ -1,22 +1,22 @@
 const MAX_RESPONSE_BYTES = 16 << 20;
 
-export class VectorDBAPIError extends Error {
+export class GideonDBAPIError extends Error {
   constructor(statusCode, code = "", message = "") {
-    super(code ? `vectordb: ${code} (HTTP ${statusCode}): ${message}` : `vectordb: HTTP ${statusCode}`);
-    this.name = "VectorDBAPIError";
+    super(code ? `gideondb: ${code} (HTTP ${statusCode}): ${message}` : `gideondb: HTTP ${statusCode}`);
+    this.name = "GideonDBAPIError";
     this.statusCode = statusCode;
     this.code = code;
   }
 }
 
-export class VectorDBTransportError extends Error {
+export class GideonDBTransportError extends Error {
   constructor(message, options) {
-    super(`vectordb: ${message}`, options);
-    this.name = "VectorDBTransportError";
+    super(`gideondb: ${message}`, options);
+    this.name = "GideonDBTransportError";
   }
 }
 
-export class VectorDBClient {
+export class GideonDBClient {
   constructor(baseURL, options = {}) {
     let parsed;
     try {
@@ -108,7 +108,7 @@ export class VectorDBClient {
   }
 
   async request(method, path, body, options = {}) {
-    const headers = { Accept: "application/json", "X-VectorDB-Client": "typescript/dev" };
+    const headers = { Accept: "application/json", "X-GideonDB-Client": "typescript/dev" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
     const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
@@ -122,19 +122,19 @@ export class VectorDBClient {
         signal,
       });
     } catch (error) {
-      throw new VectorDBTransportError("request failed", { cause: error });
+      throw new GideonDBTransportError("request failed", { cause: error });
     }
     const payload = await readBounded(response);
     if (!response.ok) {
       let detail = {};
       try { detail = payload.length ? JSON.parse(new TextDecoder().decode(payload)) : {}; } catch {}
-      throw new VectorDBAPIError(response.status, detail.code, detail.message);
+      throw new GideonDBAPIError(response.status, detail.code, detail.message);
     }
     if (response.status === 204 || payload.length === 0) return undefined;
     try {
       return JSON.parse(new TextDecoder().decode(payload));
     } catch (error) {
-      throw new VectorDBTransportError("response is not valid JSON", { cause: error });
+      throw new GideonDBTransportError("response is not valid JSON", { cause: error });
     }
   }
 }
@@ -167,13 +167,13 @@ async function readBounded(response) {
       length += value.byteLength;
       if (length > MAX_RESPONSE_BYTES) {
         await reader.cancel();
-        throw new VectorDBTransportError("response exceeds 16 MiB");
+        throw new GideonDBTransportError("response exceeds 16 MiB");
       }
       chunks.push(value);
     }
   } catch (error) {
-    if (error instanceof VectorDBTransportError) throw error;
-    throw new VectorDBTransportError("could not read response", { cause: error });
+    if (error instanceof GideonDBTransportError) throw error;
+    throw new GideonDBTransportError("could not read response", { cause: error });
   }
   const result = new Uint8Array(length);
   let offset = 0;

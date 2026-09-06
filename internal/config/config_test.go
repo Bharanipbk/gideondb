@@ -15,7 +15,7 @@ func TestLayeredConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	environment := map[string]string{"VECTORDB_HTTP_ADDRESS": "127.0.0.1:8000", "VECTORDB_CHECKPOINT_EVERY": "75", "VECTORDB_REPLICATION_FACTOR": "2", "VECTORDB_PLACEMENT_CAPACITY": "3", "VECTORDB_ALLOW_INSECURE_HTTP": "false", "VECTORDB_ENABLE_STATIC_ROUTING": "true", "VECTORDB_PEERS": "http://two:6333, http://three:6333"}
+	environment := map[string]string{"GIDEONDB_HTTP_ADDRESS": "127.0.0.1:8000", "GIDEONDB_CHECKPOINT_EVERY": "75", "GIDEONDB_REPLICATION_FACTOR": "2", "GIDEONDB_PLACEMENT_CAPACITY": "3", "GIDEONDB_ALLOW_INSECURE_HTTP": "false", "GIDEONDB_ENABLE_STATIC_ROUTING": "true", "GIDEONDB_PEERS": "http://two:6333, http://three:6333"}
 	loaded, err = ApplyEnv(loaded, func(name string) (string, bool) { value, ok := environment[name]; return value, ok })
 	if err != nil {
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestReplicationFactorValidation(t *testing.T) {
 		t.Fatal("expected zero replication factor rejection")
 	}
 	if _, err := ApplyEnv(Default(), func(name string) (string, bool) {
-		if name == "VECTORDB_REPLICATION_FACTOR" {
+		if name == "GIDEONDB_REPLICATION_FACTOR" {
 			return "invalid", true
 		}
 		return "", false
@@ -64,7 +64,7 @@ func TestPlacementCapacityValidation(t *testing.T) {
 		t.Fatal("expected excessive placement capacity rejection")
 	}
 	if _, err := ApplyEnv(Default(), func(name string) (string, bool) {
-		if name == "VECTORDB_PLACEMENT_CAPACITY" {
+		if name == "GIDEONDB_PLACEMENT_CAPACITY" {
 			return "invalid", true
 		}
 		return "", false
@@ -82,7 +82,7 @@ func TestStrictConfigAndEnvironmentValidation(t *testing.T) {
 		t.Fatal("expected unknown field rejection")
 	}
 	if _, err := ApplyEnv(Default(), func(name string) (string, bool) {
-		if name == "VECTORDB_CHECKPOINT_EVERY" {
+		if name == "GIDEONDB_CHECKPOINT_EVERY" {
 			return "invalid", true
 		}
 		return "", false

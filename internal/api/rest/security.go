@@ -9,7 +9,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/vectordb/vectordb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
 )
 
 type PeerProvider interface{ Peers() []cluster.Peer }
@@ -98,13 +98,13 @@ func (s *Server) protected(next http.HandlerFunc) http.HandlerFunc {
 		const prefix = "Bearer "
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, prefix) {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="vectordb"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="gideondb"`)
 			writeJSON(w, http.StatusUnauthorized, apiError{Code: "unauthorized", Message: "authentication required"})
 			return
 		}
 		provided := sha256.Sum256([]byte(strings.TrimPrefix(header, prefix)))
 		if subtle.ConstantTimeCompare(provided[:], s.apiKeyHash) != 1 {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="vectordb"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="gideondb"`)
 			writeJSON(w, http.StatusUnauthorized, apiError{Code: "unauthorized", Message: "authentication required"})
 			return
 		}

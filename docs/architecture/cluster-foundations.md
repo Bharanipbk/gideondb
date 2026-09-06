@@ -17,12 +17,12 @@ duplicate node IDs when a backup seeds another machine.
 Authenticated clients can call `GET /v1/node` to retrieve the stable node ID,
 configured advertised address, process start time, and current `standalone` or `static-discovery`
 mode. `-advertise-address` defaults to the HTTP listen address and can also be
-set through `advertise_address` or `VECTORDB_ADVERTISE_ADDRESS`.
+set through `advertise_address` or `GIDEONDB_ADVERTISE_ADDRESS`.
 
 ## Static peer discovery
 
 Operators may configure up to 256 HTTP(S) peer base URLs through `peers`,
-`VECTORDB_PEERS`, or `-peers`. Every five seconds the node concurrently calls
+`GIDEONDB_PEERS`, or `-peers`. Every five seconds the node concurrently calls
 each peer's authenticated `GET /v1/node` endpoint with a three-second client
 timeout and a 1 MiB strict response limit. The view records node ID, advertised
 address, health, last check, last successful observation, and the latest error.
@@ -42,7 +42,7 @@ Epoch 1 is explicitly a local bootstrap epoch. Later epochs are committed by
 the metadata Raft group and exposed through protocol fencing.
 
 Authenticated clients can inspect `GET /v1/cluster/peers`; Prometheus output
-includes `vectordb_cluster_peer_healthy`. All nodes currently use the same bearer
+includes `gideondb_cluster_peer_healthy`. All nodes currently use the same bearer
 key, and HTTPS peers must use certificates trusted by the system trust store.
 
 ## Thresholded node health
@@ -59,8 +59,8 @@ ordinary liveness failures.
 `last_seen` advances only on a valid response, while `last_checked` advances on
 every attempt and `last_transition` changes only when state changes. The REST
 membership view exposes the state and counters. Metrics retain the binary
-`vectordb_cluster_peer_healthy` gauge and add
-`vectordb_cluster_peer_state{state=...}`.
+`gideondb_cluster_peer_healthy` gauge and add
+`gideondb_cluster_peer_state{state=...}`.
 
 This view is observational only. It does not provide membership epochs, quorum
 failure detection, placement, consensus, replication, or distributed routing.
@@ -85,8 +85,8 @@ fixed modulo hash and is independent of physical membership.
 
 The authenticated internal endpoint
 `POST /v1/internal/shards/{collection}/{shard}/search` searches exactly one
-logical shard. Requests must carry `X-VectorDB-Cluster-ID`,
-`X-VectorDB-Target-Node-ID`, and `X-VectorDB-Metadata-Epoch`. Validation occurs
+logical shard. Requests must carry `X-GideonDB-Cluster-ID`,
+`X-GideonDB-Target-Node-ID`, and `X-GideonDB-Metadata-Epoch`. Validation occurs
 before request-body decoding or shard access. Cluster and target mismatches and
 stale epochs return typed `409` errors; a future epoch returns `503`, indicating
 that the receiver cannot safely serve the caller's newer metadata view. Every
@@ -152,13 +152,13 @@ node computes them or the order in which peers and collections were discovered.
 the healthy state and reports the exact local epoch and all three fingerprints.
 It returns specific mismatch reasons. `authoritative` becomes true only when
 static routing is enabled and the view is ready.
-`vectordb_cluster_view_ready` exposes the same decision as a gauge. Readiness is
+`gideondb_cluster_view_ready` exposes the same decision as a gauge. Readiness is
 a necessary activation precondition, not consensus: matching views do not grant
 leadership or make a minority partition safe for writes.
 
 ## Opt-in static placement activation
 
-`enable_static_routing`, `VECTORDB_ENABLE_STATIC_ROUTING`, or
+`enable_static_routing`, `GIDEONDB_ENABLE_STATIC_ROUTING`, or
 `-enable-static-routing` activates ownership for the immutable bootstrap epoch.
 Every distributed coordinator request then requires a ready cluster view;
 otherwise it returns `503 cluster_view_not_ready`. Internal shard reads and

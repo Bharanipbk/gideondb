@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/vectordb/vectordb/internal/cluster"
+	"github.com/Bharanipbk/gideondb/internal/cluster"
 )
 
 type raftLeadershipTransfer interface {
@@ -40,7 +40,7 @@ func (s *Server) raftAppendEntries(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_raft_request", Message: err.Error()})
 		return
 	}
-	w.Header().Set("X-VectorDB-Metadata-Epoch", formatUint(s.currentMetadataEpoch()))
+	w.Header().Set("X-GideonDB-Metadata-Epoch", formatUint(s.currentMetadataEpoch()))
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -57,7 +57,7 @@ func (s *Server) raftInstallSnapshot(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_raft_snapshot", Message: err.Error()})
 		return
 	}
-	w.Header().Set("X-VectorDB-Metadata-Epoch", formatUint(s.currentMetadataEpoch()))
+	w.Header().Set("X-GideonDB-Metadata-Epoch", formatUint(s.currentMetadataEpoch()))
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -87,7 +87,7 @@ func (s *Server) validateRaftEnvelope(w http.ResponseWriter, r *http.Request) bo
 		writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "raft_unavailable", Message: "metadata Raft is not configured"})
 		return false
 	}
-	if r.Header.Get("X-VectorDB-Cluster-ID") != s.clusterID {
+	if r.Header.Get("X-GideonDB-Cluster-ID") != s.clusterID {
 		writeJSON(w, http.StatusConflict, apiError{Code: "cluster_mismatch", Message: "Raft request cluster ID does not match this node"})
 		return false
 	}

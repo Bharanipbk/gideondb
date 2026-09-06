@@ -16,7 +16,7 @@ def create_llamaindex_vector_store(client: Any, collection: str, *, namespace: s
     except ImportError as error:
         raise ImportError("LlamaIndex integration requires the optional 'llama-index-core' package") from error
 
-    class VectorDBVectorStore:
+    class GideonDBVectorStore:
         stores_text = True
         is_embedding_query = True
 
@@ -97,4 +97,4 @@ def create_llamaindex_vector_store(client: Any, collection: str, *, namespace: s
         async def aquery(self, query: Any, **kwargs: Any) -> Any:
             return self.query(query, **kwargs)
 
-    return VectorDBVectorStore()
+    return GideonDBVectorStore()

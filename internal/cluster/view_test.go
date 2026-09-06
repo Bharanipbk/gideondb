@@ -3,7 +3,7 @@ package cluster
 import (
 	"testing"
 
-	"github.com/vectordb/vectordb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/core"
 )
 
 func TestViewDigestsConvergeAcrossNodeVantagePoints(t *testing.T) {

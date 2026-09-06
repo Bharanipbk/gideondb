@@ -1,4 +1,4 @@
-//! Synchronous Rust client for VectorDB's experimental REST API.
+//! Synchronous Rust client for GideonDB's experimental REST API.
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
@@ -22,18 +22,18 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidInput(message) => write!(f, "vectordb: {message}"),
-            Self::Transport(message) => write!(f, "vectordb: request failed: {message}"),
+            Self::InvalidInput(message) => write!(f, "gideondb: {message}"),
+            Self::Transport(message) => write!(f, "gideondb: request failed: {message}"),
             Self::Api {
                 status,
                 code,
                 message,
             } if !code.is_empty() => {
-                write!(f, "vectordb: {code} (HTTP {status}): {message}")
+                write!(f, "gideondb: {code} (HTTP {status}): {message}")
             }
-            Self::Api { status, .. } => write!(f, "vectordb: HTTP {status}"),
-            Self::InvalidResponse(message) => write!(f, "vectordb: invalid response: {message}"),
-            Self::ResponseTooLarge => write!(f, "vectordb: response exceeds 16 MiB"),
+            Self::Api { status, .. } => write!(f, "gideondb: HTTP {status}"),
+            Self::InvalidResponse(message) => write!(f, "gideondb: invalid response: {message}"),
+            Self::ResponseTooLarge => write!(f, "gideondb: response exceeds 16 MiB"),
         }
     }
 }
@@ -538,7 +538,7 @@ impl Transport for UreqTransport {
             .method(request.method)
             .uri(&request.url)
             .header("Accept", "application/json")
-            .header("X-VectorDB-Client", "rust/dev");
+            .header("X-GideonDB-Client", "rust/dev");
         if !request.api_key.is_empty() {
             builder = builder.header("Authorization", format!("Bearer {}", request.api_key));
         }

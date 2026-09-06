@@ -1,16 +1,16 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: vectordb
+  name: gideondb
 data:
-  VECTORDB_HTTP_ADDRESS: "0.0.0.0:6333"
-  VECTORDB_DATA_PATH: /var/lib/vectordb
-  VECTORDB_WAL_SYNC: always
-  VECTORDB_CHECKPOINT_EVERY: "1000"
-  VECTORDB_REPLICATION_FACTOR: "3"
-  VECTORDB_PLACEMENT_CAPACITY: "1"
-  VECTORDB_ENABLE_STATIC_ROUTING: "true"
-  VECTORDB_PEERS: >-
-    https://vectordb-0.vectordb-headless.vectordb.svc.cluster.local:6333,
-    https://vectordb-1.vectordb-headless.vectordb.svc.cluster.local:6333,
-    https://vectordb-2.vectordb-headless.vectordb.svc.cluster.local:6333
+  GIDEONDB_HTTP_ADDRESS: "0.0.0.0:6333"
+  GIDEONDB_DATA_PATH: /var/lib/gideondb
+  GIDEONDB_WAL_SYNC: always
+  GIDEONDB_CHECKPOINT_EVERY: "1000"
+  GIDEONDB_REPLICATION_FACTOR: "3"
+  GIDEONDB_PLACEMENT_CAPACITY: "1"
+  GIDEONDB_ENABLE_STATIC_ROUTING: "true"
+  GIDEONDB_PEERS: >-
+    https://gideondb-0.gideondb-headless.gideondb.svc.cluster.local:6333,
+    https://gideondb-1.gideondb-headless.gideondb.svc.cluster.local:6333,
+    https://gideondb-2.gideondb-headless.gideondb.svc.cluster.local:6333

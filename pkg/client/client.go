@@ -1,5 +1,5 @@
 // Package client provides a dependency-free Go client for the experimental
-// VectorDB REST API.
+// GideonDB REST API.
 package client
 
 import (
@@ -38,9 +38,9 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	if e.Code == "" {
-		return fmt.Sprintf("vectordb: HTTP %d", e.StatusCode)
+		return fmt.Sprintf("gideondb: HTTP %d", e.StatusCode)
 	}
-	return fmt.Sprintf("vectordb: %s (HTTP %d): %s", e.Code, e.StatusCode, e.Message)
+	return fmt.Sprintf("gideondb: %s (HTTP %d): %s", e.Code, e.StatusCode, e.Message)
 }
 
 type CollectionConfig struct {
@@ -137,14 +137,14 @@ type DistributedWriteResponse struct {
 func New(baseURL string, options Options) (*Client, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return nil, fmt.Errorf("vectordb: base URL must be an HTTP(S) origin")
+		return nil, fmt.Errorf("gideondb: base URL must be an HTTP(S) origin")
 	}
 	parsed.Path = ""
 	transport := options.HTTPClient
 	if transport == nil {
 		transport = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Client{baseURL: parsed, http: transport, apiKey: options.APIKey, userAgent: "vectordb-go/dev"}, nil
+	return &Client{baseURL: parsed, http: transport, apiKey: options.APIKey, userAgent: "gideondb-go/dev"}, nil
 }
 
 func (c *Client) Health(ctx context.Context) error {
@@ -215,7 +215,7 @@ func (c *Client) DistributedScroll(ctx context.Context, collection string, optio
 
 func (c *Client) scroll(ctx context.Context, basePath string, options ScrollOptions) (RecordPage, error) {
 	if options.Limit < 0 || options.Limit > 200 {
-		return RecordPage{}, fmt.Errorf("vectordb: scroll limit must be between 1 and 200 when set")
+		return RecordPage{}, fmt.Errorf("gideondb: scroll limit must be between 1 and 200 when set")
 	}
 	query := url.Values{}
 	if options.Namespace != "" {
@@ -296,13 +296,13 @@ func (c *Client) do(ctx context.Context, method, path string, requestBody, respo
 	if requestBody != nil {
 		payload, err := json.Marshal(requestBody)
 		if err != nil {
-			return fmt.Errorf("vectordb: encode request: %w", err)
+			return fmt.Errorf("gideondb: encode request: %w", err)
 		}
 		body = bytes.NewReader(payload)
 	}
 	request, err := http.NewRequestWithContext(ctx, method, c.baseURL.String()+path, body)
 	if err != nil {
-		return fmt.Errorf("vectordb: create request: %w", err)
+		return fmt.Errorf("gideondb: create request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", c.userAgent)
@@ -314,15 +314,15 @@ func (c *Client) do(ctx context.Context, method, path string, requestBody, respo
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return fmt.Errorf("vectordb: request: %w", err)
+		return fmt.Errorf("gideondb: request: %w", err)
 	}
 	defer response.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("vectordb: read response: %w", err)
+		return fmt.Errorf("gideondb: read response: %w", err)
 	}
 	if len(payload) > maxResponseBytes {
-		return fmt.Errorf("vectordb: response exceeds %d bytes", maxResponseBytes)
+		return fmt.Errorf("gideondb: response exceeds %d bytes", maxResponseBytes)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		apiErr := &APIError{StatusCode: response.StatusCode}
@@ -333,10 +333,10 @@ func (c *Client) do(ctx context.Context, method, path string, requestBody, respo
 		return nil
 	}
 	if len(payload) == 0 {
-		return errors.New("vectordb: successful response has no body")
+		return errors.New("gideondb: successful response has no body")
 	}
 	if err := json.Unmarshal(payload, responseBody); err != nil {
-		return fmt.Errorf("vectordb: decode response: %w", err)
+		return fmt.Errorf("gideondb: decode response: %w", err)
 	}
 	return nil
 }

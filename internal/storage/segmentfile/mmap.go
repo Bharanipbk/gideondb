@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"unsafe"
 
-	"github.com/vectordb/vectordb/internal/core"
-	"github.com/vectordb/vectordb/internal/distance"
+	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/distance"
 )
 
 // MappedVectors owns a read-only mmap of a validated VVEC file. Call Close
