@@ -33,7 +33,8 @@ The log deliberately excludes raw paths, query strings, bodies, collection
 names, namespaces, vector IDs, vectors, metadata, and payloads.
 
 Production nodes also append this same sanitized event shape to a mode-`0600`,
-bounded JSON-lines file in the data directory. The latest 4,096 entries survive
+bounded JSON-lines file in the data directory. The latest configured entries
+(4,096 by default; 256–1,000,000 via `-audit-retention`) survive
 restart; compaction is atomic. `/v1/cluster/logs` uses authenticated and
 metadata-epoch-fenced peer requests to merge recent entries and reports
 unavailable nodes explicitly.

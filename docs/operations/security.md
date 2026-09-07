@@ -59,8 +59,14 @@ validate peer servers, while every inbound `/v1/internal/*` route requires a
 verified client certificate. Responses include `nosniff`, frame denial, no-referrer, and
 `no-store` headers.
 
+Certificate, private-key, and CA files are loaded again for every new TLS
+handshake, so atomic secret replacement takes effect without restart. Existing
+connections retain their negotiated identity. The server certificate is also
+the outbound node identity by default; set `-node-tls-cert-file` and
+`-node-tls-key-file` to use a distinct client certificate for cluster traffic.
+Keep old and new issuers in the CA bundle during an issuer rotation.
+
 ## Current limitations
 
-Audit retention, certificate reload, distinct client/server node identities,
-and automated certificate management remain pending. Rate limits are
-configurable per credential or client address.
+Automated certificate management remains pending. Audit retention, rate limits,
+certificate reload, and separate server/client node identities are supported.

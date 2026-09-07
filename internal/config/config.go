@@ -31,12 +31,15 @@ type Config struct {
 	TLSCertFile          string   `json:"tls_cert_file,omitempty"`
 	TLSKeyFile           string   `json:"tls_key_file,omitempty"`
 	TLSCAFile            string   `json:"tls_ca_file,omitempty"`
+	NodeTLSCertFile      string   `json:"node_tls_cert_file,omitempty"`
+	NodeTLSKeyFile       string   `json:"node_tls_key_file,omitempty"`
 	RateLimitPerSecond   int      `json:"rate_limit_per_second"`
 	RateLimitBurst       int      `json:"rate_limit_burst"`
+	AuditRetention       int      `json:"audit_retention"`
 }
 
 func Default() Config {
-	return Config{HTTPAddress: "127.0.0.1:6333", DataPath: "./data", WALSync: string(wal.SyncAlways), CheckpointEvery: 1000, ReplicationFactor: 1, PlacementCapacity: 1, RateLimitPerSecond: 100, RateLimitBurst: 200}
+	return Config{HTTPAddress: "127.0.0.1:6333", DataPath: "./data", WALSync: string(wal.SyncAlways), CheckpointEvery: 1000, ReplicationFactor: 1, PlacementCapacity: 1, RateLimitPerSecond: 100, RateLimitBurst: 200, AuditRetention: 4096}
 }
 
 // Load overlays a strict JSON object onto base.
@@ -71,6 +74,7 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 		{"GIDEONDB_WAL_SYNC", &value.WALSync}, {"GIDEONDB_API_KEY_FILE", &value.APIKeyFile},
 		{"GIDEONDB_PRINCIPALS_FILE", &value.PrincipalsFile},
 		{"GIDEONDB_TLS_CERT_FILE", &value.TLSCertFile}, {"GIDEONDB_TLS_KEY_FILE", &value.TLSKeyFile}, {"GIDEONDB_TLS_CA_FILE", &value.TLSCAFile},
+		{"GIDEONDB_NODE_TLS_CERT_FILE", &value.NodeTLSCertFile}, {"GIDEONDB_NODE_TLS_KEY_FILE", &value.NodeTLSKeyFile},
 	}
 	for _, item := range strings {
 		if raw, ok := getenv(item.name); ok {
@@ -101,7 +105,7 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 	for _, item := range []struct {
 		name   string
 		target *int
-	}{{"GIDEONDB_RATE_LIMIT_PER_SECOND", &value.RateLimitPerSecond}, {"GIDEONDB_RATE_LIMIT_BURST", &value.RateLimitBurst}} {
+	}{{"GIDEONDB_RATE_LIMIT_PER_SECOND", &value.RateLimitPerSecond}, {"GIDEONDB_RATE_LIMIT_BURST", &value.RateLimitBurst}, {"GIDEONDB_AUDIT_RETENTION", &value.AuditRetention}} {
 		if raw, ok := getenv(item.name); ok {
 			parsed, err := strconv.Atoi(raw)
 			if err != nil {
@@ -157,6 +161,10 @@ func ApplyFlags(value Config, values map[string]string) (Config, error) {
 			value.TLSKeyFile = raw
 		case "tls-ca-file":
 			value.TLSCAFile = raw
+		case "node-tls-cert-file":
+			value.NodeTLSCertFile = raw
+		case "node-tls-key-file":
+			value.NodeTLSKeyFile = raw
 		case "checkpoint-every":
 			parsed, err := strconv.ParseUint(raw, 10, 64)
 			if err != nil {
@@ -187,6 +195,12 @@ func ApplyFlags(value Config, values map[string]string) (Config, error) {
 				return Config{}, err
 			}
 			value.RateLimitBurst = parsed
+		case "audit-retention":
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				return Config{}, err
+			}
+			value.AuditRetention = parsed
 		case "allow-unauthenticated":
 			parsed, err := strconv.ParseBool(raw)
 			if err != nil {
@@ -226,11 +240,20 @@ func (c Config) Validate() error {
 	if c.RateLimitPerSecond < 1 || c.RateLimitBurst < 1 || c.RateLimitBurst < c.RateLimitPerSecond {
 		return fmt.Errorf("rate_limit_per_second must be positive and rate_limit_burst must be at least that value")
 	}
+	if c.AuditRetention < 256 || c.AuditRetention > 1000000 {
+		return fmt.Errorf("audit_retention must be between 256 and 1000000")
+	}
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		return fmt.Errorf("tls_cert_file and tls_key_file are required together")
 	}
 	if c.TLSCAFile != "" && c.TLSCertFile == "" {
 		return fmt.Errorf("tls_ca_file requires tls_cert_file and tls_key_file")
+	}
+	if (c.NodeTLSCertFile == "") != (c.NodeTLSKeyFile == "") {
+		return fmt.Errorf("node_tls_cert_file and node_tls_key_file are required together")
+	}
+	if c.NodeTLSCertFile != "" && c.TLSCAFile == "" {
+		return fmt.Errorf("node TLS identity requires tls_ca_file")
 	}
 	if len(c.Peers) > 256 {
 		return fmt.Errorf("peers must contain at most 256 entries")

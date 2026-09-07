@@ -112,8 +112,15 @@ automated tests, and user-facing documentation are all finished.
   file provides reader, writer, and admin roles; non-admin collection-prefix
   scopes filter listings and deny cross-tenant access, invalid rotations fail
   closed, and the legacy process/cluster key remains backward compatible.
-- [ ] Add audit retention, configurable rate limits, certificate reload, and
-  distinct client/server node identities.
+- [x] Add configurable durable audit retention and per-credential/client rate
+  limits. Sanitized audit events retain 256–1,000,000 entries (4,096 by
+  default), recover across restart, and compact atomically; bounded token
+  buckets expose configurable rate and burst controls.
+- [x] Add live certificate/CA reload and distinct inbound server versus
+  outbound node-client TLS identities. New handshakes reload atomically replaced
+  server certificates, client certificates, keys, and CA roots; separate node
+  client flags fall back to the server pair for backward compatibility, and
+  cryptographic regression tests exercise certificate and issuer rotation.
 - [ ] Document and automate certificate lifecycle and secret rotation for
   supported deployment targets.
 - [ ] Validate Kubernetes behavior on the intended production storage class,

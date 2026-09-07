@@ -118,3 +118,40 @@ func TestMutualTLSCARequiresServerIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestAuditRetentionBoundsAndOverlays(t *testing.T) {
+	config := Default()
+	updated, err := ApplyEnv(config, func(name string) (string, bool) {
+		if name == "GIDEONDB_AUDIT_RETENTION" {
+			return "8192", true
+		}
+		return "", false
+	})
+	if err != nil || updated.AuditRetention != 8192 {
+		t.Fatalf("updated=%#v err=%v", updated, err)
+	}
+	updated, err = ApplyFlags(updated, map[string]string{"audit-retention": "512"})
+	if err != nil || updated.AuditRetention != 512 {
+		t.Fatalf("flag updated=%#v err=%v", updated, err)
+	}
+	updated.AuditRetention = 255
+	if err := updated.Validate(); err == nil {
+		t.Fatal("accepted audit retention below bound")
+	}
+}
+
+func TestNodeTLSIdentityRequiresPairAndCA(t *testing.T) {
+	config := Default()
+	config.NodeTLSCertFile = "/run/tls/node.crt"
+	if err := config.Validate(); err == nil {
+		t.Fatal("accepted node certificate without key")
+	}
+	config.NodeTLSKeyFile = "/run/tls/node.key"
+	if err := config.Validate(); err == nil {
+		t.Fatal("accepted node identity without CA")
+	}
+	config.TLSCertFile, config.TLSKeyFile, config.TLSCAFile = "/run/tls/server.crt", "/run/tls/server.key", "/run/tls/ca.crt"
+	if err := config.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

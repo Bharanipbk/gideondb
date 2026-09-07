@@ -27,6 +27,7 @@ type Options struct {
 	APIKey, NodeID, ClusterID, AdvertiseAddress string
 	PrincipalsFile                              string
 	EventLogPath                                string
+	EventLogRetention                           int
 	MetadataEpoch                               uint64
 	ReplicationFactor                           int
 	PlacementCapacity                           uint32

@@ -65,7 +65,8 @@ replication factor, placement capacity, and supported cluster protocol range.
 It never returns credential values, certificate material, or data paths.
 
 The authenticated node log feed returns at most 200 events. Production servers
-recover and retain the latest 4,096 sanitized events in
+recover and retain the configured number of sanitized events (4,096 by default,
+256–1,000,000 via `-audit-retention`) in
 `operational-events.jsonl` under the data directory; embedded/test servers
 without a persistence path retain 256 in memory. The file is mode `0600`, uses
 append-only JSON lines, and is atomically compacted after reaching twice its

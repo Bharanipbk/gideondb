@@ -70,7 +70,11 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 	}
 	events := newEventLog(256)
 	if options.EventLogPath != "" {
-		events = newPersistentEventLog(options.EventLogPath, 4096)
+		retention := options.EventLogRetention
+		if retention == 0 {
+			retention = 4096
+		}
+		events = newPersistentEventLog(options.EventLogPath, retention)
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
 	if options.RateLimitPerSecond > 0 && options.RateLimitBurst > 0 {

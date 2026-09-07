@@ -26,6 +26,7 @@ modes, and incomplete TLS certificate/key pairs fail startup.
   "placement_capacity": 1,
   "rate_limit_per_second": 100,
   "rate_limit_burst": 200,
+  "audit_retention": 4096,
   "api_key_file": "/run/secrets/gideondb-api-key",
   "principals_file": "/run/secrets/gideondb-principals.json",
   "allow_unauthenticated": false,
@@ -33,7 +34,9 @@ modes, and incomplete TLS certificate/key pairs fail startup.
   "enable_static_routing": false,
   "tls_cert_file": "/run/tls/tls.crt",
   "tls_key_file": "/run/tls/tls.key",
-  "tls_ca_file": "/run/tls/ca.crt"
+  "tls_ca_file": "/run/tls/ca.crt",
+  "node_tls_cert_file": "/run/tls/node-client.crt",
+  "node_tls_key_file": "/run/tls/node-client.key"
 }
 ```
 

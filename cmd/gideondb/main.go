@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -19,6 +18,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/cluster"
 	appconfig "github.com/Bharanipbk/gideondb/internal/config"
 	"github.com/Bharanipbk/gideondb/internal/engine"
+	"github.com/Bharanipbk/gideondb/internal/tlsreload"
 	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
@@ -38,6 +38,7 @@ func main() {
 	placementCapacity := flag.Uint("placement-capacity", uint(defaults.PlacementCapacity), "relative shard placement capacity from 1 to 256")
 	rateLimitPerSecond := flag.Int("rate-limit-per-second", defaults.RateLimitPerSecond, "public API requests per second per credential or client address")
 	rateLimitBurst := flag.Int("rate-limit-burst", defaults.RateLimitBurst, "public API token-bucket burst per credential or client address")
+	auditRetention := flag.Int("audit-retention", defaults.AuditRetention, "durable sanitized HTTP audit events retained (256-1000000)")
 	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
 	principalsFile := flag.String("principals-file", "", "reloadable JSON file containing API principals, roles, and collection prefixes")
 	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
@@ -46,6 +47,8 @@ func main() {
 	tlsCertFile := flag.String("tls-cert-file", "", "TLS certificate chain file")
 	tlsKeyFile := flag.String("tls-key-file", "", "TLS private key file")
 	tlsCAFile := flag.String("tls-ca-file", "", "private CA bundle for mutual TLS on internal APIs")
+	nodeTLSCertFile := flag.String("node-tls-cert-file", "", "outbound node-client certificate; defaults to tls-cert-file")
+	nodeTLSKeyFile := flag.String("node-tls-key-file", "", "outbound node-client private key; defaults to tls-key-file")
 	backupTo := flag.String("backup-to", "", "create a consistent backup archive and exit")
 	restoreFrom := flag.String("restore-from", "", "restore an archive into the data path and exit (destination must not exist)")
 	verifyData := flag.Bool("verify-data", false, "open and validate the data path, then exit")
@@ -101,11 +104,13 @@ func main() {
 	*replicationFactor = settings.ReplicationFactor
 	*placementCapacity = uint(settings.PlacementCapacity)
 	*rateLimitPerSecond, *rateLimitBurst = settings.RateLimitPerSecond, settings.RateLimitBurst
+	*auditRetention = settings.AuditRetention
 	*clusterID = settings.ClusterID
 	*apiKeyFile, *allowUnauthenticated, *allowInsecureHTTP = settings.APIKeyFile, settings.AllowUnauthenticated, settings.AllowInsecureHTTP
 	*principalsFile = settings.PrincipalsFile
 	*enableStaticRouting = settings.EnableStaticRouting
 	*tlsCertFile, *tlsKeyFile, *tlsCAFile = settings.TLSCertFile, settings.TLSKeyFile, settings.TLSCAFile
+	*nodeTLSCertFile, *nodeTLSKeyFile = settings.NodeTLSCertFile, settings.NodeTLSKeyFile
 	*peers = strings.Join(settings.Peers, ",")
 	offlineActions := 0
 	for _, selected := range []bool{*backupTo != "", *restoreFrom != "", *verifyData, *migrateData} {
@@ -169,23 +174,23 @@ func main() {
 	var internalClient *http.Client
 	var serverTLSConfig *tls.Config
 	if *tlsCAFile != "" {
-		certificate, err := tls.LoadX509KeyPair(*tlsCertFile, *tlsKeyFile)
-		if err != nil {
-			logger.Error("load mutual TLS identity", "error", err)
+		serverFiles := tlsreload.Files{Cert: *tlsCertFile, Key: *tlsKeyFile, CA: *tlsCAFile}
+		var tlsErr error
+		serverTLSConfig, tlsErr = tlsreload.ServerConfig(serverFiles)
+		if tlsErr != nil {
+			logger.Error("load server TLS identity", "error", tlsErr)
 			os.Exit(2)
 		}
-		caData, err := os.ReadFile(*tlsCAFile)
-		if err != nil {
-			logger.Error("load mutual TLS CA", "error", err)
+		clientCert, clientKey := *nodeTLSCertFile, *nodeTLSKeyFile
+		if clientCert == "" {
+			clientCert, clientKey = *tlsCertFile, *tlsKeyFile
+		}
+		clientTLSConfig, configErr := tlsreload.ClientConfig(tlsreload.Files{Cert: clientCert, Key: clientKey, CA: *tlsCAFile})
+		if configErr != nil {
+			logger.Error("load node-client TLS identity", "error", configErr)
 			os.Exit(2)
 		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(caData) {
-			logger.Error("load mutual TLS CA", "error", "CA bundle contains no certificates")
-			os.Exit(2)
-		}
-		serverTLSConfig = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: roots}
-		internalClient = &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: roots, Certificates: []tls.Certificate{certificate}}}}
+		internalClient = &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: clientTLSConfig}}
 	}
 	db, err := engine.OpenWithOptions(*dataPath, engine.Options{
 		WALSyncMode: wal.SyncMode(*walSync), CheckpointEvery: *checkpointEvery,
@@ -262,7 +267,7 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
@@ -293,7 +298,7 @@ func main() {
 	logger.Info("server starting", "address", *address, "advertise_address", *advertiseAddress, "node_id", identity.ID, "cluster_id", clusterMetadata.ClusterID, "metadata_epoch", metadataEpoch, "peers", len(settings.Peers), "static_routing", *enableStaticRouting, "replication_factor", *replicationFactor, "data_path", *dataPath)
 	var serveErr error
 	if *tlsCertFile != "" {
-		serveErr = server.ListenAndServeTLS(*tlsCertFile, *tlsKeyFile)
+		serveErr = server.ListenAndServeTLS("", "")
 	} else {
 		serveErr = server.ListenAndServe()
 	}
