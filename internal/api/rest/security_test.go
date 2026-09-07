@@ -261,7 +261,8 @@ func TestClusterReadinessRequiresConvergedHealthyViews(t *testing.T) {
 	}
 	provider[0].MetadataEpoch = 3
 	provider[0].MembershipDigest, provider[0].CatalogDigest, provider[0].PlacementDigest = digests.Membership, digests.Catalog, digests.Placement
-	handler := NewWithOptions(db, nil, Options{NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 3, PeerProvider: provider, EnableStaticRouting: true}).Handler()
+	store := committedTestRaftStore(t, localNode, []string{localNode, remoteNode}, 3, digests)
+	handler := NewWithOptions(db, nil, Options{NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 3, PeerProvider: provider, EnableStaticRouting: true, RaftStore: store}).Handler()
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/cluster/readiness", nil))
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ready":true`) || !strings.Contains(response.Body.String(), `"authoritative":true`) {

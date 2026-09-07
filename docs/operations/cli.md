@@ -7,6 +7,7 @@ one-shot operational modes:
 -version                 print build version, commit and date
 -validate-config         resolve and validate configuration, then exit
 -verify-data             open, recover and validate the data path, then exit
+-migrate-data            validate and migrate legacy checkpoints, then exit
 -backup-to FILE          checkpoint, create an archive, then exit
 -restore-from FILE       validate and restore into a nonexistent data path
 -healthcheck-url URL     require an HTTP 200 health response within 3 seconds

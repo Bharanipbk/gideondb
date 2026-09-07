@@ -5,8 +5,16 @@
 
 The machine-readable contract is [openapi.yaml](openapi.yaml). Request bodies
 are limited to 16 MiB and unknown JSON fields are rejected. Errors contain a
-stable-intent `code` and a human-readable `message`; codes are not compatibility
-stable before v0.1.0.
+stable-intent `code` and a human-readable `message`; documented codes are stable
+within a pre-1.0 minor line.
+
+Collection, peer, and shard-placement lists accept `limit` from 1 through 200
+and an opaque `cursor`, returning `next_cursor` when another page exists. Public
+API requests are protected by a configurable per-credential token bucket (or
+direct client address without credentials). A rejected request returns `429
+rate_limit_exceeded` and a `Retry-After` header. Health, readiness, and internal
+cluster transport are excluded so overload protection cannot break liveness or
+replication.
 
 | Method | Path | Behavior |
 |---|---|---|
@@ -95,8 +103,7 @@ Batch requests validate every record before writing. Records are grouped by
 logical shard and encoded as one WAL record per shard. Each shard group is
 atomic during replay, but the overall cross-shard batch is not atomic: an I/O
 failure after an earlier shard commits can produce a partial batch. Clients
-must use stable IDs and inspect/retry safely; idempotency-key retention is not
-implemented.
+must use stable IDs and inspect shard outcomes.
 
 Internal shard searches require exact cluster, target-node, and metadata-epoch
 headers. A stale epoch, wrong target, or cluster mismatch returns `409`; a
@@ -186,14 +193,22 @@ snapshot when a follower is behind.
 Distributed search fails with `503` if any shard fails. Setting
 `allow_partial: true` explicitly permits a `200` response containing incomplete
 results and per-shard failures. Responses include the metadata epoch and
-`authoritative_placement`; it becomes true only for an enabled and currently
-converged static-routing view. The route remains experimental until placement
-is consensus-backed and storage is physically partitioned.
+`authoritative_placement`. Multi-node search, scroll, and batch-write routes now
+fail with `503 authoritative_placement_required` unless the converged placement
+exactly matches metadata committed by the configured Raft voters. A standalone
+replication-factor-one node is authoritative without a remote consensus group.
 
 Distributed batch writes validate all records before fanout, but shard commits
 are independent. HTTP `207` indicates at least one `failed` or `unknown` shard
 outcome. An unknown outcome may already be durable and is never retried
-automatically. Durable idempotency keys are not yet available.
+automatically. Clients may send `Idempotency-Key` using 1–128 letters, digits,
+periods, underscores, colons, or hyphens. The coordinator propagates the key to
+each shard leader. The leader durably reserves the prepared record versions
+before WAL append, returns the original result for matching retries (including
+after checkpoint and restart), and rejects reuse with different shard content
+as `idempotency_conflict`. Keys are retained until the collection is deleted;
+operators should therefore use one key per logical request and monitor storage
+growth for high-cardinality ingestion workloads.
 With replication factor greater than one, the shard leader sends its exact
 prepared WAL batch to all followers and reports `committed` only after a
 majority acknowledges durable append. Each committed outcome includes
@@ -228,5 +243,6 @@ canonical merged manifest, and releases every successfully frozen barrier on
 both success and failure.
 
 The metrics endpoint shares the REST listener; when bearer authentication is
-configured it protects metrics along with data routes. The API does not yet
-provide pagination, rate limits, gRPC, or distributed APIs.
+configured it protects metrics along with data routes. REST list endpoints are
+bounded and cursor-paginated, public routes are rate-limited, and gRPC remains
+a contract without a server transport implementation.

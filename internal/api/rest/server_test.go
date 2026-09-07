@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/engine"
 )
 
@@ -55,6 +56,43 @@ func TestRESTLifecycle(t *testing.T) {
 	_, count, err := db.DescribeCollection("docs")
 	if err != nil || count != 3 {
 		t.Fatalf("batch count = %d, %v", count, err)
+	}
+}
+
+func TestOperationalPaginationAndRateLimit(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"alpha", "beta", "gamma"} {
+		if err := db.CreateCollection(core.CollectionConfig{Name: name, Dimension: 1, Metric: core.MetricDot, ShardCount: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	handler := NewWithOptions(db, nil, Options{RateLimitPerSecond: 1, RateLimitBurst: 1}).Handler()
+	first := httptest.NewRequest(http.MethodGet, "/v1/collections?limit=2", nil)
+	first.Header.Set("Authorization", "Bearer caller-a")
+	firstResponse := httptest.NewRecorder()
+	handler.ServeHTTP(firstResponse, first)
+	if firstResponse.Code != http.StatusOK || !strings.Contains(firstResponse.Body.String(), `"name":"alpha"`) || !strings.Contains(firstResponse.Body.String(), `"name":"beta"`) || !strings.Contains(firstResponse.Body.String(), `"next_cursor":"`) {
+		t.Fatalf("first page status=%d body=%s", firstResponse.Code, firstResponse.Body.String())
+	}
+
+	limited := httptest.NewRequest(http.MethodGet, "/v1/collections", nil)
+	limited.Header.Set("Authorization", "Bearer caller-a")
+	limitedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(limitedResponse, limited)
+	if limitedResponse.Code != http.StatusTooManyRequests || limitedResponse.Header().Get("Retry-After") == "" || !strings.Contains(limitedResponse.Body.String(), "rate_limit_exceeded") {
+		t.Fatalf("limited status=%d retry=%q body=%s", limitedResponse.Code, limitedResponse.Header().Get("Retry-After"), limitedResponse.Body.String())
+	}
+
+	independent := httptest.NewRequest(http.MethodGet, "/v1/collections?limit=2", nil)
+	independent.Header.Set("Authorization", "Bearer caller-b")
+	independentResponse := httptest.NewRecorder()
+	handler.ServeHTTP(independentResponse, independent)
+	if independentResponse.Code != http.StatusOK {
+		t.Fatalf("independent identity status=%d body=%s", independentResponse.Code, independentResponse.Body.String())
 	}
 }
 

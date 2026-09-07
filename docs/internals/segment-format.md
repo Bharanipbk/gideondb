@@ -2,7 +2,7 @@
 
 **Maturity:** Experimental  
 **Byte order:** Little endian  
-**Current manifest format:** 2
+**Current writer manifest format:** 3
 
 Manifest format 2 references independent record and vector columns. Both use a
 fixed 48-byte header followed by the declared payload.
@@ -31,6 +31,10 @@ version and namespace—but no vectors. The vector payload is row-major IEEE-754
 float32 data in little-endian order and must be exactly
 `RecordCount × Dimension × 4` bytes. Record position is the join key between
 columns.
+
+Tombstone columns use magic `VTMB`, dimension zero, sorted unique
+`namespace + NUL + id` keys encoded as JSON, and the same version-1 header and
+CRC32C envelope. Their header count is the number of deletion keys.
 
 `MANIFEST.json` format 2 contains basename-only `records_file` and
 `vectors_file`, dimension, maximum LSN and record count. Both column files are
@@ -64,5 +68,24 @@ rename and directory fsync. Unknown versions, nonzero reserved fields, unsafe
 filenames, overflow, truncation, trailing bytes and checksum mismatch fail
 recovery.
 
-Future metadata/index files require new magic/versioned formats and an atomic
-manifest schema upgrade; existing fields will not be reinterpreted.
+## Multi-segment manifest format 3
+
+Format 3 keeps the top-level live record count, dimension, and maximum covered
+LSN and adds an ordered `segments` array. Each entry declares basename-only
+record/vector files, optional graph/filter/tombstone files, dimension, record
+count, maximum LSN, and an optional measured byte size. Readers reject empty or
+more-than-16-entry arrays, unsafe names, dimension mismatches, non-increasing
+segment LSNs, entries beyond the manifest LSN, and a newest entry that does not
+end exactly at the manifest LSN.
+
+The checkpoint writer publishes format 3 with delta record/vector bundles and
+sorted, checksummed tombstone columns. Recovery applies entries from oldest to
+newest and validates the final live count. Flat recovery resolves winning
+record locations first and maps their original vector columns through a
+composite source, avoiding vector-payload copies. Existing format-2 checkpoints
+are promoted by reference on their next flush or by the offline
+`gideondb -migrate-data` command; format-1 checkpoints are rewritten into
+current columns. Existing fields are never reinterpreted. The current reader
+accepts manifest formats 1–3 and rejects unknown future formats. See the
+[compatibility and migration contract](../operations/compatibility.md) for the
+supported upgrade and downgrade policy.

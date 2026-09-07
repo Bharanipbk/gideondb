@@ -37,7 +37,7 @@ type shardSearchOutcome struct {
 }
 
 func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
-	if !s.requireStaticPlacement(w) {
+	if !s.requireAuthoritativePlacement(w) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -133,7 +133,7 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "distributed_search_failed", "message": "one or more shard searches failed", "failures": failures, "metadata_epoch": epoch})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": mergeDistributedTopK(allResults, request.TopK), "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.staticPlacementReady()})
+	writeJSON(w, http.StatusOK, map[string]any{"results": mergeDistributedTopK(allResults, request.TopK), "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
 }
 
 func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, request searchRequest, traceparent string) ([]core.SearchResult, error) {

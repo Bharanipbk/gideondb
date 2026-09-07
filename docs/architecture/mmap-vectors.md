@@ -1,6 +1,6 @@
 # Mapped immutable vectors
 
-**Maturity:** Experimental foundation; not the default engine recovery path
+**Maturity:** Experimental production path
 
 `OpenMappedVectors` opens a format-2 `VVEC` file read-only, maps the complete
 file with `MAP_SHARED`, validates header fields, manifest dimension/count/LSN,
@@ -32,12 +32,19 @@ Mapped index statistics report mapped bytes separately from owned vector heap
 bytes. Virtual mapped size is not resident-set size; OS page residency must be
 observed separately.
 
-For flat collections, the engine installs the mapped checkpoint as the shard's
-immutable base. WAL replay and later writes populate a mutable delta. Active
-keys shadow base keys, tombstones suppress deleted base values, and searches
-merge both result streams. Checkpoint publication resets the covered WAL before
-atomically replacing the base and clearing the delta. Shard locks keep mappings
-alive for in-flight reads while replacement and shutdown close old mappings.
+For format-3 flat collections, recovery reads record columns to resolve every
+live key to a winning segment and row ordinal, applying later replacements and
+tombstones without decoding vector columns. A composite mapped source opens all
+referenced `VVEC` files and presents only those winning locations as one logical
+flat index. Search holds read leases across the component mappings and scores
+the selected rows in place. Explicit record fetch still copies only the
+requested vector.
 
-HNSW collections continue decoding checkpoint vectors and rebuilding their
-mutable graph during recovery.
+WAL replay and later writes populate a mutable delta. Active keys shadow the
+composite base, tombstones suppress deleted base values, and searches merge both
+result streams. Checkpoint publication resets the covered WAL before atomically
+replacing the generation and clearing the delta. Reference-counted snapshot pins
+keep every component mapping alive until its last reader releases it.
+
+HNSW collections decode checkpoint vectors because their persisted full-view
+graph currently owns a contiguous float32 arena.

@@ -60,7 +60,7 @@ func (s *Server) internalShardBatchUpsert(w http.ResponseWriter, r *http.Request
 		writeError(w, err)
 		return
 	}
-	records, acknowledged, ambiguous, err := s.commitLeaderShardBatch(r.Context(), r.PathValue("collection"), uint32(shardID), request.Records, acknowledgement, r.Header.Get("traceparent"))
+	records, acknowledged, ambiguous, err := s.commitLeaderShardBatch(r.Context(), r.PathValue("collection"), uint32(shardID), request.Records, acknowledgement, r.Header.Get("traceparent"), r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		if ambiguous {
 			writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "replication_acknowledgement_unavailable", Message: err.Error()})
@@ -73,7 +73,7 @@ func (s *Server) internalShardBatchUpsert(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) {
-	if !s.requireStaticPlacement(w) {
+	if !s.requireAuthoritativePlacement(w) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -91,6 +91,7 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 		writeError(w, err)
 		return
 	}
+	idempotencyKey := r.Header.Get("Idempotency-Key")
 	config, _, err := s.engine.DescribeCollection(r.PathValue("name"))
 	if err != nil {
 		writeError(w, err)
@@ -156,11 +157,11 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 				var writeErr error
 				ambiguous := false
 				if owner == s.nodeID {
-					records, acknowledged, ambiguous, writeErr = s.commitLeaderShardBatch(ctx, config.Name, shardID, groups[shardID], acknowledgement, r.Header.Get("traceparent"))
+					records, acknowledged, ambiguous, writeErr = s.commitLeaderShardBatch(ctx, config.Name, shardID, groups[shardID], acknowledgement, r.Header.Get("traceparent"), idempotencyKey)
 				} else if peer, exists := peerByID[owner]; !exists {
 					writeErr = fmt.Errorf("placement node is not discoverable")
 				} else {
-					records, acknowledged, ambiguous, writeErr = s.remoteShardBatchUpsert(ctx, peer, config.Name, shardID, groups[shardID], acknowledgement, r.Header.Get("traceparent"))
+					records, acknowledged, ambiguous, writeErr = s.remoteShardBatchUpsert(ctx, peer, config.Name, shardID, groups[shardID], acknowledgement, r.Header.Get("traceparent"), idempotencyKey)
 				}
 				if writeErr == nil {
 					outcome.Status, outcome.Records, outcome.ReplicasAcknowledged, outcome.ReplicationFactor, outcome.Acknowledgement = "committed", records, acknowledged, s.replicationFactor, acknowledgement
@@ -189,10 +190,10 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 	if partial {
 		status = http.StatusMultiStatus
 	}
-	writeJSON(w, status, map[string]any{"outcomes": outcomes, "partial": partial, "metadata_epoch": epoch, "authoritative_placement": s.staticPlacementReady()})
+	writeJSON(w, status, map[string]any{"outcomes": outcomes, "partial": partial, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
 }
 
-func (s *Server) remoteShardBatchUpsert(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, records []core.Record, acknowledgement string, traceparent string) ([]core.Record, int, bool, error) {
+func (s *Server) remoteShardBatchUpsert(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, records []core.Record, acknowledgement string, traceparent string, keys ...string) ([]core.Record, int, bool, error) {
 	payload, err := json.Marshal(internalShardBatchRequest{Records: records, Acknowledgement: acknowledgement})
 	if err != nil {
 		return nil, 0, false, err
@@ -206,6 +207,9 @@ func (s *Server) remoteShardBatchUpsert(ctx context.Context, peer cluster.Peer, 
 	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
 	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
 	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	if len(keys) != 0 && keys[0] != "" {
+		request.Header.Set("Idempotency-Key", keys[0])
+	}
 	if s.peerAPIKey != "" {
 		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
 	}

@@ -1,5 +1,8 @@
 # Rolling upgrades
 
+Read the [compatibility and migration contract](compatibility.md) and create a
+verified backup before replacing the first binary.
+
 Each node advertises `min_protocol_version` and `protocol_version` from
 `GET /v1/node`. Discovery selects the newest version shared by both ranges and
 reports it as `negotiated_protocol` in the peer view.
@@ -23,3 +26,7 @@ Upgrade one voter at a time:
 Do not combine a rolling binary upgrade with a join, leave, capacity change,
 or replication-factor change. If a peer reports an incompatible protocol,
 restore the previous compatible binary rather than forcing readiness.
+
+When release notes require a persistent-format rewrite, stop and migrate each
+node with `gideondb -data-path /var/lib/gideondb -migrate-data` before returning
+it to service. Never migrate every replica concurrently.

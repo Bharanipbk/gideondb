@@ -114,6 +114,9 @@ func (e *Engine) ApplyShardOwnership(assignments map[string][]uint32) error {
 			if log := e.logs[name][shardID]; log != nil && log.LastLSN() != 0 {
 				return fmt.Errorf("refusing to prune shard %s/%d with WAL history", name, shardID)
 			}
+			if len(e.idempotency[name][shardID]) != 0 {
+				return fmt.Errorf("refusing to prune shard %s/%d with idempotency history", name, shardID)
+			}
 			entries, err := os.ReadDir(e.shardSegmentDir(name, uint32(shardID)))
 			if err == nil && len(entries) != 0 {
 				return fmt.Errorf("refusing to prune shard %s/%d with segment files", name, shardID)
@@ -171,6 +174,9 @@ func (e *Engine) ApplyShardOwnership(assignments map[string][]uint32) error {
 				return err
 			}
 			if err := os.Remove(e.shardSegmentDir(name, uint32(shardID))); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if err := os.Remove(e.idempotencyPath(name, uint32(shardID))); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
 		}

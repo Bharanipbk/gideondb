@@ -43,4 +43,5 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Observability](operations/observability.md)
 - [Administration dashboard](operations/dashboard.md)
 - [Rolling upgrades](operations/rolling-upgrades.md)
+- [Compatibility and data migration](operations/compatibility.md)
 - [Network partitions](operations/network-partitions.md)

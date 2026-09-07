@@ -104,7 +104,7 @@ func parseInternalScrollQuery(w http.ResponseWriter, r *http.Request) (int, stri
 }
 
 func (s *Server) distributedScroll(w http.ResponseWriter, r *http.Request) {
-	if !s.requireStaticPlacement(w) {
+	if !s.requireAuthoritativePlacement(w) {
 		return
 	}
 	limit := 50
@@ -197,7 +197,7 @@ func (s *Server) distributedScroll(w http.ResponseWriter, r *http.Request) {
 		cursor, _ := json.Marshal(distributedScrollCursor{Version: 1, Epoch: epoch, Namespace: namespace, AfterNamespace: all[len(all)-1].Namespace, AfterID: all[len(all)-1].ID})
 		next = base64.RawURLEncoding.EncodeToString(cursor)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"records": all, "next_cursor": next, "vectors_included": includeVector, "metadata_epoch": epoch, "authoritative_placement": s.staticPlacementReady()})
+	writeJSON(w, http.StatusOK, map[string]any{"records": all, "next_cursor": next, "vectors_included": includeVector, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
 }
 
 func (s *Server) remoteShardScroll(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, namespace, afterNamespace, afterID string, limit int, traceparent string) ([]core.Record, bool, error) {

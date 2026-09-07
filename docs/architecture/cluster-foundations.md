@@ -133,8 +133,10 @@ Cross-shard writes are not atomic. Responses list each shard as `committed`,
 peer 5xx responses, malformed successful responses, and response-fence
 mismatches are `unknown` because the remote WAL may already contain the write.
 The coordinator never retries these automatically. Clients should retain stable
-record IDs and reconcile unknown outcomes before retrying; durable idempotency
-keys are not implemented yet.
+record IDs and attach a stable `Idempotency-Key` when an unknown outcome must be
+retried. Shard leaders durably retain the request digest and originally prepared
+record versions across checkpoints and restarts; conflicting key reuse on the
+same shard is rejected.
 
 Responses state whether static placement is authoritative. This validates routing and
 failure semantics but does not activate physical ownership or provide
@@ -150,55 +152,55 @@ node computes them or the order in which peers and collections were discovered.
 
 `GET /v1/cluster/readiness` reports ready only when every configured peer is in
 the healthy state and reports the exact local epoch and all three fingerprints.
-It returns specific mismatch reasons. `authoritative` becomes true only when
-static routing is enabled and the view is ready.
-`gideondb_cluster_view_ready` exposes the same decision as a gauge. Readiness is
-a necessary activation precondition, not consensus: matching views do not grant
-leadership or make a minority partition safe for writes.
+It returns specific mismatch reasons. In a multi-node cluster, `authoritative`
+becomes true only when static routing is enabled, the view is ready, and its
+membership, catalog, and placement fingerprints exactly match a committed Raft
+view with configured voters. `gideondb_cluster_view_ready` continues to expose
+view convergence as a separate operational gauge.
 
 ## Opt-in static placement activation
 
 `enable_static_routing`, `GIDEONDB_ENABLE_STATIC_ROUTING`, or
-`-enable-static-routing` activates ownership for the immutable bootstrap epoch.
-Every distributed coordinator request then requires a ready cluster view;
-otherwise it returns `503 cluster_view_not_ready`. Internal shard reads and
+`-enable-static-routing` activates ownership for the committed placement epoch.
+Every distributed coordinator request requires a ready cluster view and a
+matching committed Raft view; otherwise it returns `503`. Internal shard reads and
 writes additionally recompute placement and return `409 wrong_owner` unless the
-target node owns that shard. Placement, readiness, distributed-search, and
-distributed-write responses report authoritative placement while these checks
-hold. Node mode becomes `static-routing`.
+target node owns that shard. Search, scroll, and batch-write coordinators all use
+the same authority gate. A replication-factor-one server with no peers remains
+an authoritative standalone deployment.
 
-This mode supports functional fixed-topology clusters, not safe topology
-changes. There is no membership log, election, quorum commit, or lease, and
-failure detection has a bounded delay. Operators must not change peers,
-collections, or node identities independently. Collection create/delete is
+Static convergence alone supports diagnostics and internal maintenance but is
+not allowed to serve multi-node public distributed data routes. Operators must
+not change peers, collections, or node identities independently. Collection create/delete is
 blocked after activation, so every node's catalog must be prepared consistently
 before startup. Legacy single-node get, search, upsert, batch, and delete routes
 also return `409 static_routing_required`; cluster coordinators and fenced
 internal routes are the only enabled data paths. Production partition safety and
-epoch advancement still require metadata consensus. Physical storage also
+epoch advancement require metadata consensus. Physical storage also
 persists an immutable node-local `SHARD_OWNERSHIP.json` manifest on the first
 convergence-gated data request. Activation fails closed if an unowned shard
-already contains records, WAL history, or segment files. Once validated, the
-engine closes and removes empty unowned WALs and segment directories; restart
-loads only owned durable shard structures. The manifest is excluded from backup
+already contains records, WAL history, segment files, or idempotency history.
+Once validated, the engine closes and removes empty unowned WALs, segment
+directories, and idempotency ledgers; restart loads only owned durable shard
+structures. The manifest is excluded from backup
 archives so restored data can be assigned deliberately in its destination
 cluster.
 
 ## Three-node functional gate
 
-The automated three-node gate uses separate durable engine directories and real
-REST handlers for three converged static-routing nodes. A coordinator writes one
+The automated three-node gate uses separate durable engine directories, a
+committed Raft view on every node, and real REST handlers. A coordinator writes one
 record per logical shard, verifies that only the assigned owner materializes
 each record, coordinates global top-K search from another node, and then
 restarts every engine to verify owner recovery. The in-process HTTP transport
 keeps the test deterministic while exercising the same authentication, fencing,
 ownership, WAL, response validation, and merge code used by the server.
 
-The gate also verifies a manifest on each node, absence of every unowned WAL,
-and continued ownership rejection after restart. Empty in-memory logical shard
+The gate also verifies a manifest on each node, absence of every unowned WAL and
+idempotency ledger, and continued ownership rejection after restart. Empty in-memory logical shard
 objects remain inexpensive routing metadata, while durable WAL and segment
-materialization is owner-only. Real socket, multi-process, partition, and
-consensus tests remain.
+materialization is owner-only. Real socket and multi-process partition testing
+remain continuous validation work rather than part of the ownership contract.
 
 ## Metadata Raft safety core
 

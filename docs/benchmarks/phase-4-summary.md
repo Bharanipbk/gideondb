@@ -57,6 +57,16 @@ An accelerated scoring implementation, representative embedding datasets, all
 metrics, end-to-end HNSW reranking, and a versioned format ADR are required
 before adoption. Exact float32 flat search remains the oracle.
 
+## Memory calibration
+
+The reproducible [index memory calibration](index-memory-calibration.md)
+compares structural index counters with retained Go heap deltas and can emit
+in-use heap profiles. On the reference machine, three isolated runs measured
+549.03–549.13 retained B/vector for a 50,000 x 128 flat index, versus 512
+structural B/vector. A 5,000 x 64 mutable HNSW index measured 908.07–908.14
+retained B/vector, versus 508.63 structural B/vector. These are point
+measurements that expose uncounted runtime overhead, not capacity claims.
+
 ## Completion boundary
 
 This completes the planned Phase 4 implementation and evidence pass. Remaining

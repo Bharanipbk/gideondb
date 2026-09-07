@@ -8,8 +8,10 @@ primarily in Go. It includes single-node storage and recovery, flat and HNSW
 search, metadata filtering, static distributed placement, Raft metadata
 coordination, replication and repair, capacity-aware rebalancing, operational
 hardening, multi-language SDKs, and an embedded administration dashboard.
-It remains pre-alpha: APIs and persistent formats may change, and deployment at
-scale requires workload-specific validation.
+It remains pre-alpha: minor releases may contain documented breaking changes,
+and deployment at scale requires workload-specific validation. Patch-level API
+guarantees, readable persistent formats, migrations, and downgrade rules are in
+the [compatibility contract](docs/operations/compatibility.md).
 
 Source repository: [github.com/Bharanipbk/gideondb](https://github.com/Bharanipbk/gideondb)
 

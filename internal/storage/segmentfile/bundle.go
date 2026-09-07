@@ -18,6 +18,7 @@ const columnHeaderSize = 48
 var recordMagic = [4]byte{'V', 'R', 'E', 'C'}
 var vectorMagic = [4]byte{'V', 'V', 'E', 'C'}
 var filterMagic = [4]byte{'V', 'F', 'L', 'T'}
+var tombstoneMagic = [4]byte{'V', 'T', 'M', 'B'}
 
 type storedRecord struct {
 	ID        string         `json:"id"`
@@ -166,6 +167,40 @@ func ReadFilter(directory string, manifest Manifest) ([]byte, error) {
 		return nil, fmt.Errorf("filter index manifest mismatch")
 	}
 	return payload, nil
+}
+
+func WriteTombstones(directory, name string, keys []string, maxLSN uint64) error {
+	if !safeBase(name) || filepath.Ext(name) != ".tombstones" {
+		return fmt.Errorf("unsafe tombstone file name")
+	}
+	payload, err := json.Marshal(keys)
+	if err != nil {
+		return err
+	}
+	return writeColumn(filepath.Join(directory, name), tombstoneMagic, 0, uint64(len(keys)), maxLSN, payload)
+}
+
+func ReadTombstones(directory, name string, maxLSN uint64) ([]string, error) {
+	if !safeBase(name) || filepath.Ext(name) != ".tombstones" {
+		return nil, fmt.Errorf("unsafe tombstone file name")
+	}
+	count, storedLSN, payload, err := readColumn(filepath.Join(directory, name), tombstoneMagic, 0)
+	if err != nil {
+		return nil, err
+	}
+	if storedLSN != maxLSN {
+		return nil, fmt.Errorf("tombstone LSN mismatch")
+	}
+	var keys []string
+	if err := json.Unmarshal(payload, &keys); err != nil || uint64(len(keys)) != count {
+		return nil, fmt.Errorf("invalid tombstone payload")
+	}
+	for position, key := range keys {
+		if key == "" || (position > 0 && keys[position-1] >= key) {
+			return nil, fmt.Errorf("tombstones must be unique and sorted")
+		}
+	}
+	return keys, nil
 }
 
 func writeColumn(path string, magic [4]byte, dimension uint32, count, maxLSN uint64, payload []byte) error {

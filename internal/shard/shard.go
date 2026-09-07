@@ -188,6 +188,21 @@ func (s *Shard) Records() []core.Record {
 	return result
 }
 
+// CheckpointDelta returns the mutable records and base deletions since the last
+// installed immutable generation. The caller serializes checkpoints against
+// mutation through the engine lock.
+func (s *Shard) CheckpointDelta() ([]core.Record, []string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	records := s.active.Records()
+	tombstones := make([]string, 0, len(s.tombstones))
+	for key := range s.tombstones {
+		tombstones = append(tombstones, key)
+	}
+	sort.Strings(tombstones)
+	return records, tombstones
+}
+
 func (s *Shard) Len() int { s.mu.RLock(); defer s.mu.RUnlock(); return s.count }
 
 // InstallImmutable replaces the checkpoint base and clears the covered delta.

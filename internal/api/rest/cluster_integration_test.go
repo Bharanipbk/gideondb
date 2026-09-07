@@ -51,14 +51,14 @@ func TestThreeNodeStaticClusterPartitionsWritesSearchesAndRecovers(t *testing.T)
 			nodes[position].peers = append(nodes[position].peers, cluster.Peer{SeedURL: "http://" + hosts[peerPosition], NodeID: nodeIDs[peerPosition], ClusterID: clusterID, AdvertiseAddress: hosts[peerPosition], Healthy: true, State: cluster.PeerHealthy})
 		}
 	}
-	digests, err := cluster.ComputeViewDigests(1, nodeIDs[0], hosts[0], []cluster.Peer(nodes[0].peers), []core.CollectionConfig{config})
+	digests, err := cluster.ComputeViewDigests(2, nodeIDs[0], hosts[0], []cluster.Peer(nodes[0].peers), []core.CollectionConfig{config})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for position := range nodes {
 		for peerPosition := range nodes[position].peers {
 			peer := &nodes[position].peers[peerPosition]
-			peer.MetadataEpoch = 1
+			peer.MetadataEpoch = 2
 			peer.MembershipDigest, peer.CatalogDigest, peer.PlacementDigest = digests.Membership, digests.Catalog, digests.Placement
 		}
 	}
@@ -74,11 +74,12 @@ func TestThreeNodeStaticClusterPartitionsWritesSearchesAndRecovers(t *testing.T)
 	})
 	client := &http.Client{Transport: transport}
 	for position := range nodes {
-		nodes[position].handler = NewWithOptions(nodes[position].db, nil, Options{APIKey: apiKey, NodeID: nodeIDs[position], ClusterID: clusterID, AdvertiseAddress: hosts[position], MetadataEpoch: 1, PeerProvider: nodes[position].peers, InternalHTTPClient: client, EnableStaticRouting: true}).Handler()
+		store := committedTestRaftStore(t, nodeIDs[position], nodeIDs, 2, digests)
+		nodes[position].handler = NewWithOptions(nodes[position].db, nil, Options{APIKey: apiKey, NodeID: nodeIDs[position], ClusterID: clusterID, AdvertiseAddress: hosts[position], MetadataEpoch: 2, PeerProvider: nodes[position].peers, InternalHTTPClient: client, EnableStaticRouting: true, RaftStore: store}).Handler()
 		handlers[hosts[position]] = nodes[position].handler
 	}
 
-	placement, err := cluster.PlanPlacement(1, nodeIDs[0], hosts[0], []cluster.Peer(nodes[0].peers), []core.CollectionConfig{config})
+	placement, err := cluster.PlanPlacement(2, nodeIDs[0], hosts[0], []cluster.Peer(nodes[0].peers), []core.CollectionConfig{config})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,6 +108,7 @@ func TestThreeNodeStaticClusterPartitionsWritesSearchesAndRecovers(t *testing.T)
 	writeRequest := httptest.NewRequest(http.MethodPost, "/v1/cluster/collections/distributed/vectors/batch", strings.NewReader(string(payload)))
 	writeRequest.Header.Set("Authorization", "Bearer "+apiKey)
 	writeRequest.Header.Set("Content-Type", "application/json")
+	writeRequest.Header.Set("Idempotency-Key", "cluster:bootstrap-001")
 	writeResponse := httptest.NewRecorder()
 	nodes[0].handler.ServeHTTP(writeResponse, writeRequest)
 	if writeResponse.Code != http.StatusOK || strings.Count(writeResponse.Body.String(), `"status":"committed"`) != config.ShardCount {
@@ -206,6 +208,14 @@ func assertPhysicalOwnership(t *testing.T, nodes []clusterTestNode, config core.
 			}
 			if nodeIndex != ownerIndex && !errors.Is(err, os.ErrNotExist) {
 				t.Fatalf("non-owner %d shard %d WAL still exists: %v", nodeIndex, shardID, err)
+			}
+			ledgerPath := filepath.Join(nodes[nodeIndex].path, "idempotency", config.Name, fmt.Sprintf("shard-%06d.json", shardID))
+			_, ledgerErr := os.Stat(ledgerPath)
+			if nodeIndex == ownerIndex && ledgerErr != nil {
+				t.Fatalf("owner %d shard %d idempotency ledger missing: %v", nodeIndex, shardID, ledgerErr)
+			}
+			if nodeIndex != ownerIndex && !errors.Is(ledgerErr, os.ErrNotExist) {
+				t.Fatalf("non-owner %d shard %d idempotency ledger exists: %v", nodeIndex, shardID, ledgerErr)
 			}
 		}
 	}

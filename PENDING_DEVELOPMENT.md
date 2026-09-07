@@ -56,21 +56,49 @@ automated tests, and user-facing documentation are all finished.
   checkpoint publication now preserve only manifest-referenced segment files,
   remove recognized stale/temp files, preserve unknown operator/future-format
   files, and report cleanup failures.
-- [ ] Replace full-shard checkpoint compaction with a bounded multi-segment,
-  size-tiered policy after measuring write amplification and memory use.
-- [ ] Calibrate index memory accounting against heap profiles before publishing
-  bytes-per-vector claims.
+- [x] Add backward-compatible format-3 manifests for up to 16 ordered immutable
+  segment bundles, with safe path, dimension, and increasing-LSN validation.
+- [x] Add a deterministic size-tiered compaction planner with four-segment
+  fan-in, an eight-segment pressure limit, a 64 MiB input bound, and explicit
+  backpressure when no bounded plan exists. A 64-flush unit simulation wrote
+  778 units versus 2,080 for full-shard rewrites (0.374 ratio).
+- [x] Migrate checkpoint flush/recovery to format-3 delta segments, persist
+  tombstones, merge newest versions across segment readers, execute bounded
+  plans, and retain format-2 promotion compatibility. A four-by-1,000-by-128
+  materialization benchmark measured 6.53–6.66 ms and about 7.46 MB allocated
+  for 2.05 MB of raw vectors; that evidence reduced the input cap to 64 MiB.
+- [x] Add a direct composite mmap reader for format-3 flat segments. Recovery
+  resolves newest record locations and tombstones from record columns, then
+  searches surviving vectors in their original mapped segment files without
+  copying vector payloads into the Go heap.
+- [x] Add a reproducible retained-heap calibration command with optional in-use
+  heap profiles. Three isolated Apple M3/Go 1.26.5 runs measured 549.03–549.13
+  retained B/vector for flat 50,000 x 128 (512 structural) and 908.07–908.14
+  for mutable HNSW 5,000 x 64 (508.63 structural); these remain workload-local
+  measurements rather than publishable universal capacity claims.
 
 ## API and distributed behavior
 
-- [ ] Add durable idempotency keys for writes so ambiguous distributed outcomes
-  can be retried safely.
-- [ ] Finish consensus-backed authoritative placement and fully separated
-  physical shard ownership for every public distributed route.
-- [ ] Add any still-missing pagination and server-side rate limiting to public
-  operational APIs.
-- [ ] Finalize API and persistent-format compatibility guarantees, migrations,
-  and pre-1.0 breaking-change policy.
+- [x] Add durable `Idempotency-Key` handling for placement-aware writes. Each
+  shard persists the request digest and prepared record versions before WAL
+  append, matching retries return the original result across checkpoint and
+  restart, conflicting reuse returns `409`, and coordinator/client propagation
+  is covered by recovery and transport tests.
+- [x] Require authoritative placement for every public distributed search,
+  scroll, and batch-write route. Multi-node authority now requires converged
+  fingerprints matching a committed metadata-Raft view; standalone ownership
+  remains valid, and the three-node gate verifies owner-only WAL, segment, and
+  idempotency state across restart.
+- [x] Add opaque cursor pagination with 1–200 item bounds to collection, peer,
+  and shard-placement listings. Public APIs now use configurable per-credential
+  or direct-address token buckets, return `429` with `Retry-After`, exempt
+  health/readiness and internal transport, and cap retained limiter identities
+  at 4,096.
+- [x] Finalize API and persistent-format compatibility guarantees, migrations,
+  and pre-1.0 breaking-change policy. The published compatibility matrix now
+  covers REST, cluster transport, WAL, checkpoints, index sidecars, metadata,
+  and backups; `gideondb -migrate-data` performs an offline format-1/2 to
+  format-3 checkpoint migration, with regression tests for both legacy paths.
 - [ ] Add sparse and hybrid retrieval if adopted by the release scope; the
   current engine supports dense float32 vectors only.
 

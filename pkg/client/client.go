@@ -263,12 +263,18 @@ func (c *Client) DistributedSearch(ctx context.Context, collection string, optio
 }
 
 func (c *Client) DistributedBatchUpsert(ctx context.Context, collection string, records []Record, acknowledgement string) (DistributedWriteResponse, error) {
+	return c.DistributedBatchUpsertWithIdempotencyKey(ctx, collection, records, acknowledgement, "")
+}
+
+// DistributedBatchUpsertWithIdempotencyKey binds a durable key to every shard
+// mutation created by the placement-aware batch coordinator.
+func (c *Client) DistributedBatchUpsertWithIdempotencyKey(ctx context.Context, collection string, records []Record, acknowledgement, idempotencyKey string) (DistributedWriteResponse, error) {
 	var response DistributedWriteResponse
 	body := map[string]any{"records": records}
 	if acknowledgement != "" {
 		body["acknowledgement"] = acknowledgement
 	}
-	err := c.do(ctx, http.MethodPost, clusterCollectionPath(collection)+"/vectors/batch", body, &response)
+	err := c.doWithIdempotencyKey(ctx, http.MethodPost, clusterCollectionPath(collection)+"/vectors/batch", body, &response, idempotencyKey)
 	return response, err
 }
 
@@ -296,6 +302,10 @@ func clusterCollectionPath(name string) string {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, requestBody, responseBody any) error {
+	return c.doWithIdempotencyKey(ctx, method, path, requestBody, responseBody, "")
+}
+
+func (c *Client) doWithIdempotencyKey(ctx context.Context, method, path string, requestBody, responseBody any, idempotencyKey string) error {
 	var body io.Reader
 	if requestBody != nil {
 		payload, err := json.Marshal(requestBody)
@@ -315,6 +325,9 @@ func (c *Client) do(ctx context.Context, method, path string, requestBody, respo
 	}
 	if c.apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	if idempotencyKey != "" {
+		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
 	response, err := c.http.Do(request)
 	if err != nil {

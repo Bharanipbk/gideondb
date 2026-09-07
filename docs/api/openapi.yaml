@@ -166,6 +166,9 @@ paths:
   /cluster/peers:
     get:
       operationId: clusterPeers
+      parameters:
+        - {$ref: "#/components/parameters/PageLimit"}
+        - {$ref: "#/components/parameters/PageCursor"}
       responses:
         "200":
           description: Local observational view of configured static peers.
@@ -180,11 +183,16 @@ paths:
                   peers:
                     type: array
                     items: {$ref: "#/components/schemas/Peer"}
-                required: [cluster_id, local_node_id, metadata_epoch, peers]
+                  next_cursor: {type: string}
+                required: [cluster_id, local_node_id, metadata_epoch, peers, next_cursor]
         "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
   /cluster/placement:
     get:
       operationId: clusterPlacement
+      parameters:
+        - {$ref: "#/components/parameters/PageLimit"}
+        - {$ref: "#/components/parameters/PageCursor"}
       responses:
         "200":
           description: Deterministic logical-shard placement with static activation status.
@@ -192,6 +200,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/PlacementTable"}
         "401": {$ref: "#/components/responses/Error"}
+        "429": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
   /cluster/replicas:
     get:
@@ -339,6 +348,9 @@ paths:
   /collections:
     get:
       operationId: listCollections
+      parameters:
+        - {$ref: "#/components/parameters/PageLimit"}
+        - {$ref: "#/components/parameters/PageCursor"}
       responses:
         "200":
           description: Collection configurations.
@@ -350,7 +362,8 @@ paths:
                   collections:
                     type: array
                     items: {$ref: "#/components/schemas/CollectionConfig"}
-                required: [collections]
+                  next_cursor: {type: string}
+                required: [collections, next_cursor]
     post:
       operationId: createCollection
       requestBody:
@@ -831,6 +844,8 @@ paths:
     post:
       operationId: distributedBatchUpsert
       description: Experimental non-atomic batch coordination over preview placement.
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
       requestBody:
         required: true
         content:
@@ -851,6 +866,7 @@ paths:
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
 components:
   parameters:
@@ -859,6 +875,20 @@ components:
       in: path
       required: true
       schema: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"}
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Durable logical-request key; reuse is valid only with identical records.
+      schema: {type: string, minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"}
+    PageLimit:
+      name: limit
+      in: query
+      schema: {type: integer, minimum: 1, maximum: 200, default: 100}
+    PageCursor:
+      name: cursor
+      in: query
+      schema: {type: string}
   responses:
     Error:
       description: Error response.
@@ -922,6 +952,7 @@ components:
         shards:
           type: array
           items: {$ref: "#/components/schemas/ShardPlacement"}
+        next_cursor: {type: string}
       required: [epoch, authoritative, nodes, shards]
     ReplicaPlacementTable:
       type: object

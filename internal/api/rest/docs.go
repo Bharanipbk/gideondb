@@ -129,7 +129,8 @@ func documentationDocumentOrder(name string) int {
 		"operations/observability.md":         5,
 		"operations/backup-restore.md":        6,
 		"operations/rolling-upgrades.md":      7,
-		"operations/network-partitions.md":    8,
+		"operations/compatibility.md":          8,
+		"operations/network-partitions.md":    9,
 	}
 	if position, exists := order[name]; exists {
 		return position

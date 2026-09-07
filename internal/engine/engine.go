@@ -35,6 +35,7 @@ type Engine struct {
 	checkpointEvery uint64
 	ownership       map[string]map[uint32]struct{}
 	walDigests      map[string][]map[uint64][32]byte
+	idempotency     map[string][]map[string]idempotencyEntry
 }
 
 func Open(dataPath string) (*Engine, error) {
@@ -67,6 +68,7 @@ func OpenWithOptions(dataPath string, options Options) (*Engine, error) {
 		checkpointEvery: options.CheckpointEvery,
 		ownership:       ownership,
 		walDigests:      make(map[string][]map[uint64][32]byte),
+		idempotency:     make(map[string][]map[string]idempotencyEntry),
 	}
 	entries, err := os.ReadDir(filepath.Join(dataPath, "collections"))
 	if err != nil {
@@ -86,6 +88,10 @@ func OpenWithOptions(dataPath string, options Options) (*Engine, error) {
 		}
 		e.collections[snapshot.Config.Name] = c
 		e.initializeWALDigests(snapshot.Config)
+		if err := e.initializeIdempotency(snapshot.Config); err != nil {
+			_ = e.closeLogs()
+			return nil, err
+		}
 		if err := e.loadSegments(c, snapshot.Records); err != nil {
 			_ = e.closeLogs()
 			return nil, err
@@ -119,6 +125,11 @@ func (e *Engine) CreateCollection(config core.CollectionConfig) error {
 	}
 	e.collections[config.Name] = c
 	e.initializeWALDigests(config)
+	if err := e.initializeIdempotency(config); err != nil {
+		delete(e.collections, config.Name)
+		_ = os.Remove(e.collectionPath(config.Name))
+		return err
+	}
 	e.checkpointLSN[config.Name] = make([]uint64, config.ShardCount)
 	e.mutations[config.Name] = make([]uint64, config.ShardCount)
 	if err := e.openCollectionLogs(c); err != nil {
@@ -161,10 +172,14 @@ func (e *Engine) DeleteCollection(name string) error {
 	if err := os.RemoveAll(filepath.Join(e.dataPath, "segments", name)); err != nil {
 		return err
 	}
+	if err := os.RemoveAll(filepath.Join(e.dataPath, "idempotency", name)); err != nil {
+		return err
+	}
 	delete(e.collections, name)
 	delete(e.logs, name)
 	delete(e.checkpointLSN, name)
 	delete(e.mutations, name)
+	delete(e.idempotency, name)
 	return nil
 }
 
@@ -305,6 +320,13 @@ func (e *Engine) BatchUpsertShard(name string, shardID uint32, records []core.Re
 // BatchUpsertShardWithSequence returns the durable WAL sequence used by
 // replica transport in addition to the leader-prepared records.
 func (e *Engine) BatchUpsertShardWithSequence(name string, shardID uint32, records []core.Record) ([]core.Record, uint64, error) {
+	return e.BatchUpsertShardIdempotent(name, shardID, records, "")
+}
+
+// BatchUpsertShardIdempotent commits a shard batch once for a durable key. A
+// retry with the same canonical request returns the originally prepared record
+// versions; reusing the key for different content is rejected.
+func (e *Engine) BatchUpsertShardIdempotent(name string, shardID uint32, records []core.Record, idempotencyKey string) ([]core.Record, uint64, error) {
 	if len(records) == 0 || len(records) > 10_000 {
 		return nil, 0, fmt.Errorf("%w: batch size must be between 1 and 10000", core.ErrInvalidArgument)
 	}
@@ -319,6 +341,24 @@ func (e *Engine) BatchUpsertShardWithSequence(name string, shardID uint32, recor
 	}
 	if int(shardID) >= c.Config().ShardCount {
 		return nil, 0, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
+	}
+	requestDigest, err := idempotencyDigest(records)
+	if err != nil {
+		return nil, 0, err
+	}
+	if idempotencyKey != "" {
+		if err := validateIdempotencyKey(idempotencyKey); err != nil {
+			return nil, 0, err
+		}
+		if retained, exists := e.idempotency[name][shardID][idempotencyKey]; exists {
+			if retained.Digest != requestDigest {
+				return nil, 0, core.ErrIdempotencyConflict
+			}
+			if retained.Completed {
+				return cloneRecords(retained.Records), retained.Sequence, nil
+			}
+			return e.commitReservedBatchLocked(name, c, shardID, idempotencyKey, retained)
+		}
 	}
 	for position, record := range records {
 		if record.ID == "" || c.RouteShard(record.Namespace, record.ID) != shardID {
@@ -335,6 +375,15 @@ func (e *Engine) BatchUpsertShardWithSequence(name string, shardID uint32, recor
 			return nil, 0, fmt.Errorf("record %d: %w", position, err)
 		}
 		prepared[position] = stored
+	}
+	if idempotencyKey != "" {
+		entry := idempotencyEntry{Key: idempotencyKey, Digest: requestDigest, Records: cloneRecords(prepared)}
+		e.idempotency[name][shardID][idempotencyKey] = entry
+		if err := e.persistIdempotencyLocked(name, shardID); err != nil {
+			delete(e.idempotency[name][shardID], idempotencyKey)
+			return nil, 0, err
+		}
+		return e.commitReservedBatchLocked(name, c, shardID, idempotencyKey, entry)
 	}
 	payload, err := json.Marshal(walMutation{Records: prepared})
 	if err != nil {
@@ -793,7 +842,57 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 			return fmt.Errorf("load manifest for %s shard %d: %w", config.Name, shardID, err)
 		}
 		var records []core.Record
-		if manifest.Format == 1 {
+		if manifest.Format == 3 {
+			var locations []segmentfile.VectorLocation
+			if config.Index.Type == core.IndexFlat {
+				records, locations, err = resolveMappedSegments(directory, manifest.Segments)
+			} else {
+				records, _, err = materializeSegments(directory, manifest.Segments)
+			}
+			if err != nil {
+				return fmt.Errorf("load multi-segment shard %s/%d: %w", config.Name, shardID, err)
+			}
+			if uint64(len(records)) != manifest.RecordCount {
+				return fmt.Errorf("multi-segment live record count mismatch for %s shard %d", config.Name, shardID)
+			}
+			var metadataIndex *metadata.Index
+			if manifest.FilterFile != "" {
+				payload, filterErr := segmentfile.ReadFilter(directory, manifest)
+				if filterErr != nil {
+					return fmt.Errorf("load multi-segment filter index: %w", filterErr)
+				}
+				metadataIndex, filterErr = metadata.LoadBinary(payload, manifest.RecordCount)
+				if filterErr != nil {
+					return fmt.Errorf("restore multi-segment filter index: %w", filterErr)
+				}
+			}
+			for _, record := range records {
+				if c.RouteShard(record.Namespace, record.ID) != uint32(shardID) {
+					return fmt.Errorf("multi-segment record routed to wrong shard")
+				}
+			}
+			if config.Index.Type == core.IndexFlat {
+				mapped, mapErr := segmentfile.OpenCompositeMappedVectors(directory, manifest.Segments, locations)
+				if mapErr != nil {
+					return fmt.Errorf("map multi-segment vectors: %w", mapErr)
+				}
+				if err := c.InstallMappedShardWithMetadata(uint32(shardID), records, mapped, mapped, metadataIndex); err != nil {
+					_ = mapped.Close()
+					return err
+				}
+			} else if config.Index.Type == core.IndexHNSW && manifest.GraphFile != "" {
+				graph, graphErr := segmentfile.ReadGraph(directory, manifest)
+				if graphErr != nil {
+					return fmt.Errorf("load multi-segment hnsw graph: %w", graphErr)
+				}
+				if err := c.InstallHNSWShardWithMetadata(uint32(shardID), records, graph, metadataIndex); err != nil {
+					return err
+				}
+			} else if err := c.InstallRecordsShardWithMetadata(uint32(shardID), records, metadataIndex); err != nil {
+				return err
+			}
+			records = nil
+		} else if manifest.Format == 1 {
 			count, maxLSN, err := segmentfile.Read(filepath.Join(directory, manifest.SegmentFile), &records)
 			if err != nil {
 				return fmt.Errorf("load legacy segment for %s shard %d: %w", config.Name, shardID, err)
@@ -895,6 +994,17 @@ func (e *Engine) Checkpoint(name string) error {
 	return nil
 }
 
+// MigratePersistentFormats rewrites every owned legacy checkpoint through the
+// current durable format-3 publisher. Current checkpoints are left unchanged.
+func (e *Engine) MigratePersistentFormats() error {
+	for _, config := range e.ListCollections() {
+		if err := e.Checkpoint(config.Name); err != nil {
+			return fmt.Errorf("migrate collection %s: %w", config.Name, err)
+		}
+	}
+	return nil
+}
+
 func (e *Engine) afterMutationLocked(name string, c *collection.Collection, shardID uint32) error {
 	e.mutations[name][shardID]++
 	if e.checkpointEvery > 0 && e.mutations[name][shardID] >= e.checkpointEvery {
@@ -915,21 +1025,60 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 	if maxLSN < e.checkpointLSN[name][shardID] {
 		return fmt.Errorf("WAL LSN regressed below checkpoint")
 	}
+	delta, tombstones, err := c.ShardCheckpointDelta(shardID)
+	if err != nil {
+		return err
+	}
+	manifestPath := filepath.Join(e.shardSegmentDir(name, shardID), "MANIFEST.json")
+	old, oldErr := segmentfile.LoadManifest(manifestPath)
+	if oldErr != nil && !errors.Is(oldErr, os.ErrNotExist) {
+		return oldErr
+	}
+	if oldErr == nil && old.Format == 3 && maxLSN == old.MaxLSN && len(delta) == 0 && len(tombstones) == 0 {
+		return nil
+	}
 	records, err := c.ShardRecords(shardID)
 	if err != nil {
 		return err
 	}
 	directory := e.shardSegmentDir(name, shardID)
-	segmentBase := fmt.Sprintf("segment-%020d", maxLSN)
-	manifest, err := segmentfile.WriteBundle(directory, segmentBase, records, c.Config().Dimension, maxLSN)
+	refs := make([]segmentfile.SegmentRef, 0, 9)
+	if oldErr == nil {
+		switch old.Format {
+		case 1:
+			// Combined legacy checkpoints cannot be referenced by a format-3
+			// manifest, so materialize their complete live view as one bundle.
+			delta = records
+			tombstones = nil
+		case 2:
+			ref, err := refFromManifest(directory, old)
+			if err != nil {
+				return err
+			}
+			refs = append(refs, ref)
+		case 3:
+			refs = append(refs, old.Segments...)
+		}
+	}
+	writeDelta := oldErr != nil || (oldErr == nil && old.Format == 1) || len(delta) != 0 || len(tombstones) != 0
+	if writeDelta {
+		segmentBase := fmt.Sprintf("segment-%020d-delta", maxLSN)
+		ref, err := writeSegmentRef(directory, segmentBase, delta, tombstones, c.Config().Dimension, maxLSN)
+		if err != nil {
+			return err
+		}
+		refs = append(refs, ref)
+	}
+	refs, err = compactSegmentRefs(directory, refs, c.Config().Dimension, maxLSN)
 	if err != nil {
 		return err
 	}
+	manifest := segmentfile.Manifest{Format: 3, Dimension: uint32(c.Config().Dimension), MaxLSN: maxLSN, RecordCount: uint64(len(records)), Segments: refs}
 	filterData, err := metadata.MarshalRecords(records)
 	if err != nil {
 		return err
 	}
-	manifest.FilterFile = segmentBase + ".filter"
+	manifest.FilterFile = fmt.Sprintf("view-%020d.filter", maxLSN)
 	if err := segmentfile.WriteFilter(directory, manifest.FilterFile, filterData, manifest.RecordCount, manifest.MaxLSN); err != nil {
 		return err
 	}
@@ -939,14 +1088,10 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 		if err != nil {
 			return err
 		}
-		manifest.GraphFile = segmentBase + ".graph"
+		manifest.GraphFile = fmt.Sprintf("view-%020d.graph", maxLSN)
 		if err := segmentfile.WriteGraph(directory, manifest.GraphFile, graphData); err != nil {
 			return err
 		}
-	}
-	manifestPath := filepath.Join(directory, "MANIFEST.json")
-	if _, err := segmentfile.LoadManifest(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
 	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
@@ -955,30 +1100,25 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 		return err
 	}
 	e.walDigests[name][shardID] = make(map[uint64][32]byte)
-	if c.Config().Index.Type == core.IndexFlat {
-		baseRecords, err := segmentfile.ReadRecordColumn(directory, manifest)
+	metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
+	if err != nil {
+		return err
+	}
+	if c.Config().Index.Type == core.IndexHNSW {
+		if err := c.InstallHNSWShardWithMetadata(shardID, records, graphData, metadataIndex); err != nil {
+			return err
+		}
+	} else {
+		baseRecords, locations, err := resolveMappedSegments(directory, manifest.Segments)
 		if err != nil {
 			return err
 		}
-		mapped, err := segmentfile.OpenMappedVectors(filepath.Join(directory, manifest.VectorsFile), manifest.Dimension, manifest.RecordCount, manifest.MaxLSN)
+		mapped, err := segmentfile.OpenCompositeMappedVectors(directory, manifest.Segments, locations)
 		if err != nil {
-			return err
-		}
-		metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
-		if err != nil {
-			_ = mapped.Close()
 			return err
 		}
 		if err := c.InstallMappedShardWithMetadata(shardID, baseRecords, mapped, mapped, metadataIndex); err != nil {
 			_ = mapped.Close()
-			return err
-		}
-	} else if c.Config().Index.Type == core.IndexHNSW {
-		metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
-		if err != nil {
-			return err
-		}
-		if err := c.InstallHNSWShardWithMetadata(shardID, records, graphData, metadataIndex); err != nil {
 			return err
 		}
 	}

@@ -44,6 +44,7 @@ Collection configuration is stored in an atomic JSON catalog snapshot. Vector
 mutations use checksummed per-shard WALs. After 1,000 mutations to a shard by
 default, live records are compacted into an immutable checksummed segment, an
 atomic manifest publishes its checkpoint LSN, and the covered WAL is reset.
-Group commit, multi-segment size-tiered compaction, mmap, index files, snapshots,
-and stable format compatibility are not implemented. Do not use this phase for
-production data.
+Format-3 multi-segment compaction, mmap-backed flat recovery, HNSW/filter index
+files, snapshots, and an offline legacy migration path are implemented. The
+project remains pre-1.0; read the [compatibility contract](../operations/compatibility.md)
+and validate backups before relying on it for important data.

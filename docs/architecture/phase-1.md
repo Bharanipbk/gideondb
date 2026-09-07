@@ -57,6 +57,6 @@ only then updates the in-memory segment. Startup loads the catalog and replays
 all shard WALs. Startup fails rather than skipping an unreadable catalog or a
 corrupt complete WAL record.
 
-The JSON catalog and WAL format remain experimental. Immutable segments,
-manifests, checkpoints, compaction, bounded WAL retention, batch group commit,
-and stable format compatibility are not yet claimed.
+This historical phase used the format-1 catalog and WAL. Current immutable
+checkpoint formats and migration guarantees are documented in the
+[compatibility contract](../operations/compatibility.md).

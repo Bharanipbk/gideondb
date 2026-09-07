@@ -36,6 +36,8 @@ func main() {
 	checkpointEvery := flag.Uint64("checkpoint-every", defaults.CheckpointEvery, "checkpoint a shard after this many mutations; 0 disables")
 	replicationFactor := flag.Int("replication-factor", defaults.ReplicationFactor, "number of deterministic shard replicas")
 	placementCapacity := flag.Uint("placement-capacity", uint(defaults.PlacementCapacity), "relative shard placement capacity from 1 to 256")
+	rateLimitPerSecond := flag.Int("rate-limit-per-second", defaults.RateLimitPerSecond, "public API requests per second per credential or client address")
+	rateLimitBurst := flag.Int("rate-limit-burst", defaults.RateLimitBurst, "public API token-bucket burst per credential or client address")
 	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
 	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
 	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow bearer authentication over cleartext HTTP on a non-loopback listener")
@@ -46,6 +48,7 @@ func main() {
 	backupTo := flag.String("backup-to", "", "create a consistent backup archive and exit")
 	restoreFrom := flag.String("restore-from", "", "restore an archive into the data path and exit (destination must not exist)")
 	verifyData := flag.Bool("verify-data", false, "open and validate the data path, then exit")
+	migrateData := flag.Bool("migrate-data", false, "validate and rewrite legacy checkpoints to the current persistent format, then exit")
 	validateConfig := flag.Bool("validate-config", false, "validate effective configuration, then exit")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	healthcheckURL := flag.String("healthcheck-url", "", "check an HTTP health URL and exit")
@@ -96,13 +99,20 @@ func main() {
 	*address, *advertiseAddress, *dataPath, *walSync, *checkpointEvery = settings.HTTPAddress, settings.AdvertiseAddress, settings.DataPath, settings.WALSync, settings.CheckpointEvery
 	*replicationFactor = settings.ReplicationFactor
 	*placementCapacity = uint(settings.PlacementCapacity)
+	*rateLimitPerSecond, *rateLimitBurst = settings.RateLimitPerSecond, settings.RateLimitBurst
 	*clusterID = settings.ClusterID
 	*apiKeyFile, *allowUnauthenticated, *allowInsecureHTTP = settings.APIKeyFile, settings.AllowUnauthenticated, settings.AllowInsecureHTTP
 	*enableStaticRouting = settings.EnableStaticRouting
 	*tlsCertFile, *tlsKeyFile, *tlsCAFile = settings.TLSCertFile, settings.TLSKeyFile, settings.TLSCAFile
 	*peers = strings.Join(settings.Peers, ",")
-	if *backupTo != "" && *restoreFrom != "" {
-		logger.Error("-backup-to and -restore-from are mutually exclusive")
+	offlineActions := 0
+	for _, selected := range []bool{*backupTo != "", *restoreFrom != "", *verifyData, *migrateData} {
+		if selected {
+			offlineActions++
+		}
+	}
+	if offlineActions > 1 {
+		logger.Error("-backup-to, -restore-from, -verify-data, and -migrate-data are mutually exclusive")
 		os.Exit(2)
 	}
 	if *restoreFrom != "" {
@@ -114,7 +124,7 @@ func main() {
 		return
 	}
 	var apiKey string
-	offline := *backupTo != "" || *verifyData
+	offline := *backupTo != "" || *verifyData || *migrateData
 	if !offline {
 		if _, err := rest.ParseAddress(*address); err != nil {
 			logger.Error("invalid HTTP address", "error", err)
@@ -193,6 +203,14 @@ func main() {
 		logger.Info("data verification complete", "data_path", *dataPath)
 		return
 	}
+	if *migrateData {
+		if err := db.MigratePersistentFormats(); err != nil {
+			logger.Error("migrate persistent formats", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("persistent format migration complete", "data_path", *dataPath, "manifest_format", 3)
+		return
+	}
 	identity, err := cluster.LoadOrCreate(*dataPath)
 	if err != nil {
 		logger.Error("load node identity", "error", err)
@@ -236,7 +254,7 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != ""})
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,

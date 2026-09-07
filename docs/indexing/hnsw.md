@@ -58,11 +58,13 @@ checkpoints without a graph remain readable through deterministic rebuilding.
 ## Memory accounting
 
 The index reports live/deleted nodes, vector bytes, directed graph edges,
-estimated edge bytes, and maximum level. This is owned-allocation accounting,
-not process RSS. For recovered immutable graphs, graph bytes include the packed
-neighbor and per-layer offset backing arrays. Slice headers, map buckets, and
-allocator overhead are not yet included. Heap-profile calibration is required
-before publishing bytes/vector.
+structural edge bytes, and maximum level. This is a deterministic structural
+lower bound, not Go heap usage or process RSS. For recovered immutable graphs,
+graph bytes include the packed neighbor and per-layer offset backing arrays.
+Slice headers, map buckets, spare capacity, and allocator overhead are not
+included. A reproducible heap calibration measured the expected gap, but its
+result is environment- and workload-specific; run the calibration command with
+representative dimensions and HNSW settings before capacity planning.
 
 ## Quality validation
 

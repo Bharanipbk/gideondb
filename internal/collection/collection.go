@@ -350,24 +350,27 @@ func (c *Collection) ShardRecords(shardID uint32) ([]core.Record, error) {
 	return c.shards[shardID].Records(), nil
 }
 
+func (c *Collection) ShardCheckpointDelta(shardID uint32) ([]core.Record, []string, error) {
+	if int(shardID) >= len(c.shards) {
+		return nil, nil, fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
+	}
+	records, tombstones := c.shards[shardID].CheckpointDelta()
+	return records, tombstones, nil
+}
+
 // ReplaceShardRecords replaces one shard with a complete materialized replica
 // snapshot while preserving the leader-assigned record versions.
 func (c *Collection) ReplaceShardRecords(shardID uint32, records []core.Record) error {
+	return c.InstallRecordsShardWithMetadata(shardID, records, nil)
+}
+
+func (c *Collection) InstallRecordsShardWithMetadata(shardID uint32, records []core.Record, metadataIndex *metadata.Index) error {
 	if int(shardID) >= len(c.shards) {
 		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
 	}
-	base, err := segment.New(c.config)
-	if err != nil {
-		return err
-	}
 	for _, record := range records {
 		if c.RouteShard(record.Namespace, record.ID) != shardID {
-			_ = base.Close()
 			return fmt.Errorf("snapshot record routed to wrong shard")
-		}
-		if err := base.Upsert(record); err != nil {
-			_ = base.Close()
-			return err
 		}
 		for {
 			current := c.version.Load()
@@ -375,6 +378,10 @@ func (c *Collection) ReplaceShardRecords(shardID uint32, records []core.Record) 
 				break
 			}
 		}
+	}
+	base, err := segment.NewImmutable(c.config, records, metadataIndex)
+	if err != nil {
+		return err
 	}
 	return c.shards[shardID].InstallImmutable(base)
 }

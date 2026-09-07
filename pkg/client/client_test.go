@@ -128,7 +128,7 @@ func TestClientDistributedEndpointsAndValidation(t *testing.T) {
 	if _, err := sdk.CreateCollection(ctx, client.CollectionConfig{Name: "distributed", Dimension: 2, Metric: "dot", ShardCount: 2}); err != nil {
 		t.Fatal(err)
 	}
-	write, err := sdk.DistributedBatchUpsert(ctx, "distributed", []client.Record{{ID: "one", Vector: []float32{1, 0}}}, "quorum")
+	write, err := sdk.DistributedBatchUpsertWithIdempotencyKey(ctx, "distributed", []client.Record{{ID: "one", Vector: []float32{1, 0}}}, "quorum", "client:batch-001")
 	if err != nil || write.Partial || len(write.Outcomes) != 1 {
 		t.Fatalf("write=%#v err=%v", write, err)
 	}

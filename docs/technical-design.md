@@ -2,7 +2,8 @@
 
 **Status:** Proposed  
 **Scope:** Architecture before implementation  
-**Compatibility:** No public or persistent compatibility exists yet
+**Compatibility:** Pre-1.0 contract documented in
+[operations/compatibility.md](operations/compatibility.md)
 
 This document is the implementation contract for the first phases. Later
 distributed sections specify the intended destination and its failure model;

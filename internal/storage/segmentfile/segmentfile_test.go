@@ -61,6 +61,28 @@ func TestManifestRejectsTraversal(t *testing.T) {
 	}
 }
 
+func TestMultiSegmentManifestRoundTripAndValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "MANIFEST.json")
+	manifest := Manifest{Format: 3, Dimension: 2, MaxLSN: 20, RecordCount: 3, Segments: []SegmentRef{
+		{RecordsFile: "segment-10.records", VectorsFile: "segment-10.vectors", FilterFile: "segment-10.filter", TombstonesFile: "segment-10.tombstones", Dimension: 2, MaxLSN: 10, RecordCount: 2, SizeBytes: 128},
+		{RecordsFile: "segment-20.records", VectorsFile: "segment-20.vectors", Dimension: 2, MaxLSN: 20, RecordCount: 1, SizeBytes: 64},
+	}}
+	if err := SaveManifest(path, manifest); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadManifest(path)
+	if err != nil || len(loaded.Segments) != 2 || loaded.Segments[1].MaxLSN != 20 {
+		t.Fatalf("manifest = %#v, %v", loaded, err)
+	}
+	manifest.Segments[1].MaxLSN = 10
+	if err := SaveManifest(path, manifest); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadManifest(path); err == nil {
+		t.Fatal("accepted non-increasing segment LSNs")
+	}
+}
+
 func TestCleanupOrphansPreservesManifestAndUnknownFiles(t *testing.T) {
 	directory := t.TempDir()
 	manifest := Manifest{Format: 2, RecordsFile: "segment-20.records", VectorsFile: "segment-20.vectors", Dimension: 2, MaxLSN: 20}
@@ -126,6 +148,25 @@ func TestVectorColumnCorruptionFails(t *testing.T) {
 	_ = file.Close()
 	if _, err := ReadBundle(directory, manifest); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
 		t.Fatalf("expected vector checksum failure, got %v", err)
+	}
+}
+
+func TestTombstoneColumnRoundTripAndCorruption(t *testing.T) {
+	directory := t.TempDir()
+	name := "segment-2.tombstones"
+	if err := WriteTombstones(directory, name, []string{"\x00a", "tenant\x00b"}, 2); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := ReadTombstones(directory, name, 2)
+	if err != nil || len(keys) != 2 || keys[1] != "tenant\x00b" {
+		t.Fatalf("keys=%q err=%v", keys, err)
+	}
+	path := filepath.Join(directory, name)
+	file, _ := os.OpenFile(path, os.O_RDWR, 0)
+	_, _ = file.WriteAt([]byte{'X'}, columnHeaderSize+1)
+	_ = file.Close()
+	if _, err := ReadTombstones(directory, name, 2); err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		t.Fatalf("expected tombstone checksum failure, got %v", err)
 	}
 }
 
@@ -196,5 +237,42 @@ func TestMappedVectorsRejectsManifestMismatch(t *testing.T) {
 	if mapped, err := OpenMappedVectors(filepath.Join(directory, manifest.VectorsFile), 3, 1, 3); err == nil {
 		_ = mapped.Close()
 		t.Fatal("expected dimension mismatch")
+	}
+}
+
+func TestCompositeMappedVectorsRoutesSelectedRows(t *testing.T) {
+	directory := t.TempDir()
+	first, err := WriteBundle(directory, "first", []core.Record{{ID: "a", Vector: []float32{1, 2}}, {ID: "shadowed", Vector: []float32{9, 9}}}, 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := WriteBundle(directory, "second", []core.Record{{ID: "b", Vector: []float32{3, 4}}, {ID: "replacement", Vector: []float32{5, 6}}}, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refs := []SegmentRef{
+		{RecordsFile: first.RecordsFile, VectorsFile: first.VectorsFile, Dimension: 2, RecordCount: 2, MaxLSN: 1},
+		{RecordsFile: second.RecordsFile, VectorsFile: second.VectorsFile, Dimension: 2, RecordCount: 2, MaxLSN: 2},
+	}
+	mapped, err := OpenCompositeMappedVectors(directory, refs, []VectorLocation{{Segment: 1, Ordinal: 1}, {Segment: 0, Ordinal: 0}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapped.Len() != 2 || mapped.Dimension() != 2 || mapped.MappedBytes() == 0 {
+		t.Fatal("invalid composite mapping statistics")
+	}
+	vector, err := mapped.VectorCopy(0)
+	if err != nil || vector[0] != 5 || vector[1] != 6 {
+		t.Fatalf("routed vector = %v, %v", vector, err)
+	}
+	score, err := mapped.Score(core.MetricDot, []float32{1, 1}, 1)
+	if err != nil || score != 3 {
+		t.Fatalf("routed score = %v, %v", score, err)
+	}
+	if err := mapped.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapped.Score(core.MetricDot, []float32{1, 1}, 0); err == nil {
+		t.Fatal("composite score after close should fail")
 	}
 }

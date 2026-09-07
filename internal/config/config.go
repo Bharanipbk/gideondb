@@ -30,10 +30,12 @@ type Config struct {
 	TLSCertFile          string   `json:"tls_cert_file,omitempty"`
 	TLSKeyFile           string   `json:"tls_key_file,omitempty"`
 	TLSCAFile            string   `json:"tls_ca_file,omitempty"`
+	RateLimitPerSecond   int      `json:"rate_limit_per_second"`
+	RateLimitBurst       int      `json:"rate_limit_burst"`
 }
 
 func Default() Config {
-	return Config{HTTPAddress: "127.0.0.1:6333", DataPath: "./data", WALSync: string(wal.SyncAlways), CheckpointEvery: 1000, ReplicationFactor: 1, PlacementCapacity: 1}
+	return Config{HTTPAddress: "127.0.0.1:6333", DataPath: "./data", WALSync: string(wal.SyncAlways), CheckpointEvery: 1000, ReplicationFactor: 1, PlacementCapacity: 1, RateLimitPerSecond: 100, RateLimitBurst: 200}
 }
 
 // Load overlays a strict JSON object onto base.
@@ -93,6 +95,18 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 			return Config{}, fmt.Errorf("GIDEONDB_PLACEMENT_CAPACITY: %w", err)
 		}
 		value.PlacementCapacity = uint32(parsed)
+	}
+	for _, item := range []struct {
+		name   string
+		target *int
+	}{{"GIDEONDB_RATE_LIMIT_PER_SECOND", &value.RateLimitPerSecond}, {"GIDEONDB_RATE_LIMIT_BURST", &value.RateLimitBurst}} {
+		if raw, ok := getenv(item.name); ok {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				return Config{}, fmt.Errorf("%s: %w", item.name, err)
+			}
+			*item.target = parsed
+		}
 	}
 	if raw, ok := getenv("GIDEONDB_PEERS"); ok {
 		value.Peers = splitPeers(raw)
@@ -157,6 +171,18 @@ func ApplyFlags(value Config, values map[string]string) (Config, error) {
 				return Config{}, err
 			}
 			value.PlacementCapacity = uint32(parsed)
+		case "rate-limit-per-second":
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				return Config{}, err
+			}
+			value.RateLimitPerSecond = parsed
+		case "rate-limit-burst":
+			parsed, err := strconv.Atoi(raw)
+			if err != nil {
+				return Config{}, err
+			}
+			value.RateLimitBurst = parsed
 		case "allow-unauthenticated":
 			parsed, err := strconv.ParseBool(raw)
 			if err != nil {
@@ -192,6 +218,9 @@ func (c Config) Validate() error {
 	}
 	if c.PlacementCapacity < 1 || c.PlacementCapacity > 256 {
 		return fmt.Errorf("placement_capacity must be between 1 and 256")
+	}
+	if c.RateLimitPerSecond < 1 || c.RateLimitBurst < 1 || c.RateLimitBurst < c.RateLimitPerSecond {
+		return fmt.Errorf("rate_limit_per_second must be positive and rate_limit_burst must be at least that value")
 	}
 	if (c.TLSCertFile == "") != (c.TLSKeyFile == "") {
 		return fmt.Errorf("tls_cert_file and tls_key_file are required together")

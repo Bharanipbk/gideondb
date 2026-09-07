@@ -53,11 +53,40 @@ the combined-segment format 1 remain readable.
 
 ## Compaction semantics
 
-The checkpoint enumerates only the shard's current live records. Replaced
-versions and deletions are therefore physically absent from the new segment.
-This is full-shard compaction, not the final multi-segment size-tiered policy.
-It bounds WAL replay but has `O(live shard bytes)` write amplification at every
-threshold and temporarily holds serialized payload bytes in memory.
+Each checkpoint flushes only records changed since the prior generation and
+tombstones for deletions from older bundles. Replaced versions coexist until a
+selected compaction merges them using newest-operation semantics. This bounds
+ordinary flush write amplification while retaining atomic manifest publication
+and WAL replay boundaries.
+
+### Size-tiered policy
+
+Manifest format 3 can reference up to 16 immutable bundles
+ordered by strictly increasing checkpoint LSN, including record, vector, graph,
+filter, and tombstone files. Format-1 and format-2 manifests remain readable.
+
+The checked-in size-tiered planner uses four-segment fan-in, groups inputs whose
+sizes are within a 4× range, caps one compaction at 64 MiB, and applies pressure
+at eight segments. It returns an explicit error instead of exceeding the byte
+bound when pressure cannot produce a valid plan. In a deterministic simulation
+of 64 equal unit flushes, the planner wrote 778 units including flushes and
+compactions, versus 2,080 units for rewriting the complete live shard after
+every flush—a ratio of 0.374. This is algorithmic evidence, not disk or latency
+benchmark data.
+
+The production checkpoint writer now emits format-3 delta bundles containing
+only active records and persisted base-deletion tombstones. Recovery applies
+segments from oldest to newest, so later records replace earlier values and
+later tombstones remove them. The writer promotes an existing format-2 bundle
+into the first format-3 manifest without rewriting it, executes one selected
+bounded plan per flush, and atomically publishes the resulting segment set.
+
+A four-segment benchmark with 1,000 records and 128 dimensions per segment
+materialized 2.05 MB of raw vectors in 6.53–6.66 ms at 307–314 MB/s, allocating
+about 7.46 MB in 12,178 allocations. Because decoded records and merge maps use
+roughly 3.6× the raw vector bytes in this small trial, the initial compaction
+input cap was reduced from 256 MiB to 64 MiB. This is local Apple M3 evidence,
+not a production capacity claim.
 
 ## Pinned readers and generations
 
@@ -77,13 +106,15 @@ a transactionally consistent timestamp across separate cluster nodes.
 
 ## Current limitations
 
-- Flat shards search one mmap-backed checkpoint base plus one mutable WAL delta;
-  active keys and tombstones suppress older immutable values.
+- Flat shards use a composite mmap source for format-3 generations. Recovery
+  resolves each live key to its newest `(segment, ordinal)` from record columns,
+  applies tombstones, and leaves surviving vector payloads in their original
+  mapped files.
 - Record metadata/payload remains JSON inside its integrity envelope.
 - Vector data is a separate fixed-width column with a validated mmap reader and
   direct flat index used by the flat recovery path.
-- HNSW checkpoints load a versioned, checksummed graph; legacy checkpoints
-  without one rebuild deterministically from records.
+- HNSW checkpoints load a versioned, checksummed full-view graph; legacy
+  checkpoints without one rebuild deterministically from records.
 - After a manifest and its referenced columns validate, startup and checkpoint
   publication remove recognized obsolete segment columns, legacy segments,
   graph/filter files, and interrupted atomic-write temporaries. Unknown files are

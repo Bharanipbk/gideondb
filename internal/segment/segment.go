@@ -88,6 +88,23 @@ func New(config core.CollectionConfig) (*Segment, error) {
 	}, nil
 }
 
+func NewImmutable(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index) (*Segment, error) {
+	s, err := New(config)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		if err := s.Upsert(record); err != nil {
+			return nil, err
+		}
+	}
+	if metadataIndex != nil {
+		s.metadata = metadataIndex
+	}
+	s.readOnly = true
+	return s, nil
+}
+
 func BuildHNSWGraph(config core.CollectionConfig, records []core.Record) ([]byte, error) {
 	idx, err := hnsw.New(indexConfig(config))
 	if err != nil {

@@ -91,5 +91,5 @@ validated restore is renamed into place. Existing data is never merged,
 deleted, or overwritten.
 
 After restoration, normal engine startup performs its usual manifest, segment,
-and WAL validation. Backups remain experimental and carry no cross-version
-compatibility promise before the first stable format release.
+and WAL validation. Backup format 1 is guaranteed within the same pre-1.0 minor
+line; cross-minor restore support is stated in each release's migration notes.

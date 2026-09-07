@@ -34,6 +34,8 @@ type Options struct {
 	RebalanceBarriers                           *cluster.RebalanceBarrierStore
 	RebalanceExecutor                           *cluster.RebalanceExecutor
 	RequireInternalMTLS                         bool
+	RateLimitPerSecond                          int
+	RateLimitBurst                              int
 }
 
 func requireInternalMTLS(enabled bool, next http.Handler) http.Handler {

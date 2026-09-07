@@ -17,6 +17,7 @@ var (
 	ErrReplicationGap       = errors.New("replication sequence gap")
 	ErrReplicationConflict  = errors.New("replication sequence conflict")
 	ErrReplicationCompacted = errors.New("replication sequence compacted")
+	ErrIdempotencyConflict  = errors.New("idempotency key conflict")
 )
 
 // Metric identifies how vector similarity is computed.

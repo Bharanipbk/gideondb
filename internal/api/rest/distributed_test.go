@@ -36,7 +36,13 @@ func TestDistributedSearchFanoutFencingAndPartialFailures(t *testing.T) {
 	const localNode = "11111111111111111111111111111111"
 	const remoteNode = "22222222222222222222222222222222"
 	const clusterID = "33333333333333333333333333333333"
-	peer := cluster.Peer{SeedURL: "http://peer-b:6333", NodeID: remoteNode, ClusterID: clusterID, AdvertiseAddress: "peer-b:6333", Healthy: true}
+	peer := cluster.Peer{SeedURL: "http://peer-b:6333", NodeID: remoteNode, ClusterID: clusterID, AdvertiseAddress: "peer-b:6333", Healthy: true, State: cluster.PeerHealthy}
+	digests, err := cluster.ComputeViewDigests(7, localNode, "node-a:6333", []cluster.Peer{peer}, []core.CollectionConfig{config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.MetadataEpoch = 7
+	peer.MembershipDigest, peer.CatalogDigest, peer.PlacementDigest = digests.Membership, digests.Catalog, digests.Placement
 	plan, err := cluster.PlanPlacement(7, localNode, "node-a:6333", []cluster.Peer{peer}, []core.CollectionConfig{config})
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +77,8 @@ func TestDistributedSearchFanoutFencingAndPartialFailures(t *testing.T) {
 		body := fmt.Sprintf(`{"results":[{"id":"remote-%d","score":10}],"shard_id":%d,"metadata_epoch":7}`, shardID, shardID)
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
-	handler := NewWithOptions(db, nil, Options{APIKey: "0123456789abcdef", NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 7, PeerProvider: staticPeerProvider{peer}, InternalHTTPClient: client}).Handler()
+	store := committedTestRaftStore(t, localNode, []string{localNode, remoteNode}, 7, digests)
+	handler := NewWithOptions(db, nil, Options{APIKey: "0123456789abcdef", NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 7, PeerProvider: staticPeerProvider{peer}, InternalHTTPClient: client, EnableStaticRouting: true, RaftStore: store}).Handler()
 	call := func(allowPartial bool) *httptest.ResponseRecorder {
 		body := `{"vector":[1,0],"top_k":5}`
 		if allowPartial {
@@ -123,7 +130,13 @@ func TestDistributedBatchWriteOutcomesAndValidation(t *testing.T) {
 	const localNode = "11111111111111111111111111111111"
 	const remoteNode = "22222222222222222222222222222222"
 	const clusterID = "33333333333333333333333333333333"
-	peer := cluster.Peer{SeedURL: "http://peer-b:6333", NodeID: remoteNode, ClusterID: clusterID, AdvertiseAddress: "peer-b:6333", Healthy: true}
+	peer := cluster.Peer{SeedURL: "http://peer-b:6333", NodeID: remoteNode, ClusterID: clusterID, AdvertiseAddress: "peer-b:6333", Healthy: true, State: cluster.PeerHealthy}
+	digests, err := cluster.ComputeViewDigests(9, localNode, "node-a:6333", []cluster.Peer{peer}, []core.CollectionConfig{config})
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.MetadataEpoch = 9
+	peer.MembershipDigest, peer.CatalogDigest, peer.PlacementDigest = digests.Membership, digests.Catalog, digests.Placement
 	plan, err := cluster.PlanPlacement(9, localNode, "node-a:6333", []cluster.Peer{peer}, []core.CollectionConfig{config})
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +172,9 @@ func TestDistributedBatchWriteOutcomesAndValidation(t *testing.T) {
 		if request.Header.Get("X-GideonDB-Metadata-Epoch") != "9" || request.Header.Get("X-GideonDB-Target-Node-ID") != remoteNode {
 			return nil, errors.New("missing write fence")
 		}
+		if request.Header.Get("Idempotency-Key") != "batch:001" {
+			return nil, errors.New("missing idempotency key")
+		}
 		var incoming internalShardBatchRequest
 		if err := json.NewDecoder(request.Body).Decode(&incoming); err != nil {
 			return nil, err
@@ -178,24 +194,34 @@ func TestDistributedBatchWriteOutcomesAndValidation(t *testing.T) {
 		}
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(string(payload))), Header: make(http.Header)}, nil
 	})}
-	handler := NewWithOptions(db, nil, Options{NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 9, PeerProvider: staticPeerProvider{peer}, InternalHTTPClient: client}).Handler()
-	call := func(records []core.Record) *httptest.ResponseRecorder {
+	store := committedTestRaftStore(t, localNode, []string{localNode, remoteNode}, 9, digests)
+	handler := NewWithOptions(db, nil, Options{NodeID: localNode, ClusterID: clusterID, AdvertiseAddress: "node-a:6333", MetadataEpoch: 9, PeerProvider: staticPeerProvider{peer}, InternalHTTPClient: client, EnableStaticRouting: true, RaftStore: store}).Handler()
+	call := func(records []core.Record, keys ...string) *httptest.ResponseRecorder {
 		payload, marshalErr := json.Marshal(map[string]any{"records": records})
 		if marshalErr != nil {
 			t.Fatal(marshalErr)
 		}
 		request := httptest.NewRequest(http.MethodPost, "/v1/cluster/collections/writes/vectors/batch", strings.NewReader(string(payload)))
 		request.Header.Set("Content-Type", "application/json")
+		if len(keys) != 0 {
+			request.Header.Set("Idempotency-Key", keys[0])
+		}
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
 		return response
 	}
-	response := call([]core.Record{localRecord, remoteRecord})
+	response := call([]core.Record{localRecord, remoteRecord}, "batch:001")
 	if response.Code != http.StatusOK || strings.Count(response.Body.String(), `"status":"committed"`) != 2 || !strings.Contains(response.Body.String(), `"partial":false`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	if _, err := db.Get("writes", "", localRecord.ID); err != nil {
 		t.Fatalf("local record not committed: %v", err)
+	}
+	firstLocal, _ := db.Get("writes", "", localRecord.ID)
+	response = call([]core.Record{localRecord, remoteRecord}, "batch:001")
+	retriedLocal, _ := db.Get("writes", "", localRecord.ID)
+	if response.Code != http.StatusOK || retriedLocal.Version != firstLocal.Version || retriedLocal.Timestamp != firstLocal.Timestamp {
+		t.Fatalf("idempotent retry changed local record: first=%#v retry=%#v status=%d", firstLocal, retriedLocal, response.Code)
 	}
 	before := calls.Load()
 	response = call([]core.Record{{ID: "invalid", Vector: []float32{1}}})

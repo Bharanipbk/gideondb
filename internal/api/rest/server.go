@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -55,6 +56,7 @@ type Server struct {
 	backupOperation     string
 	requireInternalMTLS bool
 	draining            atomic.Bool
+	rateLimiter         *requestRateLimiter
 }
 
 func New(e *engine.Engine, logger *slog.Logger) *Server {
@@ -70,6 +72,9 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 		events = newPersistentEventLog(options.EventLogPath, 4096)
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
+	if options.RateLimitPerSecond > 0 && options.RateLimitBurst > 0 {
+		s.rateLimiter = newRequestRateLimiter(options.RateLimitPerSecond, options.RateLimitBurst)
+	}
 	if s.replicationFactor == 0 {
 		s.replicationFactor = 1
 	}
@@ -107,7 +112,7 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 }
 
 func (s *Server) Handler() http.Handler {
-	return securityHeaders(s.metrics.middleware(s.traceMiddleware(s.drainMiddleware(s.backupBarrierMiddleware(requireInternalMTLS(s.requireInternalMTLS, s.mux))))))
+	return securityHeaders(s.metrics.middleware(s.traceMiddleware(s.rateLimitMiddleware(s.drainMiddleware(s.backupBarrierMiddleware(requireInternalMTLS(s.requireInternalMTLS, s.mux)))))))
 }
 
 func (s *Server) BeginDrain() { s.draining.Store(true) }
@@ -262,15 +267,30 @@ func (s *Server) nodeInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) clusterPeers(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) clusterPeers(w http.ResponseWriter, r *http.Request) {
+	limit, cursor, ok := parsePageQuery(w, r)
+	if !ok {
+		return
+	}
 	peers := []cluster.Peer{}
 	if s.peerProvider != nil {
 		peers = s.peerProvider.Peers()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"cluster_id": s.clusterID, "local_node_id": s.nodeID, "metadata_epoch": s.currentMetadataEpoch(), "peers": peers})
+	sort.Slice(peers, func(i, j int) bool { return peers[i].NodeID < peers[j].NodeID })
+	start := sort.Search(len(peers), func(i int) bool { return peers[i].NodeID > cursor })
+	end := min(len(peers), start+limit)
+	next := ""
+	if end < len(peers) {
+		next = pageCursor(peers[end-1].NodeID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"cluster_id": s.clusterID, "local_node_id": s.nodeID, "metadata_epoch": s.currentMetadataEpoch(), "peers": peers[start:end], "next_cursor": next})
 }
 
-func (s *Server) clusterPlacement(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) clusterPlacement(w http.ResponseWriter, r *http.Request) {
+	limit, cursor, ok := parsePageQuery(w, r)
+	if !ok {
+		return
+	}
 	peers, peerErr := s.membershipPeers()
 	if peerErr != nil {
 		writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "membership_unavailable", Message: peerErr.Error()})
@@ -281,7 +301,16 @@ func (s *Server) clusterPlacement(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "placement_unavailable", Message: err.Error()})
 		return
 	}
-	table.Authoritative = s.staticPlacementReady()
+	table.Authoritative = s.authoritativePlacementReady()
+	key := func(item cluster.ShardPlacement) string {
+		return fmt.Sprintf("%s\x00%010d", item.Collection, item.ShardID)
+	}
+	start := sort.Search(len(table.Shards), func(i int) bool { return key(table.Shards[i]) > cursor })
+	end := min(len(table.Shards), start+limit)
+	if end < len(table.Shards) {
+		table.NextCursor = pageCursor(key(table.Shards[end-1]))
+	}
+	table.Shards = table.Shards[start:end]
 	writeJSON(w, http.StatusOK, table)
 }
 
@@ -347,7 +376,7 @@ func (s *Server) membershipPeers() ([]cluster.Peer, error) {
 
 func (s *Server) clusterReadiness(w http.ResponseWriter, _ *http.Request) {
 	local, peers, reasons := s.clusterReadinessState()
-	writeJSON(w, http.StatusOK, map[string]any{"ready": len(reasons) == 0, "authoritative": s.staticRouting && len(reasons) == 0, "static_routing_enabled": s.staticRouting, "metadata_epoch": s.currentMetadataEpoch(), "digests": local, "peers_checked": len(peers), "reasons": reasons})
+	writeJSON(w, http.StatusOK, map[string]any{"ready": len(reasons) == 0, "authoritative": s.authoritativePlacementReady(), "static_routing_enabled": s.staticRouting, "metadata_epoch": s.currentMetadataEpoch(), "digests": local, "peers_checked": len(peers), "reasons": reasons})
 }
 
 func (s *Server) staticPlacementReady() bool {
@@ -356,6 +385,39 @@ func (s *Server) staticPlacementReady() bool {
 	}
 	_, _, reasons := s.clusterReadinessState()
 	return len(reasons) == 0
+}
+
+// authoritativePlacementReady distinguishes a converged development view from
+// a placement committed by the metadata Raft group. A one-node deployment is
+// authoritative without distributed consensus because it has no remote owner.
+func (s *Server) authoritativePlacementReady() bool {
+	peers, err := s.membershipPeers()
+	if err != nil {
+		return false
+	}
+	if len(peers) == 0 && s.replicationFactor == 1 {
+		return true
+	}
+	if !s.staticPlacementReady() || s.raftStore == nil || len(s.raftStore.Voters()) == 0 {
+		return false
+	}
+	local, err := s.viewDigests()
+	if err != nil {
+		return false
+	}
+	committed, exists := s.raftStore.CommittedView()
+	return exists && committed.Membership == local.Membership && committed.Catalog == local.Catalog && committed.Placement == local.Placement
+}
+
+func (s *Server) requireAuthoritativePlacement(w http.ResponseWriter) bool {
+	if !s.requireStaticPlacement(w) {
+		return false
+	}
+	if s.authoritativePlacementReady() {
+		return true
+	}
+	writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "authoritative_placement_required", Message: "distributed data routes require placement committed by the metadata Raft group"})
+	return false
 }
 
 func (s *Server) requireStaticPlacement(w http.ResponseWriter) bool {
@@ -526,8 +588,19 @@ func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-func (s *Server) listCollections(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"collections": s.engine.ListCollections()})
+func (s *Server) listCollections(w http.ResponseWriter, r *http.Request) {
+	limit, cursor, ok := parsePageQuery(w, r)
+	if !ok {
+		return
+	}
+	collections := s.engine.ListCollections()
+	start := sort.Search(len(collections), func(i int) bool { return collections[i].Name > cursor })
+	end := min(len(collections), start+limit)
+	next := ""
+	if end < len(collections) {
+		next = pageCursor(collections[end-1].Name)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"collections": collections[start:end], "next_cursor": next})
 }
 
 func (s *Server) createCollection(w http.ResponseWriter, r *http.Request) {
@@ -747,6 +820,8 @@ func writeError(w http.ResponseWriter, err error) {
 		status, code = http.StatusConflict, "replication_conflict"
 	case errors.Is(err, core.ErrReplicationCompacted):
 		status, code = http.StatusGone, "replication_sequence_compacted"
+	case errors.Is(err, core.ErrIdempotencyConflict):
+		status, code = http.StatusConflict, "idempotency_conflict"
 	case errors.Is(err, core.ErrInvalidArgument), errors.Is(err, core.ErrDimensionMismatch):
 		status, code = http.StatusBadRequest, "invalid_argument"
 	}

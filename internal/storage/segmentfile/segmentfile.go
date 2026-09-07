@@ -24,15 +24,30 @@ var magic = [4]byte{'V', 'S', 'E', 'G'}
 var crcTable = crc32.MakeTable(crc32.Castagnoli)
 
 type Manifest struct {
-	Format      int    `json:"format"`
-	SegmentFile string `json:"segment_file,omitempty"`
-	RecordsFile string `json:"records_file,omitempty"`
-	VectorsFile string `json:"vectors_file,omitempty"`
-	GraphFile   string `json:"graph_file,omitempty"`
-	FilterFile  string `json:"filter_file,omitempty"`
-	Dimension   uint32 `json:"dimension,omitempty"`
-	MaxLSN      uint64 `json:"max_lsn"`
-	RecordCount uint64 `json:"record_count"`
+	Format      int          `json:"format"`
+	SegmentFile string       `json:"segment_file,omitempty"`
+	RecordsFile string       `json:"records_file,omitempty"`
+	VectorsFile string       `json:"vectors_file,omitempty"`
+	GraphFile   string       `json:"graph_file,omitempty"`
+	FilterFile  string       `json:"filter_file,omitempty"`
+	Dimension   uint32       `json:"dimension,omitempty"`
+	MaxLSN      uint64       `json:"max_lsn"`
+	RecordCount uint64       `json:"record_count"`
+	Segments    []SegmentRef `json:"segments,omitempty"`
+}
+
+// SegmentRef describes one immutable column bundle in a format-3 manifest.
+// Entries are ordered from oldest to newest and have increasing MaxLSN values.
+type SegmentRef struct {
+	RecordsFile    string `json:"records_file"`
+	VectorsFile    string `json:"vectors_file"`
+	GraphFile      string `json:"graph_file,omitempty"`
+	FilterFile     string `json:"filter_file,omitempty"`
+	TombstonesFile string `json:"tombstones_file,omitempty"`
+	Dimension      uint32 `json:"dimension"`
+	MaxLSN         uint64 `json:"max_lsn"`
+	RecordCount    uint64 `json:"record_count"`
+	SizeBytes      uint64 `json:"size_bytes,omitempty"`
 }
 
 func Write(path string, records any, recordCount uint64, maxLSN uint64) error {
@@ -139,6 +154,28 @@ func LoadManifest(path string) (Manifest, error) {
 			(manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) {
 			return Manifest{}, fmt.Errorf("invalid column segment manifest")
 		}
+	case 3:
+		if len(manifest.Segments) == 0 || len(manifest.Segments) > 16 || manifest.Dimension == 0 {
+			return Manifest{}, fmt.Errorf("invalid multi-segment manifest")
+		}
+		if (manifest.GraphFile != "" && !safeBase(manifest.GraphFile)) || (manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) {
+			return Manifest{}, fmt.Errorf("invalid multi-segment view index")
+		}
+		var previousLSN uint64
+		for position, segment := range manifest.Segments {
+			if segment.Dimension != manifest.Dimension || segment.RecordsFile == "" || segment.VectorsFile == "" ||
+				!safeBase(segment.RecordsFile) || !safeBase(segment.VectorsFile) ||
+				(segment.GraphFile != "" && !safeBase(segment.GraphFile)) ||
+				(segment.FilterFile != "" && !safeBase(segment.FilterFile)) ||
+				(segment.TombstonesFile != "" && !safeBase(segment.TombstonesFile)) ||
+				(position > 0 && segment.MaxLSN <= previousLSN) || segment.MaxLSN > manifest.MaxLSN {
+				return Manifest{}, fmt.Errorf("invalid multi-segment entry %d", position)
+			}
+			previousLSN = segment.MaxLSN
+		}
+		if manifest.Segments[len(manifest.Segments)-1].MaxLSN != manifest.MaxLSN {
+			return Manifest{}, fmt.Errorf("multi-segment manifest LSN mismatch")
+		}
 	default:
 		return Manifest{}, fmt.Errorf("unsupported segment manifest format %d", manifest.Format)
 	}
@@ -158,6 +195,13 @@ func CleanupOrphans(directory string, manifest Manifest) error {
 	for _, name := range []string{manifest.SegmentFile, manifest.RecordsFile, manifest.VectorsFile, manifest.GraphFile, manifest.FilterFile} {
 		if name != "" {
 			referenced[name] = struct{}{}
+		}
+	}
+	for _, segment := range manifest.Segments {
+		for _, name := range []string{segment.RecordsFile, segment.VectorsFile, segment.GraphFile, segment.FilterFile, segment.TombstonesFile} {
+			if name != "" {
+				referenced[name] = struct{}{}
+			}
 		}
 	}
 	for _, entry := range entries {
@@ -196,7 +240,7 @@ func orphanCandidate(name string) bool {
 	if !strings.HasPrefix(name, "segment-") {
 		return false
 	}
-	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".filter"} {
+	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".filter", ".tombstones"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}

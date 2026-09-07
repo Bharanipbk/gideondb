@@ -17,7 +17,7 @@ import (
 
 // commitLeaderShardBatch serializes leader commits through follower fanout so
 // concurrent requests cannot deliver later WAL sequences first.
-func (s *Server) commitLeaderShardBatch(ctx context.Context, collection string, shardID uint32, records []core.Record, acknowledgement string, traceparent string) ([]core.Record, int, bool, error) {
+func (s *Server) commitLeaderShardBatch(ctx context.Context, collection string, shardID uint32, records []core.Record, acknowledgement string, traceparent string, keys ...string) ([]core.Record, int, bool, error) {
 	s.replicationMu.Lock()
 	unlockHere := true
 	defer func() {
@@ -71,7 +71,11 @@ func (s *Server) commitLeaderShardBatch(ctx context.Context, collection string, 
 		return nil, 0, false, fmt.Errorf("local node is not the planned shard leader")
 	}
 
-	prepared, sequence, err := s.engine.BatchUpsertShardWithSequence(collection, shardID, records)
+	key := ""
+	if len(keys) != 0 {
+		key = keys[0]
+	}
+	prepared, sequence, err := s.engine.BatchUpsertShardIdempotent(collection, shardID, records, key)
 	if err != nil {
 		return nil, 0, false, err
 	}

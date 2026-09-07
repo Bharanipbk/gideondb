@@ -29,3 +29,8 @@ checksum mismatches. Batch-upsert payloads contain 1–10,000 complete records
 that all route to the WAL's shard. A short final header or payload is the only automatically
 recoverable corruption case. Major layout changes require a new version and a
 migration/replay tool; fields will never be reinterpreted silently.
+
+The current reader and writer both use WAL format 1. Upgrades must retain these
+files until they have been checkpointed successfully; unknown future versions
+fail closed. See the [compatibility and migration
+contract](../operations/compatibility.md) for release guarantees.

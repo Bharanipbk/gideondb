@@ -477,6 +477,10 @@ func TestPinnedSnapshotRetainsOlderGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	firstVectorFile := firstManifest.VectorsFile
+	if firstManifest.Format == 3 {
+		firstVectorFile = firstManifest.Segments[0].VectorsFile
+	}
 	first, err := db.PinSnapshot(config.Name)
 	if err != nil {
 		t.Fatal(err)
@@ -502,7 +506,7 @@ func TestPinnedSnapshotRetainsOlderGeneration(t *testing.T) {
 	if err != nil || newRecord.Vector[0] != 2 {
 		t.Fatalf("second generation record = %#v, %v", newRecord, err)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstManifest.VectorsFile)); err != nil {
+	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstVectorFile)); err != nil {
 		t.Fatalf("pinned generation vector file removed: %v", err)
 	}
 	if err := db.DeleteCollection(config.Name); !errors.Is(err, core.ErrInvalidArgument) {
@@ -520,11 +524,208 @@ func TestPinnedSnapshotRetainsOlderGeneration(t *testing.T) {
 	if err := db.Checkpoint(config.Name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstManifest.VectorsFile)); !errors.Is(err, os.ErrNotExist) {
+	if _, err := db.Upsert(config.Name, core.Record{ID: "item", Vector: []float32{4, 0}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstVectorFile)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("released obsolete generation still exists: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestMultiSegmentDeltaRecoveryAppliesNewestVersionsAndTombstones(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "multi", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []core.Record{{ID: "a", Vector: []float32{1, 0}}, {ID: "b", Vector: []float32{0, 1}}} {
+		if _, err := db.Upsert(config.Name, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "a", Vector: []float32{2, 0}, Metadata: map[string]any{"kind": "new"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(config.Name, "", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "c", Vector: []float32{0, 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "d", Vector: []float32{1, 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(path, "segments", config.Name, "shard-000000", "MANIFEST.json")
+	manifest, err := segmentfile.LoadManifest(manifestPath)
+	if err != nil || manifest.Format != 3 || len(manifest.Segments) != 3 || manifest.RecordCount != 3 || manifest.Segments[1].TombstonesFile == "" {
+		t.Fatalf("multi-segment manifest = %#v, %v", manifest, err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	a, err := reopened.Get(config.Name, "", "a")
+	if err != nil || a.Vector[0] != 2 || a.Metadata["kind"] != "new" {
+		t.Fatalf("newest a = %#v, %v", a, err)
+	}
+	if _, err := reopened.Get(config.Name, "", "b"); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("deleted b error = %v", err)
+	}
+	for _, id := range []string{"c", "d"} {
+		if _, err := reopened.Get(config.Name, "", id); err != nil {
+			t.Fatalf("missing %s after recovery: %v", id, err)
+		}
+	}
+}
+
+func TestMigratePersistentFormatsRewritesLegacyCombinedCheckpoint(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "legacy", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.Upsert(config.Name, core.Record{ID: "one", Vector: []float32{1, 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := filepath.Join(path, "segments", config.Name, "shard-000000")
+	if err := os.RemoveAll(directory); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := segmentfile.Write(filepath.Join(directory, "legacy.vseg"), []core.Record{stored}, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := segmentfile.SaveManifest(filepath.Join(directory, "MANIFEST.json"), segmentfile.Manifest{Format: 1, SegmentFile: "legacy.vseg", MaxLSN: 1, RecordCount: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.MigratePersistentFormats(); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := segmentfile.LoadManifest(filepath.Join(directory, "MANIFEST.json"))
+	if err != nil || manifest.Format != 3 || manifest.RecordCount != 1 || len(manifest.Segments) != 1 {
+		t.Fatalf("migrated manifest=%#v err=%v", manifest, err)
+	}
+	verified, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verified.Close()
+	if record, err := verified.Get(config.Name, "", stored.ID); err != nil || record.Version != stored.Version {
+		t.Fatalf("migrated record=%#v err=%v", record, err)
+	}
+}
+
+func TestMigratePersistentFormatsPromotesFormatTwoByReference(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "legacy-columns", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.Upsert(config.Name, core.Record{ID: "one", Vector: []float32{1, 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	directory := filepath.Join(path, "segments", config.Name, "shard-000000")
+	manifestPath := filepath.Join(directory, "MANIFEST.json")
+	current, err := segmentfile.LoadManifest(manifestPath)
+	if err != nil || len(current.Segments) != 1 {
+		t.Fatalf("current manifest=%#v err=%v", current, err)
+	}
+	ref := current.Segments[0]
+	legacy := segmentfile.Manifest{
+		Format:      2,
+		RecordsFile: ref.RecordsFile,
+		VectorsFile: ref.VectorsFile,
+		GraphFile:   ref.GraphFile,
+		FilterFile:  ref.FilterFile,
+		Dimension:   ref.Dimension,
+		MaxLSN:      ref.MaxLSN,
+		RecordCount: ref.RecordCount,
+	}
+	if err := segmentfile.SaveManifest(manifestPath, legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.MigratePersistentFormats(); err != nil {
+		t.Fatal(err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := segmentfile.LoadManifest(manifestPath)
+	if err != nil || migrated.Format != 3 || len(migrated.Segments) != 1 {
+		t.Fatalf("migrated manifest=%#v err=%v", migrated, err)
+	}
+	if migrated.Segments[0].RecordsFile != ref.RecordsFile || migrated.Segments[0].VectorsFile != ref.VectorsFile {
+		t.Fatalf("format-2 files were not promoted by reference: before=%#v after=%#v", ref, migrated.Segments[0])
+	}
+	verified, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer verified.Close()
+	if record, err := verified.Get(config.Name, "", stored.ID); err != nil || record.Version != stored.Version {
+		t.Fatalf("migrated record=%#v err=%v", record, err)
 	}
 }
 
@@ -561,5 +762,42 @@ func TestBatchUpsertShardValidatesRoutingAndRecovers(t *testing.T) {
 	got, err := reopened.Get(config.Name, "", record.ID)
 	if err != nil || got.Version != stored[0].Version {
 		t.Fatalf("got=%#v err=%v", got, err)
+	}
+}
+
+func TestShardBatchIdempotencySurvivesCheckpointAndRestart(t *testing.T) {
+	dataPath := t.TempDir()
+	db, err := OpenWithOptions(dataPath, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "idempotent", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	request := []core.Record{{ID: "one", Vector: []float32{1, 2}, Metadata: map[string]any{"source": "test"}}}
+	first, firstSequence, err := db.BatchUpsertShardIdempotent(config.Name, 0, request, "import:batch-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenWithOptions(dataPath, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	retried, retrySequence, err := reopened.BatchUpsertShardIdempotent(config.Name, 0, request, "import:batch-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retrySequence != firstSequence || len(retried) != 1 || retried[0].Version != first[0].Version || retried[0].Timestamp != first[0].Timestamp {
+		t.Fatalf("retry changed committed result: first=%#v/%d retry=%#v/%d", first, firstSequence, retried, retrySequence)
+	}
+	_, _, err = reopened.BatchUpsertShardIdempotent(config.Name, 0, []core.Record{{ID: "one", Vector: []float32{2, 1}}}, "import:batch-001")
+	if !errors.Is(err, core.ErrIdempotencyConflict) {
+		t.Fatalf("reused key error = %v, want idempotency conflict", err)
 	}
 }

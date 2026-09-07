@@ -34,6 +34,7 @@ type PlacementTable struct {
 	Authoritative bool             `json:"authoritative"`
 	Nodes         []PlacementNode  `json:"nodes"`
 	Shards        []ShardPlacement `json:"shards"`
+	NextCursor    string           `json:"next_cursor,omitempty"`
 }
 
 // PlanPlacement assigns every logical shard to one node using rendezvous
