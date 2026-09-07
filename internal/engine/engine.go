@@ -367,6 +367,11 @@ func (e *Engine) BatchUpsertShardIdempotent(name string, shardID uint32, records
 		if err := core.ValidateVector(record.Vector, c.Config().Dimension); err != nil {
 			return nil, 0, fmt.Errorf("record %d: %w", position, err)
 		}
+		if record.SparseVector != nil {
+			if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+				return nil, 0, fmt.Errorf("record %d: %w", position, err)
+			}
+		}
 	}
 	prepared := make([]core.Record, len(records))
 	for position, record := range records {
@@ -432,6 +437,11 @@ func (e *Engine) ApplyReplicaBatch(name string, shardID uint32, sequence uint64,
 		}
 		if err := core.ValidateVector(record.Vector, c.Config().Dimension); err != nil {
 			return fmt.Errorf("record %d: %w", position, err)
+		}
+		if record.SparseVector != nil {
+			if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+				return fmt.Errorf("record %d: %w", position, err)
+			}
 		}
 	}
 	payload, err := json.Marshal(walMutation{Records: records})
@@ -539,6 +549,11 @@ func (e *Engine) InstallReplicaSnapshot(name string, shardID uint32, sequence ui
 		seen[key] = struct{}{}
 		if err := core.ValidateVector(record.Vector, c.Config().Dimension); err != nil {
 			return fmt.Errorf("record %d: %w", position, err)
+		}
+		if record.SparseVector != nil {
+			if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+				return fmt.Errorf("record %d: %w", position, err)
+			}
 		}
 	}
 	directory := e.shardSegmentDir(name, shardID)
@@ -694,6 +709,14 @@ func (e *Engine) SearchFilteredWithEF(name, namespace string, vector []float32, 
 	return c.SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
 }
 
+func (e *Engine) SearchSparseHybrid(name, namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	c, err := e.getCollection(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter)
+}
+
 func (e *Engine) SearchShardFiltered(name string, shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
 	return e.SearchShardFilteredWithEF(name, shardID, namespace, vector, k, filter, 0)
 }
@@ -707,6 +730,17 @@ func (e *Engine) SearchShardFilteredWithEF(name string, shardID uint32, namespac
 		return nil, err
 	}
 	return c.SearchShardFilteredWithEF(shardID, namespace, vector, k, filter, efSearch)
+}
+
+func (e *Engine) SearchShardSparseHybrid(name string, shardID uint32, namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	if !e.shardOwned(name, shardID) {
+		return nil, core.ErrShardNotOwned
+	}
+	c, err := e.getCollection(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.SearchShardSparseHybrid(shardID, namespace, dense, sparse, alpha, k, filter)
 }
 
 func (e *Engine) getCollection(name string) (*collection.Collection, error) {

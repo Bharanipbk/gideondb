@@ -14,6 +14,7 @@ with the quickstart, then choose the SDK or integration for your application.
 - [REST API](api/rest.md)
 - [Experimental HNSW index](indexing/hnsw.md)
 - [Metadata filtering](indexing/filtering.md)
+- [Sparse and hybrid retrieval](indexing/sparse-hybrid.md)
 
 ## Client SDKs
 

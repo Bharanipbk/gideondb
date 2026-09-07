@@ -31,6 +31,7 @@ type Server struct {
 	metrics             *metricsRegistry
 	events              *eventLog
 	apiKeyHash          []byte
+	principals          *principalStore
 	nodeID              string
 	clusterID           string
 	advertiseAddress    string
@@ -106,6 +107,9 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 	if options.APIKey != "" {
 		digest := sha256.Sum256([]byte(options.APIKey))
 		s.apiKeyHash = append([]byte(nil), digest[:]...)
+	}
+	if options.PrincipalsFile != "" {
+		s.principals = &principalStore{path: options.PrincipalsFile}
 	}
 	s.routes()
 	return s
@@ -244,7 +248,7 @@ func (s *Server) nodeInfo(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "cluster_view_invalid", Message: err.Error()})
 		return
 	}
-	response := map[string]any{"node_id": s.nodeID, "cluster_id": s.clusterID, "advertise_address": s.advertiseAddress, "started_at": s.startedAt, "mode": mode, "metadata_epoch": s.currentMetadataEpoch(), "replication_factor": s.replicationFactor, "placement_capacity": s.currentPlacementCapacity(), "min_protocol_version": cluster.MinClusterProtocolVersion, "protocol_version": cluster.ClusterProtocolVersion, "authentication_required": s.apiKeyHash != nil, "internal_mtls_required": s.requireInternalMTLS, "static_routing": s.staticRouting, "membership_digest": digests.Membership, "catalog_digest": digests.Catalog, "placement_digest": digests.Placement}
+	response := map[string]any{"node_id": s.nodeID, "cluster_id": s.clusterID, "advertise_address": s.advertiseAddress, "started_at": s.startedAt, "mode": mode, "metadata_epoch": s.currentMetadataEpoch(), "replication_factor": s.replicationFactor, "placement_capacity": s.currentPlacementCapacity(), "min_protocol_version": cluster.MinClusterProtocolVersion, "protocol_version": cluster.ClusterProtocolVersion, "authentication_required": s.apiKeyHash != nil || s.principals != nil, "internal_mtls_required": s.requireInternalMTLS, "static_routing": s.staticRouting, "membership_digest": digests.Membership, "catalog_digest": digests.Catalog, "placement_digest": digests.Placement}
 	if status, ok := s.raftProtocol.(interface {
 		Status() (cluster.RaftRole, string, uint64)
 	}); ok {
@@ -594,6 +598,15 @@ func (s *Server) listCollections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	collections := s.engine.ListCollections()
+	if principal := principalFromRequest(r); principal != nil && principal.Role != "admin" {
+		visible := collections[:0]
+		for _, config := range collections {
+			if allowedCollection(principal, config.Name) {
+				visible = append(visible, config)
+			}
+		}
+		collections = visible
+	}
 	start := sort.Search(len(collections), func(i int) bool { return collections[i].Name > cursor })
 	end := min(len(collections), start+limit)
 	next := ""
@@ -700,11 +713,20 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 }
 
 type searchRequest struct {
-	Vector    []float32      `json:"vector"`
-	TopK      int            `json:"top_k"`
-	EFSearch  int            `json:"ef_search,omitempty"`
-	Namespace string         `json:"namespace,omitempty"`
-	Filter    map[string]any `json:"filter,omitempty"`
+	Vector       []float32          `json:"vector"`
+	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
+	Alpha        *float32           `json:"alpha,omitempty"`
+	TopK         int                `json:"top_k"`
+	EFSearch     int                `json:"ef_search,omitempty"`
+	Namespace    string             `json:"namespace,omitempty"`
+	Filter       map[string]any     `json:"filter,omitempty"`
+}
+
+func (r searchRequest) denseWeight() float32 {
+	if r.Alpha != nil {
+		return *r.Alpha
+	}
+	return 0.5
 }
 
 func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
@@ -728,7 +750,12 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	results, err := s.engine.SearchShardFilteredWithEF(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+	var results []core.SearchResult
+	if request.SparseVector != nil {
+		results, err = s.engine.SearchShardSparseHybrid(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.SparseVector, request.denseWeight(), request.TopK, filter)
+	} else {
+		results, err = s.engine.SearchShardFilteredWithEF(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -768,7 +795,12 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	results, err := s.engine.SearchFilteredWithEF(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+	var results []core.SearchResult
+	if request.SparseVector != nil {
+		results, err = s.engine.SearchSparseHybrid(r.PathValue("name"), request.Namespace, request.Vector, request.SparseVector, request.denseWeight(), request.TopK, filter)
+	} else {
+		results, err = s.engine.SearchFilteredWithEF(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+	}
 	if err != nil {
 		writeError(w, err)
 		return

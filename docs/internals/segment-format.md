@@ -26,8 +26,9 @@ fixed 48-byte header followed by the declared payload.
 CRC32C covers header bytes `[4,40)`, header bytes `[44,48)`, and payload. Magic
 and the checksum field are excluded. File size must equal `48 + PayloadLength`.
 
-The record payload is a JSON array containing ID, metadata, payload, timestamp,
-version and namespace—but no vectors. The vector payload is row-major IEEE-754
+The record payload is a JSON array containing ID, optional sparse term weights,
+metadata, payload, timestamp, version and namespace—but no dense vectors. The
+vector payload is row-major IEEE-754
 float32 data in little-endian order and must be exactly
 `RecordCount × Dimension × 4` bytes. Record position is the join key between
 columns.

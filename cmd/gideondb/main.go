@@ -39,6 +39,7 @@ func main() {
 	rateLimitPerSecond := flag.Int("rate-limit-per-second", defaults.RateLimitPerSecond, "public API requests per second per credential or client address")
 	rateLimitBurst := flag.Int("rate-limit-burst", defaults.RateLimitBurst, "public API token-bucket burst per credential or client address")
 	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
+	principalsFile := flag.String("principals-file", "", "reloadable JSON file containing API principals, roles, and collection prefixes")
 	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
 	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow bearer authentication over cleartext HTTP on a non-loopback listener")
 	enableStaticRouting := flag.Bool("enable-static-routing", false, "activate immutable static placement only while all peer views converge")
@@ -102,6 +103,7 @@ func main() {
 	*rateLimitPerSecond, *rateLimitBurst = settings.RateLimitPerSecond, settings.RateLimitBurst
 	*clusterID = settings.ClusterID
 	*apiKeyFile, *allowUnauthenticated, *allowInsecureHTTP = settings.APIKeyFile, settings.AllowUnauthenticated, settings.AllowInsecureHTTP
+	*principalsFile = settings.PrincipalsFile
 	*enableStaticRouting = settings.EnableStaticRouting
 	*tlsCertFile, *tlsKeyFile, *tlsCAFile = settings.TLSCertFile, settings.TLSKeyFile, settings.TLSCAFile
 	*peers = strings.Join(settings.Peers, ",")
@@ -145,11 +147,17 @@ func main() {
 			}
 			apiKey = loaded
 		}
-		if apiKey == "" && !rest.IsLoopbackAddress(*address) && !*allowUnauthenticated {
+		if *principalsFile != "" {
+			if _, principalsErr := rest.LoadPrincipalsFile(*principalsFile); principalsErr != nil {
+				logger.Error("load principals", "error", principalsErr)
+				os.Exit(2)
+			}
+		}
+		if apiKey == "" && *principalsFile == "" && !rest.IsLoopbackAddress(*address) && !*allowUnauthenticated {
 			logger.Error("refusing unauthenticated non-loopback listener", "address", *address, "hint", "configure -api-key-file or explicitly set -allow-unauthenticated")
 			os.Exit(2)
 		}
-		if apiKey != "" && !rest.IsLoopbackAddress(*address) && *tlsCertFile == "" && !*allowInsecureHTTP {
+		if (apiKey != "" || *principalsFile != "") && !rest.IsLoopbackAddress(*address) && *tlsCertFile == "" && !*allowInsecureHTTP {
 			logger.Error("refusing bearer authentication over non-loopback cleartext HTTP", "hint", "configure TLS or explicitly set -allow-insecure-http")
 			os.Exit(2)
 		}
@@ -254,7 +262,7 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,

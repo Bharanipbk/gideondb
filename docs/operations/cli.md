@@ -20,3 +20,4 @@ server startup; it is not a byte-for-byte read-only filesystem inspection.
 
 Build metadata is injected through `VERSION`, `COMMIT`, and `BUILD_DATE` when
 running `make build` or through corresponding Docker build arguments.
+-principals-file PATH        reloadable principal, role, and collection-prefix JSON file

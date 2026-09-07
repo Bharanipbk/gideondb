@@ -115,6 +115,7 @@ func documentationDocumentOrder(name string) int {
 		"integrations/llamaindex.md":          5,
 		"indexing/hnsw.md":                    0,
 		"indexing/filtering.md":               1,
+		"indexing/sparse-hybrid.md":           2,
 		"architecture/segments.md":            0,
 		"architecture/wal.md":                 1,
 		"architecture/mmap-vectors.md":        2,

@@ -4,4 +4,4 @@ data
 *.tar.gz
 *.test
 gideondb
-docs
+# Keep docs/ in the build context: the Go docs package embeds Markdown files.

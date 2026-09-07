@@ -10,7 +10,8 @@ model.
 Record the vector dimension, metric, expected vector count, write rate, query
 concurrency, top K, metadata selectivity, payload size, tenant/namespace model,
 latency objective, recall objective, durability target, and recovery-time
-objective. GideonDB currently stores dense float32 vectors and supports cosine,
+objective. GideonDB stores dense float32 vectors with optional sparse term
+weights and supports cosine,
 dot-product and L2 distance. Sparse/hybrid retrieval and quantized storage are
 not implemented.
 

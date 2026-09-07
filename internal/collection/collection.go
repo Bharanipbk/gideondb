@@ -152,6 +152,11 @@ func (c *Collection) PrepareUpsert(record core.Record) (core.Record, error) {
 	if err := core.ValidateVector(record.Vector, c.config.Dimension); err != nil {
 		return core.Record{}, err
 	}
+	if record.SparseVector != nil {
+		if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+			return core.Record{}, err
+		}
+	}
 	if record.ID == "" {
 		return core.Record{}, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
 	}
@@ -168,6 +173,11 @@ func (c *Collection) ApplyUpsert(record core.Record) error {
 func (c *Collection) Restore(record core.Record) error {
 	if err := core.ValidateVector(record.Vector, c.config.Dimension); err != nil {
 		return err
+	}
+	if record.SparseVector != nil {
+		if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+			return err
+		}
 	}
 	for {
 		current := c.version.Load()
@@ -246,6 +256,29 @@ func (c *Collection) SearchFilteredWithEF(namespace string, vector []float32, k 
 	return mergeTopK(perShard, k), nil
 }
 
+func (c *Collection) SearchSparseHybrid(namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	if dense != nil {
+		if err := core.ValidateVector(dense, c.config.Dimension); err != nil {
+			return nil, err
+		}
+	}
+	if err := core.ValidateSparseVector(sparse); err != nil {
+		return nil, err
+	}
+	if alpha < 0 || alpha > 1 || k <= 0 {
+		return nil, fmt.Errorf("%w: alpha must be between 0 and 1 and top_k must be positive", core.ErrInvalidArgument)
+	}
+	perShard := make([][]core.SearchResult, len(c.shards))
+	for shardID := range c.shards {
+		results, err := c.shards[shardID].SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter)
+		if err != nil {
+			return nil, err
+		}
+		perShard[shardID] = results
+	}
+	return mergeTopK(perShard, k), nil
+}
+
 func (c *Collection) SearchShardFiltered(shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
 	return c.SearchShardFilteredWithEF(shardID, namespace, vector, k, filter, 0)
 }
@@ -264,6 +297,24 @@ func (c *Collection) SearchShardFilteredWithEF(shardID uint32, namespace string,
 		return nil, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
 	}
 	return c.shards[shardID].SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
+}
+
+func (c *Collection) SearchShardSparseHybrid(shardID uint32, namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	if dense != nil {
+		if err := core.ValidateVector(dense, c.config.Dimension); err != nil {
+			return nil, err
+		}
+	}
+	if err := core.ValidateSparseVector(sparse); err != nil {
+		return nil, err
+	}
+	if alpha < 0 || alpha > 1 || k <= 0 {
+		return nil, fmt.Errorf("%w: invalid sparse search options", core.ErrInvalidArgument)
+	}
+	if uint64(shardID) >= uint64(len(c.shards)) {
+		return nil, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
+	}
+	return c.shards[shardID].SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter)
 }
 
 type searchResultHeap []core.SearchResult

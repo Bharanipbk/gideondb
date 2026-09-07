@@ -38,7 +38,7 @@ replication.
 | POST | `/collections/{name}/vectors/batch` | Insert or replace 1–10,000 records |
 | GET | `/collections/{name}/vectors/{id}` | Read a record |
 | DELETE | `/collections/{name}/vectors/{id}` | Delete a record |
-| POST | `/collections/{name}/search` | Exact vector search |
+| POST | `/collections/{name}/search` | Dense, sparse, or hybrid search |
 | POST | `/internal/shards/{collection}/{shard}/search` | Fenced single-shard internal search |
 | POST | `/cluster/collections/{name}/search` | Experimental placement-aware distributed search |
 | POST | `/internal/shards/{collection}/{shard}/vectors/batch` | Fenced single-shard WAL-backed batch write |
@@ -98,6 +98,11 @@ deterministic bounded traversal, not snapshot isolation from concurrent writes.
 
 Vectors and search queries must contain exactly the collection dimension and
 only finite float32 values; NaN and positive/negative infinity are rejected.
+Records may additionally contain a `sparse_vector` with 1–10,000 non-empty
+term keys and finite weights. A search with only `sparse_vector` uses sparse
+cosine similarity; supplying both vectors enables hybrid scoring, with `alpha`
+from 0 through 1 selecting the dense weight (default `0.5`). See [Sparse and
+hybrid retrieval](../indexing/sparse-hybrid.md).
 
 Batch requests validate every record before writing. Records are grouped by
 logical shard and encoded as one WAL record per shard. Each shard group is

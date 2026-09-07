@@ -50,6 +50,24 @@ func ValidateVector(vector []float32, dimension int) error {
 	return nil
 }
 
+func ValidateSparseVector(vector map[string]float32) error {
+	if len(vector) == 0 {
+		return fmt.Errorf("%w: sparse_vector must contain at least one term", ErrInvalidArgument)
+	}
+	if len(vector) > 10000 {
+		return fmt.Errorf("%w: sparse_vector cannot exceed 10000 terms", ErrInvalidArgument)
+	}
+	for term, value := range vector {
+		if term == "" {
+			return fmt.Errorf("%w: sparse_vector terms must not be empty", ErrInvalidArgument)
+		}
+		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+			return fmt.Errorf("%w: sparse_vector value for %q must be finite", ErrInvalidArgument, term)
+		}
+	}
+	return nil
+}
+
 // CollectionConfig is immutable for the lifetime of a collection in v0.1.
 type CollectionConfig struct {
 	Name       string      `json:"name"`
@@ -128,13 +146,14 @@ func (c CollectionConfig) Validate() error {
 // Record is the externally visible vector record. Metadata and payload use
 // JSON-compatible values at the API boundary.
 type Record struct {
-	ID        string         `json:"id"`
-	Vector    []float32      `json:"vector,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	Payload   map[string]any `json:"payload,omitempty"`
-	Timestamp int64          `json:"timestamp"`
-	Version   uint64         `json:"version"`
-	Namespace string         `json:"namespace,omitempty"`
+	ID           string             `json:"id"`
+	Vector       []float32          `json:"vector,omitempty"`
+	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
+	Metadata     map[string]any     `json:"metadata,omitempty"`
+	Payload      map[string]any     `json:"payload,omitempty"`
+	Timestamp    int64              `json:"timestamp"`
+	Version      uint64             `json:"version"`
+	Namespace    string             `json:"namespace,omitempty"`
 }
 
 // SearchResult is ordered by descending Score. Score is normalized so larger

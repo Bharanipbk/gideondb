@@ -24,6 +24,7 @@ type Config struct {
 	ReplicationFactor    int      `json:"replication_factor"`
 	PlacementCapacity    uint32   `json:"placement_capacity"`
 	APIKeyFile           string   `json:"api_key_file,omitempty"`
+	PrincipalsFile       string   `json:"principals_file,omitempty"`
 	AllowUnauthenticated bool     `json:"allow_unauthenticated"`
 	AllowInsecureHTTP    bool     `json:"allow_insecure_http"`
 	EnableStaticRouting  bool     `json:"enable_static_routing"`
@@ -68,6 +69,7 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 		{"GIDEONDB_ADVERTISE_ADDRESS", &value.AdvertiseAddress},
 		{"GIDEONDB_CLUSTER_ID", &value.ClusterID},
 		{"GIDEONDB_WAL_SYNC", &value.WALSync}, {"GIDEONDB_API_KEY_FILE", &value.APIKeyFile},
+		{"GIDEONDB_PRINCIPALS_FILE", &value.PrincipalsFile},
 		{"GIDEONDB_TLS_CERT_FILE", &value.TLSCertFile}, {"GIDEONDB_TLS_KEY_FILE", &value.TLSKeyFile}, {"GIDEONDB_TLS_CA_FILE", &value.TLSCAFile},
 	}
 	for _, item := range strings {
@@ -147,6 +149,8 @@ func ApplyFlags(value Config, values map[string]string) (Config, error) {
 			value.WALSync = raw
 		case "api-key-file":
 			value.APIKeyFile = raw
+		case "principals-file":
+			value.PrincipalsFile = raw
 		case "tls-cert-file":
 			value.TLSCertFile = raw
 		case "tls-key-file":

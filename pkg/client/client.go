@@ -64,13 +64,14 @@ type CollectionDescription struct {
 }
 
 type Record struct {
-	ID        string         `json:"id"`
-	Vector    []float32      `json:"vector"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	Payload   map[string]any `json:"payload,omitempty"`
-	Timestamp int64          `json:"timestamp,omitempty"`
-	Version   uint64         `json:"version,omitempty"`
-	Namespace string         `json:"namespace,omitempty"`
+	ID           string             `json:"id"`
+	Vector       []float32          `json:"vector"`
+	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
+	Metadata     map[string]any     `json:"metadata,omitempty"`
+	Payload      map[string]any     `json:"payload,omitempty"`
+	Timestamp    int64              `json:"timestamp,omitempty"`
+	Version      uint64             `json:"version,omitempty"`
+	Namespace    string             `json:"namespace,omitempty"`
 }
 
 type ScrollOptions struct {
@@ -90,6 +91,8 @@ type RecordPage struct {
 
 type SearchOptions struct {
 	Vector       []float32
+	SparseVector map[string]float32
+	Alpha        *float32
 	TopK         int
 	EFSearch     int
 	Namespace    string
@@ -280,6 +283,12 @@ func (c *Client) DistributedBatchUpsertWithIdempotencyKey(ctx context.Context, c
 
 func searchBody(options SearchOptions, distributed bool) map[string]any {
 	body := map[string]any{"vector": options.Vector, "top_k": options.TopK}
+	if options.SparseVector != nil {
+		body["sparse_vector"] = options.SparseVector
+	}
+	if options.Alpha != nil {
+		body["alpha"] = *options.Alpha
+	}
 	if options.EFSearch != 0 {
 		body["ef_search"] = options.EFSearch
 	}

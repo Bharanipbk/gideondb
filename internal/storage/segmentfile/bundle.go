@@ -21,12 +21,13 @@ var filterMagic = [4]byte{'V', 'F', 'L', 'T'}
 var tombstoneMagic = [4]byte{'V', 'T', 'M', 'B'}
 
 type storedRecord struct {
-	ID        string         `json:"id"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
-	Payload   map[string]any `json:"payload,omitempty"`
-	Timestamp int64          `json:"timestamp"`
-	Version   uint64         `json:"version"`
-	Namespace string         `json:"namespace,omitempty"`
+	ID           string             `json:"id"`
+	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
+	Metadata     map[string]any     `json:"metadata,omitempty"`
+	Payload      map[string]any     `json:"payload,omitempty"`
+	Timestamp    int64              `json:"timestamp"`
+	Version      uint64             `json:"version"`
+	Namespace    string             `json:"namespace,omitempty"`
 }
 
 // WriteBundle writes record and vector columns. Publishing the returned
@@ -50,7 +51,7 @@ func WriteBundle(directory, baseName string, records []core.Record, dimension in
 			return Manifest{}, fmt.Errorf("record %q dimension mismatch", record.ID)
 		}
 		stored[position] = storedRecord{
-			ID: record.ID, Metadata: record.Metadata, Payload: record.Payload,
+			ID: record.ID, SparseVector: record.SparseVector, Metadata: record.Metadata, Payload: record.Payload,
 			Timestamp: record.Timestamp, Version: record.Version, Namespace: record.Namespace,
 		}
 		start := position * dimension * 4
@@ -114,7 +115,7 @@ func ReadBundle(directory string, manifest Manifest) ([]core.Record, error) {
 			vector[offset] = math.Float32frombits(binary.LittleEndian.Uint32(vectorPayload[start+offset*4:]))
 		}
 		records[position] = core.Record{
-			ID: item.ID, Vector: vector, Metadata: item.Metadata, Payload: item.Payload,
+			ID: item.ID, Vector: vector, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload,
 			Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace,
 		}
 	}
@@ -143,7 +144,7 @@ func ReadRecordColumn(directory string, manifest Manifest) ([]core.Record, error
 	}
 	records := make([]core.Record, len(stored))
 	for position, item := range stored {
-		records[position] = core.Record{ID: item.ID, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace}
+		records[position] = core.Record{ID: item.ID, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace}
 	}
 	return records, nil
 }

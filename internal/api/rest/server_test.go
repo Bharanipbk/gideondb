@@ -59,6 +59,23 @@ func TestRESTLifecycle(t *testing.T) {
 	}
 }
 
+func TestRESTSparseAndHybridSearch(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(db, nil).Handler()
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "hybrid", "dimension": 2, "metric": "cosine", "shard_count": 1}, http.StatusCreated)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/hybrid/vectors", map[string]any{"id": "one", "vector": []float32{1, 0}, "sparse_vector": map[string]float32{"gideondb": 2}}, http.StatusOK)
+	response := requestJSON(t, handler, http.MethodPost, "/v1/collections/hybrid/search", map[string]any{"sparse_vector": map[string]float32{"gideondb": 1}, "top_k": 1}, http.StatusOK)
+	if !strings.Contains(string(response), `"id":"one"`) {
+		t.Fatalf("unexpected sparse response: %s", response)
+	}
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/hybrid/search", map[string]any{"vector": []float32{1, 0}, "sparse_vector": map[string]float32{"gideondb": 1}, "alpha": 1.1, "top_k": 1}, http.StatusBadRequest)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/hybrid/vectors", map[string]any{"id": "bad", "vector": []float32{1, 0}, "sparse_vector": map[string]float32{"": 1}}, http.StatusBadRequest)
+}
+
 func TestOperationalPaginationAndRateLimit(t *testing.T) {
 	db, err := engine.Open(t.TempDir())
 	if err != nil {

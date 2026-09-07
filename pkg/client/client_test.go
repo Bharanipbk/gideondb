@@ -128,12 +128,16 @@ func TestClientDistributedEndpointsAndValidation(t *testing.T) {
 	if _, err := sdk.CreateCollection(ctx, client.CollectionConfig{Name: "distributed", Dimension: 2, Metric: "dot", ShardCount: 2}); err != nil {
 		t.Fatal(err)
 	}
-	write, err := sdk.DistributedBatchUpsertWithIdempotencyKey(ctx, "distributed", []client.Record{{ID: "one", Vector: []float32{1, 0}}}, "quorum", "client:batch-001")
+	write, err := sdk.DistributedBatchUpsertWithIdempotencyKey(ctx, "distributed", []client.Record{{ID: "one", Vector: []float32{1, 0}, SparseVector: map[string]float32{"guide": 1}}}, "quorum", "client:batch-001")
 	if err != nil || write.Partial || len(write.Outcomes) != 1 {
 		t.Fatalf("write=%#v err=%v", write, err)
 	}
 	search, err := sdk.DistributedSearch(ctx, "distributed", client.SearchOptions{Vector: []float32{1, 0}, TopK: 1})
 	if err != nil || search.Partial || len(search.Results) != 1 || search.Results[0].ID != "one" {
 		t.Fatalf("search=%#v err=%v", search, err)
+	}
+	search, err = sdk.DistributedSearch(ctx, "distributed", client.SearchOptions{SparseVector: map[string]float32{"guide": 1}, TopK: 1})
+	if err != nil || search.Partial || len(search.Results) != 1 || search.Results[0].ID != "one" {
+		t.Fatalf("sparse search=%#v err=%v", search, err)
 	}
 }

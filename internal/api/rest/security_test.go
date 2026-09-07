@@ -127,6 +127,58 @@ func TestLoadAPIKeyFilePermissionsAndLength(t *testing.T) {
 	}
 }
 
+func TestReloadablePrincipalsRBACAndCollectionIsolation(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, name := range []string{"tenant-a.docs", "tenant-b.docs"} {
+		if err := db.CreateCollection(core.CollectionConfig{Name: name, Dimension: 1, Metric: core.MetricDot, ShardCount: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "principals.json")
+	writePrincipals := func(readerKey string) {
+		payload := fmt.Sprintf(`{"principals":[{"name":"reader-a","key":%q,"role":"reader","collection_prefixes":["tenant-a."]},{"name":"writer-a","key":"writer-0123456789abcdef","role":"writer","collection_prefixes":["tenant-a."]}]}`, readerKey)
+		if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writePrincipals("reader-0123456789abcdef")
+	handler := NewWithOptions(db, nil, Options{PrincipalsFile: path}).Handler()
+	call := func(method, target, key, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+key)
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+	listed := call(http.MethodGet, "/v1/collections", "reader-0123456789abcdef", "")
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), "tenant-a.docs") || strings.Contains(listed.Body.String(), "tenant-b.docs") {
+		t.Fatalf("isolated list status=%d body=%s", listed.Code, listed.Body.String())
+	}
+	if response := call(http.MethodGet, "/v1/collections/tenant-b.docs", "reader-0123456789abcdef", ""); response.Code != http.StatusForbidden {
+		t.Fatalf("cross-tenant status=%d", response.Code)
+	}
+	if response := call(http.MethodPost, "/v1/collections/tenant-a.docs/vectors", "reader-0123456789abcdef", `{"id":"one","vector":[1]}`); response.Code != http.StatusForbidden {
+		t.Fatalf("reader write status=%d", response.Code)
+	}
+	if response := call(http.MethodPost, "/v1/collections/tenant-a.docs/vectors", "writer-0123456789abcdef", `{"id":"one","vector":[1]}`); response.Code != http.StatusOK {
+		t.Fatalf("writer status=%d body=%s", response.Code, response.Body.String())
+	}
+	writePrincipals("rotated-0123456789abcdef")
+	if response := call(http.MethodGet, "/v1/collections", "reader-0123456789abcdef", ""); response.Code != http.StatusUnauthorized {
+		t.Fatalf("old key status=%d", response.Code)
+	}
+	if response := call(http.MethodGet, "/v1/collections", "rotated-0123456789abcdef", ""); response.Code != http.StatusOK {
+		t.Fatalf("rotated key status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestLoopbackAddressDetection(t *testing.T) {
 	for _, address := range []string{"127.0.0.1:6333", "[::1]:6333", "localhost:6333"} {
 		if !IsLoopbackAddress(address) {

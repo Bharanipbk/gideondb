@@ -27,6 +27,7 @@ modes, and incomplete TLS certificate/key pairs fail startup.
   "rate_limit_per_second": 100,
   "rate_limit_burst": 200,
   "api_key_file": "/run/secrets/gideondb-api-key",
+  "principals_file": "/run/secrets/gideondb-principals.json",
   "allow_unauthenticated": false,
   "allow_insecure_http": false,
   "enable_static_routing": false,

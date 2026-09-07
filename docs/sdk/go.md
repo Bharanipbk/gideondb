@@ -51,6 +51,11 @@ when any shard is unavailable. Set `SearchOptions.EFSearch` from 1 through
 10,000 to override an HNSW collection's query breadth; zero uses its configured
 default and flat indexes ignore the option.
 
+Set `Record.SparseVector` to persist sparse term weights. Search with
+`SearchOptions.SparseVector`; omit `Vector` for sparse-only retrieval or supply
+both plus an `Alpha` pointer for hybrid retrieval. `Alpha` defaults to `0.5` on
+the server.
+
 `Scroll` browses records physically present on one node. Pass its opaque cursor
 unchanged for the next page; vectors require explicit inclusion:
 

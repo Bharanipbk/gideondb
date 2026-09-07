@@ -21,6 +21,28 @@ constant time. Collection, vector, search, and metrics routes require the token;
 and traffic probes. API key material and
 authorization headers are never logged.
 
+For multiple independently rotatable credentials, use a mode-`0600`
+`-principals-file` instead of, or alongside, the legacy key:
+
+```json
+{
+  "principals": [
+    {"name":"tenant-a-reader","key":"replace-with-16-plus-chars","role":"reader","collection_prefixes":["tenant-a."]},
+    {"name":"tenant-a-writer","key":"replace-with-another-key","role":"writer","collection_prefixes":["tenant-a."]},
+    {"name":"operator","key":"replace-with-admin-key","role":"admin"}
+  ]
+}
+```
+
+The file is re-read for every authenticated request, so an atomic Secret/file
+replacement rotates keys without restarting. Invalid replacements fail closed.
+`reader` can read and search, `writer` can additionally mutate records, and
+`admin` can manage schemas and cluster operations. Non-admin principals see
+and access only collection names matching one of their prefixes; using a
+tenant-owned prefix such as `tenant-a.` provides collection-level tenant
+isolation. Internal cluster calls require an admin credential (the legacy
+`-api-key-file` remains an unrestricted cluster credential).
+
 On Unix-like platforms the API-key file rejects all access by other users.
 Group access is limited to read-only and is accepted only when the file group
 matches the process's effective or supplementary groups; this supports
@@ -39,7 +61,6 @@ verified client certificate. Responses include `nosniff`, frame denial, no-refer
 
 ## Current limitations
 
-This foundation provides one process-wide bearer credential. It does not yet
-provide key rotation without restart, multiple principals, authorization roles,
-tenant isolation, audit retention, rate limiting, certificate reload, distinct
-client/server node identities, or automated certificate management.
+Audit retention, certificate reload, distinct client/server node identities,
+and automated certificate management remain pending. Rate limits are
+configurable per credential or client address.

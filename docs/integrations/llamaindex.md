@@ -25,7 +25,9 @@ match metadata filters, namespaces, sync/async calls, and reference-document
 deletion within the current adapter session are supported. After a process
 restart, deletion falls back to treating the reference-document ID as a node
 ID; durable reference-document bulk deletion requires a future server API.
-Hybrid, sparse, and MMR modes are rejected explicitly.
+The adapter currently exposes dense mode only. GideonDB's REST and Go APIs also
+support sparse and hybrid retrieval; adapter mapping for those LlamaIndex modes
+is still pending. MMR mode is rejected explicitly.
 
 Collection creation remains explicit so dimensions and distance metrics cannot
 silently disagree with the embedding model. The implementation follows

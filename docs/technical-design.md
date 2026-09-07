@@ -566,7 +566,7 @@ Docker image; Go client; reproducible correctness, recall and performance
 benchmarks; complete documentation for implemented behavior.
 
 Excluded: distributed execution/consensus/replication, automatic rebalancing,
-advanced quantization, sparse/hybrid search, advanced RBAC, Kubernetes operator,
+advanced quantization, a persistent sparse inverted index, advanced RBAC, Kubernetes operator,
 dashboard and six SDKs. Logical shards and transport interfaces are included so
 these additions do not change the storage ownership model.
 

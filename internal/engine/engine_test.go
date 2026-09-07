@@ -68,6 +68,57 @@ func TestPersistenceAndSearch(t *testing.T) {
 	_ = reopened.Close()
 }
 
+func TestSparseAndHybridSearchSurviveCheckpoint(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "hybrid", Dimension: 2, Metric: core.MetricCosine, ShardCount: 2}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []core.Record{
+		{ID: "dense", Vector: []float32{1, 0}, SparseVector: map[string]float32{"other": 1}},
+		{ID: "sparse", Vector: []float32{0, 1}, SparseVector: map[string]float32{"database": 1}},
+	} {
+		if _, err := db.Upsert(config.Name, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sparse, err := db.SearchSparseHybrid(config.Name, "", nil, map[string]float32{"database": 1}, 0.5, 2, nil)
+	if err != nil || len(sparse) != 2 || sparse[0].ID != "sparse" {
+		t.Fatalf("sparse=%#v err=%v", sparse, err)
+	}
+	denseWeighted, err := db.SearchSparseHybrid(config.Name, "", []float32{1, 0}, map[string]float32{"database": 1}, 0.8, 2, nil)
+	if err != nil || denseWeighted[0].ID != "dense" {
+		t.Fatalf("dense weighted=%#v err=%v", denseWeighted, err)
+	}
+	sparseWeighted, err := db.SearchSparseHybrid(config.Name, "", []float32{1, 0}, map[string]float32{"database": 1}, 0.2, 2, nil)
+	if err != nil || sparseWeighted[0].ID != "sparse" {
+		t.Fatalf("sparse weighted=%#v err=%v", sparseWeighted, err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	got, err := reopened.Get(config.Name, "", "sparse")
+	if err != nil || got.SparseVector["database"] != 1 {
+		t.Fatalf("record=%#v err=%v", got, err)
+	}
+	results, err := reopened.SearchSparseHybrid(config.Name, "", nil, map[string]float32{"database": 1}, 0.5, 1, nil)
+	if err != nil || len(results) != 1 || results[0].ID != "sparse" {
+		t.Fatalf("recovered sparse=%#v err=%v", results, err)
+	}
+}
+
 func TestCheckpointLoadsSegmentThenReplaysWAL(t *testing.T) {
 	path := t.TempDir()
 	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways})

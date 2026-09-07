@@ -99,13 +99,19 @@ automated tests, and user-facing documentation are all finished.
   covers REST, cluster transport, WAL, checkpoints, index sidecars, metadata,
   and backups; `gideondb -migrate-data` performs an offline format-1/2 to
   format-3 checkpoint migration, with regression tests for both legacy paths.
-- [ ] Add sparse and hybrid retrieval if adopted by the release scope; the
-  current engine supports dense float32 vectors only.
+- [x] Add sparse and hybrid retrieval. Records persist optional validated sparse
+  term weights through WAL, replication, checkpoints, backup, and recovery;
+  local and distributed APIs support exact sparse cosine or normalized weighted
+  hybrid scoring with metadata/namespace filters. A persistent sparse inverted
+  index remains a future optimization rather than a correctness dependency.
 
 ## Security and operations
 
-- [ ] Support API-key rotation without restarting and multiple principals with
-  role-based authorization and tenant isolation.
+- [x] Support API-key rotation without restarting and multiple principals with
+  role-based authorization and tenant isolation. A secure reloadable principals
+  file provides reader, writer, and admin roles; non-admin collection-prefix
+  scopes filter listings and deny cross-tenant access, invalid rotations fail
+  closed, and the legacy process/cluster key remains backward compatible.
 - [ ] Add audit retention, configurable rate limits, certificate reload, and
   distinct client/server node identities.
 - [ ] Document and automate certificate lifecycle and secret rotation for

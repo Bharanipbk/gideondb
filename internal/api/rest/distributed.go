@@ -56,9 +56,21 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if err := core.ValidateVector(request.Vector, config.Dimension); err != nil {
-		writeError(w, err)
-		return
+	if request.SparseVector == nil || request.Vector != nil {
+		if err := core.ValidateVector(request.Vector, config.Dimension); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+	if request.SparseVector != nil {
+		if err := core.ValidateSparseVector(request.SparseVector); err != nil {
+			writeError(w, err)
+			return
+		}
+		if weight := request.denseWeight(); weight < 0 || weight > 1 {
+			writeError(w, fmt.Errorf("%w: alpha must be between 0 and 1", core.ErrInvalidArgument))
+			return
+		}
 	}
 	if request.TopK <= 0 {
 		writeError(w, fmt.Errorf("%w: top_k must be positive", core.ErrInvalidArgument))
@@ -98,7 +110,11 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 				var results []core.SearchResult
 				var searchErr error
 				if assignment.NodeID == s.nodeID {
-					results, searchErr = s.engine.SearchShardFilteredWithEF(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+					if request.SparseVector != nil {
+						results, searchErr = s.engine.SearchShardSparseHybrid(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.SparseVector, request.denseWeight(), request.TopK, filter)
+					} else {
+						results, searchErr = s.engine.SearchShardFilteredWithEF(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
+					}
 				} else {
 					peer, exists := peerByID[assignment.NodeID]
 					if !exists {

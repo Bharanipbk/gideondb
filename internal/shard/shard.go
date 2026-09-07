@@ -163,6 +163,33 @@ func (s *Shard) SearchFilteredWithEF(namespace string, vector []float32, k int, 
 	return results, nil
 }
 
+func (s *Shard) SearchSparseHybrid(namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	results, err := s.active.SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter, nil)
+	if err != nil {
+		return nil, err
+	}
+	if s.immutable != nil {
+		excluded := s.active.Keys()
+		for key := range s.tombstones {
+			excluded[key] = struct{}{}
+		}
+		base, err := s.immutable.segment.SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter, excluded)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, base...)
+	}
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score || (results[i].Score == results[j].Score && results[i].ID < results[j].ID)
+	})
+	if len(results) > k {
+		results = results[:k]
+	}
+	return results, nil
+}
+
 func (s *Shard) Records() []core.Record {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

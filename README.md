@@ -179,6 +179,10 @@ require `-tls-cert-file` and `-tls-key-file` unless cleartext is explicitly
 acknowledged with `-allow-insecure-http`; unauthenticated non-loopback binds are
 refused unless `-allow-unauthenticated` is explicitly set.
 
+Open-source multi-user deployments can instead configure a reloadable
+`-principals-file` with reader, writer, and admin roles plus tenant collection
+prefixes; see the [security guide](docs/operations/security.md).
+
 Create a consistent archive with `-backup-to`, and restore it into a nonexistent
 data path with `-restore-from`. See the [backup and restore guide](docs/operations/backup-restore.md).
 
