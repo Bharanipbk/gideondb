@@ -10,6 +10,7 @@ import (
 
 	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/storage/segmentfile"
 	"github.com/Bharanipbk/gideondb/internal/wal"
 )
 
@@ -354,6 +355,18 @@ func TestHNSWCollectionSurvivesRestart(t *testing.T) {
 	if _, err := db.Upsert("approx", core.Record{ID: "other", Vector: []float32{0, 1}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Checkpoint("approx"); err != nil {
+		t.Fatal(err)
+	}
+	for shardID := 0; shardID < config.ShardCount; shardID++ {
+		manifest, err := segmentfile.LoadManifest(filepath.Join(path, "segments", config.Name, fmt.Sprintf("shard-%06d", shardID), "MANIFEST.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if manifest.GraphFile == "" {
+			t.Fatalf("shard %d manifest does not reference an hnsw graph", shardID)
+		}
+	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -368,6 +381,150 @@ func TestHNSWCollectionSurvivesRestart(t *testing.T) {
 	described, _, _ := reopened.DescribeCollection("approx")
 	if described.Index.Type != core.IndexHNSW {
 		t.Fatalf("index config not restored: %#v", described.Index)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(path, "segments", config.Name, "shard-000000", "MANIFEST.json")
+	manifest, err := segmentfile.LoadManifest(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graphPath := filepath.Join(filepath.Dir(manifestPath), manifest.GraphFile)
+	graph, err := os.ReadFile(graphPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	graph[len(graph)-1] ^= 0xff
+	if err := os.WriteFile(graphPath, graph, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if corrupt, err := Open(path); err == nil {
+		_ = corrupt.Close()
+		t.Fatal("expected corrupt hnsw graph to fail engine startup")
+	}
+}
+
+func TestFilterIndexSurvivesRestartAndCorruption(t *testing.T) {
+	path := t.TempDir()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "filters", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert("filters", core.Record{ID: "guide", Vector: []float32{1, 0}, Metadata: map[string]any{"kind": "guide", "year": 2026}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint("filters"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter, _ := metadata.Parse(map[string]any{"kind": "guide"})
+	results, err := reopened.SearchFiltered("filters", "", []float32{1, 0}, 1, filter)
+	if err != nil || len(results) != 1 || results[0].ID != "guide" {
+		t.Fatalf("persisted filter search = %#v, %v", results, err)
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(path, "segments", "filters", "shard-000000", "MANIFEST.json")
+	manifest, err := segmentfile.LoadManifest(manifestPath)
+	if err != nil || manifest.FilterFile == "" {
+		t.Fatalf("filter manifest = %#v, %v", manifest, err)
+	}
+	filterPath := filepath.Join(filepath.Dir(manifestPath), manifest.FilterFile)
+	data, err := os.ReadFile(filterPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data[len(data)-1] ^= 0xff
+	if err := os.WriteFile(filterPath, data, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if corrupt, err := Open(path); err == nil {
+		_ = corrupt.Close()
+		t.Fatal("expected corrupt filter index to fail engine startup")
+	}
+}
+
+func TestPinnedSnapshotRetainsOlderGeneration(t *testing.T) {
+	path := t.TempDir()
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "pinned", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "item", Vector: []float32{1, 0}, Metadata: map[string]any{"generation": 1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	firstManifestPath := filepath.Join(path, "segments", config.Name, "shard-000000", "MANIFEST.json")
+	firstManifest, err := segmentfile.LoadManifest(firstManifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.PinSnapshot(config.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "item", Vector: []float32{2, 0}, Metadata: map[string]any{"generation": 2}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	second, err := db.PinSnapshot(config.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Generations()[0] == second.Generations()[0] {
+		t.Fatal("checkpoint did not publish a new generation")
+	}
+	oldRecord, err := first.Get("", "item")
+	if err != nil || oldRecord.Vector[0] != 1 {
+		t.Fatalf("first generation record = %#v, %v", oldRecord, err)
+	}
+	newRecord, err := second.Get("", "item")
+	if err != nil || newRecord.Vector[0] != 2 {
+		t.Fatalf("second generation record = %#v, %v", newRecord, err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstManifest.VectorsFile)); err != nil {
+		t.Fatalf("pinned generation vector file removed: %v", err)
+	}
+	if err := db.DeleteCollection(config.Name); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("delete with pinned readers error = %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "item", Vector: []float32{3, 0}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(firstManifestPath), firstManifest.VectorsFile)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("released obsolete generation still exists: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

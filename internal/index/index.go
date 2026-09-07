@@ -17,6 +17,18 @@ type VectorIndex interface {
 	Stats() Stats
 }
 
+// SearchOptions carries optional query-time tuning without expanding the base
+// index contract used by implementations that do not need it.
+type SearchOptions struct {
+	EFSearch     int
+	Allowed      func(id uint64) bool
+	AllowedCount int
+}
+
+type TunableVectorIndex interface {
+	SearchWithOptions(vector []float32, k int, options SearchOptions) ([]Candidate, error)
+}
+
 type Stats struct {
 	Type         core.IndexType
 	Vectors      int

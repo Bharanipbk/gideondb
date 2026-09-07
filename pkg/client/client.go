@@ -91,6 +91,7 @@ type RecordPage struct {
 type SearchOptions struct {
 	Vector       []float32
 	TopK         int
+	EFSearch     int
 	Namespace    string
 	Filter       map[string]any
 	AllowPartial bool
@@ -273,6 +274,9 @@ func (c *Client) DistributedBatchUpsert(ctx context.Context, collection string, 
 
 func searchBody(options SearchOptions, distributed bool) map[string]any {
 	body := map[string]any{"vector": options.Vector, "top_k": options.TopK}
+	if options.EFSearch != 0 {
+		body["ef_search"] = options.EFSearch
+	}
 	if options.Namespace != "" {
 		body["namespace"] = options.Namespace
 	}

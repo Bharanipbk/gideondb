@@ -29,16 +29,33 @@ automated tests, and user-facing documentation are all finished.
 
 ## Storage and indexing
 
-- [ ] Persist versioned, checksummed HNSW graph files so startup does not need
-  to rebuild graph edges from every stored record.
-- [ ] Rebuild persisted HNSW graphs during compaction and replace slice-based
-  adjacency with a measured packed immutable representation.
-- [ ] Add a per-query HNSW `efSearch` override and selectivity-aware filtered
-  traversal backed by persisted filter indexes.
-- [ ] Evaluate SIMD distance kernels and vector quantization while retaining
-  flat search as the correctness oracle.
-- [ ] Add general snapshot pinning and a multi-generation reader API.
-- [ ] Add reliable orphan/obsolete segment discovery and cleanup.
+- [x] Persist versioned, checksummed HNSW graph files so startup does not need
+  to rebuild graph edges from every stored record. Graph topology is validated
+  against the manifest records, collection index settings, entry point, layer
+  bounds, neighbor ordinals, and CRC32C before publication.
+- [x] Store recovered immutable HNSW adjacency in a contiguous packed neighbor
+  array with per-node layer offsets and measured backing-array accounting.
+  Mutable graph construction retains editable slices; checkpoint recovery
+  publishes the packed representation and rejects mutation.
+- [x] Add a per-query HNSW `ef_search` override across REST, distributed shard
+  transport, and the Go client, plus exact allowed-set search for selective
+  metadata bitmaps.
+- [x] Persist versioned, checksummed immutable metadata filter indexes.
+  Recovery validates the file's manifest count/LSN, ordinal/value/posting
+  consistency, and numeric entries before directly installing the index.
+- [x] Evaluate SIMD distance kernels and symmetric int8 vector quantization
+  while retaining float32 flat scoring as the correctness oracle. Portable
+  four-lane float32 kernels remain the production path; int8 storage is deferred
+  because its portable cosine kernel regressed latency despite 0.996 recall@10
+  and an approximately 75% vector-payload reduction in the synthetic trial.
+- [x] Add reference-counted snapshot pinning and a multi-generation reader API.
+  Engine snapshots pin one immutable generation per shard, expose consistent
+  get/search/record reads, defer retired mmap closure until the last release,
+  and prevent collection deletion while readers remain pinned.
+- [x] Add reliable orphan/obsolete segment discovery and cleanup. Startup and
+  checkpoint publication now preserve only manifest-referenced segment files,
+  remove recognized stale/temp files, preserve unknown operator/future-format
+  files, and report cleanup failures.
 - [ ] Replace full-shard checkpoint compaction with a bounded multi-segment,
   size-tiered policy after measuring write amplification and memory use.
 - [ ] Calibrate index memory accounting against heap profiles before publishing

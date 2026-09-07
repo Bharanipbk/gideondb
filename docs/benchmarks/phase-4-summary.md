@@ -30,6 +30,33 @@ maintained kernels, feature detection, numerical-equivalence testing, and a
 measured end-to-end gain beyond the current memory/metadata bottlenecks. The
 portable kernel is the correctness oracle for any later SIMD implementation.
 
+## Int8 quantization evaluation
+
+On 2026-09-07, a symmetric per-vector int8 prototype was tested against exact
+float32 scoring. It uses one byte per dimension plus a four-byte scale, reducing
+a 768-dimensional vector from 3,072 to 772 bytes (about 75%). On 1,000
+deterministic random 32-dimensional vectors and 25 queries, approximate cosine
+top-10 achieved 0.996 recall@10 against exact flat scores.
+
+The portable int8 cosine kernel measured 1,075–1,079 ns/op with zero allocations
+on the same Apple M3, versus 414–415 ns/op for prepared float32 cosine. Encoding
+a 768-dimensional vector measured 5,768–5,772 ns/op, 768 B/op, and one
+allocation. Commands:
+
+```bash
+go test -run TestInt8RecallAgainstExactFlatScores -v ./internal/quantization
+go test -run '^$' -bench 'Benchmark(Dot768|CosinePrepared768)$' \
+  -benchmem -count=3 ./internal/distance
+go test -run '^$' -bench 'Benchmark(Int8Cosine768|QuantizeInt8_768)$' \
+  -benchmem -count=3 ./internal/quantization
+```
+
+Decision: retain the prototype and its regression tests as evaluation evidence,
+but do not add int8 to the persisted segment format or public configuration yet.
+An accelerated scoring implementation, representative embedding datasets, all
+metrics, end-to-end HNSW reranking, and a versioned format ADR are required
+before adoption. Exact float32 flat search remains the oracle.
+
 ## Completion boundary
 
 This completes the planned Phase 4 implementation and evidence pass. Remaining

@@ -1,7 +1,9 @@
 package hnsw
 
 import (
+	"errors"
 	"math/rand/v2"
+	"strings"
 	"sync"
 	"testing"
 
@@ -52,6 +54,68 @@ func TestSearchRecallAgainstFlat(t *testing.T) {
 	}
 }
 
+func TestGraphRoundTripAndCorruption(t *testing.T) {
+	cfg := index.Config{Dimension: 3, Metric: core.MetricCosine, M: 4, EFConstruction: 16, EFSearch: 12}
+	original, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vectors := [][]float32{{1, 0, 0}, {0.9, 0.1, 0}, {0, 1, 0}, {0, 0, 1}}
+	ids := []uint64{1, 2, 3, 4}
+	for position := range ids {
+		if err := original.Upsert(ids[position], vectors[position]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	graph, err := original.MarshalGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := LoadGraph(cfg, ids, vectors, graph)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.packedOffsets == nil || len(restored.packedNeighbors) == 0 || restored.nodes[0].neighbors != nil {
+		t.Fatal("restored graph did not use packed immutable adjacency")
+	}
+	if restored.Stats().GraphBytes == 0 || restored.Stats().GraphEdges != original.Stats().GraphEdges {
+		t.Fatalf("packed graph stats=%#v original=%#v", restored.Stats(), original.Stats())
+	}
+	if err := restored.Upsert(99, []float32{1, 0, 0}); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("packed graph upsert error = %v, want invalid argument", err)
+	}
+	if err := restored.Delete(1); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("packed graph delete error = %v, want invalid argument", err)
+	}
+	reencoded, err := restored.MarshalGraph()
+	if err != nil {
+		t.Fatalf("marshal packed graph: %v", err)
+	}
+	if _, err := LoadGraph(cfg, ids, vectors, reencoded); err != nil {
+		t.Fatalf("reload packed graph: %v", err)
+	}
+	want, _ := original.Search([]float32{1, 0, 0}, 3)
+	got, err := restored.Search([]float32{1, 0, 0}, 3)
+	if err != nil || len(got) != len(want) {
+		t.Fatalf("restored search=%v err=%v", got, err)
+	}
+	for position := range want {
+		if got[position] != want[position] {
+			t.Fatalf("candidate %d=%v want %v", position, got[position], want[position])
+		}
+	}
+	corrupt := append([]byte(nil), graph...)
+	corrupt[len(corrupt)-1] ^= 0xff
+	if _, err := LoadGraph(cfg, ids, vectors, corrupt); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("expected checksum error, got %v", err)
+	}
+	wrong := cfg
+	wrong.EFSearch++
+	if _, err := LoadGraph(wrong, ids, vectors, graph); err == nil || !strings.Contains(err.Error(), "configuration") {
+		t.Fatalf("expected configuration error, got %v", err)
+	}
+}
+
 func TestUpdateDeleteAndConcurrentSearch(t *testing.T) {
 	idx, _ := New(index.Config{Dimension: 2, Metric: core.MetricDot, M: 4, EFConstruction: 16, EFSearch: 16})
 	for id := uint64(1); id <= 100; id++ {
@@ -91,6 +155,26 @@ func TestUpdateDeleteAndConcurrentSearch(t *testing.T) {
 	stats := idx.Stats()
 	if stats.Type != core.IndexHNSW || stats.Vectors != 99 || stats.GraphEdges == 0 || stats.Deleted != 1 {
 		t.Fatalf("unexpected stats: %#v", stats)
+	}
+}
+
+func TestQueryEFSearchAndSelectiveExactPath(t *testing.T) {
+	idx, err := New(index.Config{Dimension: 2, Metric: core.MetricDot, M: 4, EFConstruction: 16, EFSearch: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, vector := range [][]float32{{1, 0}, {0.8, 0.2}, {0, 1}, {-1, 0}} {
+		if err := idx.Upsert(uint64(id+1), vector); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allowed := func(id uint64) bool { return id == 2 || id == 3 }
+	results, err := idx.SearchWithOptions([]float32{1, 0}, 2, index.SearchOptions{EFSearch: 1, Allowed: allowed, AllowedCount: 2})
+	if err != nil || len(results) != 2 || results[0].ID != 2 || results[1].ID != 3 {
+		t.Fatalf("selective search = %#v, %v", results, err)
+	}
+	if _, err := idx.SearchWithOptions([]float32{1, 0}, 1, index.SearchOptions{EFSearch: 10001, AllowedCount: -1}); !errors.Is(err, core.ErrInvalidArgument) {
+		t.Fatalf("ef_search validation error = %v", err)
 	}
 }
 

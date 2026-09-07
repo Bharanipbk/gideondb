@@ -25,7 +25,7 @@ func TestRESTLifecycle(t *testing.T) {
 	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/vectors",
 		map[string]any{"id": "one", "vector": []float32{1, 0}, "metadata": map[string]any{"type": "test"}}, http.StatusOK)
 	response := requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/search",
-		map[string]any{"vector": []float32{1, 0}, "top_k": 1}, http.StatusOK)
+		map[string]any{"vector": []float32{1, 0}, "top_k": 1, "ef_search": 8}, http.StatusOK)
 	var body struct {
 		Results []struct {
 			ID string `json:"id"`
@@ -45,6 +45,8 @@ func TestRESTLifecycle(t *testing.T) {
 	if len(body.Results) != 0 {
 		t.Fatalf("filter should exclude result: %s", response)
 	}
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/search",
+		map[string]any{"vector": []float32{1, 0}, "top_k": 1, "ef_search": 10001}, http.StatusBadRequest)
 	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/vectors/batch",
 		map[string]any{"records": []any{
 			map[string]any{"id": "two", "vector": []float32{0, 1}},

@@ -629,6 +629,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 type searchRequest struct {
 	Vector    []float32      `json:"vector"`
 	TopK      int            `json:"top_k"`
+	EFSearch  int            `json:"ef_search,omitempty"`
 	Namespace string         `json:"namespace,omitempty"`
 	Filter    map[string]any `json:"filter,omitempty"`
 }
@@ -654,7 +655,7 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	results, err := s.engine.SearchShardFiltered(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter)
+	results, err := s.engine.SearchShardFilteredWithEF(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -694,7 +695,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	results, err := s.engine.SearchFiltered(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter)
+	results, err := s.engine.SearchFilteredWithEF(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	if err != nil {
 		writeError(w, err)
 		return

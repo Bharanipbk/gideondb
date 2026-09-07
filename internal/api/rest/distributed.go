@@ -64,6 +64,10 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, fmt.Errorf("%w: top_k must be positive", core.ErrInvalidArgument))
 		return
 	}
+	if request.EFSearch < 0 || request.EFSearch > 10000 {
+		writeError(w, fmt.Errorf("%w: ef_search must be between 1 and 10000 when set", core.ErrInvalidArgument))
+		return
+	}
 	peers, peerErr := s.membershipPeers()
 	if peerErr != nil {
 		writeJSON(w, http.StatusServiceUnavailable, apiError{Code: "membership_unavailable", Message: peerErr.Error()})
@@ -94,7 +98,7 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 				var results []core.SearchResult
 				var searchErr error
 				if assignment.NodeID == s.nodeID {
-					results, searchErr = s.engine.SearchShardFiltered(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.TopK, filter)
+					results, searchErr = s.engine.SearchShardFilteredWithEF(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 				} else {
 					peer, exists := peerByID[assignment.NodeID]
 					if !exists {

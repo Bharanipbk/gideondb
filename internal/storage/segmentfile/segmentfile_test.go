@@ -1,6 +1,7 @@
 package segmentfile
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -57,6 +58,33 @@ func TestManifestRejectsTraversal(t *testing.T) {
 	}
 	if _, err := LoadManifest(path); err == nil {
 		t.Fatal("expected unsafe path to be rejected")
+	}
+}
+
+func TestCleanupOrphansPreservesManifestAndUnknownFiles(t *testing.T) {
+	directory := t.TempDir()
+	manifest := Manifest{Format: 2, RecordsFile: "segment-20.records", VectorsFile: "segment-20.vectors", Dimension: 2, MaxLSN: 20}
+	for _, name := range []string{
+		"MANIFEST.json", "segment-20.records", "segment-20.vectors",
+		"segment-10.records", "segment-10.vectors", "segment-5.vseg",
+		"segment-30.graph", ".tmp-interrupted", "operator-notes.txt",
+	} {
+		if err := os.WriteFile(filepath.Join(directory, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := CleanupOrphans(directory, manifest); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"MANIFEST.json", "segment-20.records", "segment-20.vectors", "operator-notes.txt"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); err != nil {
+			t.Fatalf("preserved file %s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"segment-10.records", "segment-10.vectors", "segment-5.vseg", "segment-30.graph", ".tmp-interrupted"} {
+		if _, err := os.Stat(filepath.Join(directory, name)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("orphan file %s still exists: %v", name, err)
+		}
 	}
 }
 

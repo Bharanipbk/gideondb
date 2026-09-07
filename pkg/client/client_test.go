@@ -69,7 +69,7 @@ func TestClientLifecycleAndTypedErrors(t *testing.T) {
 	if err != nil || got.ID != "one" || got.Namespace != "tenant-a" {
 		t.Fatalf("got=%#v err=%v", got, err)
 	}
-	results, err := sdk.Search(ctx, "docs", client.SearchOptions{Vector: []float32{1, 0}, TopK: 1, Namespace: "tenant-a", Filter: map[string]any{"kind": "guide"}})
+	results, err := sdk.Search(ctx, "docs", client.SearchOptions{Vector: []float32{1, 0}, TopK: 1, EFSearch: 32, Namespace: "tenant-a", Filter: map[string]any{"kind": "guide"}})
 	if err != nil || len(results) != 1 || results[0].ID != "one" {
 		t.Fatalf("results=%#v err=%v", results, err)
 	}

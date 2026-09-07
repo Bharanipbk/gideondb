@@ -29,6 +29,9 @@ type Index struct {
 	efSearch               int
 	vectors                []float32
 	nodes                  []node
+	packedOffsets          [][]int
+	packedNeighbors        []int
+	immutableGraph         bool
 	ordinals               map[uint64]int
 	entry                  int
 	maxLevel               int
@@ -59,6 +62,9 @@ func (h *Index) Upsert(id uint64, vector []float32) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.immutableGraph {
+		return fmt.Errorf("%w: persisted hnsw graph is immutable", core.ErrInvalidArgument)
+	}
 	if ordinal, ok := h.ordinals[id]; ok {
 		copy(h.vectorAt(ordinal), vector)
 		// Updating a vector invalidates its graph geometry. Rebuild deterministically
@@ -109,6 +115,9 @@ func (h *Index) insertLocked(id uint64, vector []float32) error {
 func (h *Index) Delete(id uint64) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.immutableGraph {
+		return fmt.Errorf("%w: persisted hnsw graph is immutable", core.ErrInvalidArgument)
+	}
 	ordinal, ok := h.ordinals[id]
 	if !ok {
 		return core.ErrNotFound
@@ -120,15 +129,22 @@ func (h *Index) Delete(id uint64) error {
 }
 
 func (h *Index) Search(query []float32, k int) ([]index.Candidate, error) {
-	return h.SearchFiltered(query, k, nil)
+	return h.SearchWithOptions(query, k, index.SearchOptions{AllowedCount: -1})
 }
 
 func (h *Index) SearchFiltered(query []float32, k int, allowed func(id uint64) bool) ([]index.Candidate, error) {
+	return h.SearchWithOptions(query, k, index.SearchOptions{Allowed: allowed, AllowedCount: -1})
+}
+
+func (h *Index) SearchWithOptions(query []float32, k int, options index.SearchOptions) ([]index.Candidate, error) {
 	if len(query) != h.dimension {
 		return nil, core.ErrDimensionMismatch
 	}
 	if k <= 0 {
 		return nil, fmt.Errorf("%w: k must be positive", core.ErrInvalidArgument)
+	}
+	if options.EFSearch < 0 || options.EFSearch > 10000 {
+		return nil, fmt.Errorf("%w: ef_search must be between 1 and 10000 when set", core.ErrInvalidArgument)
 	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -137,10 +153,17 @@ func (h *Index) SearchFiltered(query []float32, k int, allowed func(id uint64) b
 	}
 	entry := h.entry
 	querySquaredNorm := h.querySquaredNorm(query)
+	ef := options.EFSearch
+	if ef == 0 {
+		ef = h.efSearch
+	}
+	ef = max(k, ef)
+	if options.Allowed != nil && options.AllowedCount >= 0 && options.AllowedCount <= max(ef, k*4) {
+		return h.exactFilteredLocked(query, querySquaredNorm, k, options.Allowed), nil
+	}
 	for layer := h.maxLevel; layer > 0; layer-- {
 		entry = h.greedyLocked(query, querySquaredNorm, entry, layer)
 	}
-	ef := max(k, h.efSearch)
 	visited := h.visitedPool.Get().(map[int]struct{})
 	defer func() {
 		if len(visited) > maxPooledVisitedEntries {
@@ -151,7 +174,7 @@ func (h *Index) SearchFiltered(query []float32, k int, allowed func(id uint64) b
 	}()
 	accept := func(ordinal int) bool {
 		n := h.nodes[ordinal]
-		return !n.deleted && (allowed == nil || allowed(n.id))
+		return !n.deleted && (options.Allowed == nil || options.Allowed(n.id))
 	}
 	found := h.searchLayerLocked(query, querySquaredNorm, []int{entry}, ef, 0, -1, accept, nil, 0, visited)
 	result := make([]index.Candidate, 0, min(k, len(found)))
@@ -168,6 +191,31 @@ func (h *Index) SearchFiltered(query []float32, k int, allowed func(id uint64) b
 	return result, nil
 }
 
+func (h *Index) exactFilteredLocked(query []float32, querySquaredNorm float32, k int, allowed func(uint64) bool) []index.Candidate {
+	best := make(minHeap, 0, k)
+	for ordinal, item := range h.nodes {
+		if item.deleted || !allowed(item.id) {
+			continue
+		}
+		candidate := scoredOrdinal{ordinal: ordinal, score: h.scoreLocked(query, querySquaredNorm, ordinal)}
+		if len(best) < k {
+			minPush(&best, candidate)
+		} else if candidate.score > best[0].score || (candidate.score == best[0].score && item.id < h.nodes[best[0].ordinal].id) {
+			best[0] = candidate
+			minFixRoot(best)
+		}
+	}
+	ordered := append([]scoredOrdinal(nil), best...)
+	sort.Slice(ordered, func(i, j int) bool {
+		return ordered[i].score > ordered[j].score || (ordered[i].score == ordered[j].score && h.nodes[ordered[i].ordinal].id < h.nodes[ordered[j].ordinal].id)
+	})
+	result := make([]index.Candidate, len(ordered))
+	for position, candidate := range ordered {
+		result[position] = index.Candidate{ID: h.nodes[candidate.ordinal].id, Score: candidate.score}
+	}
+	return result
+}
+
 func (h *Index) Len() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -178,15 +226,26 @@ func (h *Index) Stats() index.Stats {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	var edges uint64
-	for _, n := range h.nodes {
-		for _, neighbors := range n.neighbors {
-			edges += uint64(len(neighbors))
+	var graphBytes uint64
+	if h.packedOffsets != nil {
+		edges = uint64(len(h.packedNeighbors))
+		offsets := 0
+		for _, values := range h.packedOffsets {
+			offsets += len(values)
 		}
+		graphBytes = uint64(len(h.packedNeighbors)+offsets) * uint64(bits.UintSize/8)
+	} else {
+		for _, n := range h.nodes {
+			for _, neighbors := range n.neighbors {
+				edges += uint64(len(neighbors))
+			}
+		}
+		graphBytes = edges * uint64(bits.UintSize/8)
 	}
 	return index.Stats{
 		Type: core.IndexHNSW, Vectors: h.live,
 		VectorBytes: uint64(len(h.vectors)) * 4,
-		GraphBytes:  edges * 8, GraphEdges: edges,
+		GraphBytes:  graphBytes, GraphEdges: edges,
 		Deleted: len(h.nodes) - h.live, MaximumLevel: h.maxLevel,
 	}
 }
@@ -345,6 +404,10 @@ func (h *Index) neighborsAt(ordinal, layer int) []int {
 	if layer > h.nodes[ordinal].level {
 		return nil
 	}
+	if h.packedOffsets != nil {
+		offsets := h.packedOffsets[ordinal]
+		return h.packedNeighbors[offsets[layer]:offsets[layer+1]]
+	}
 	return h.nodes[ordinal].neighbors[layer]
 }
 
@@ -439,4 +502,23 @@ func minPop(h *minHeap) scoredOrdinal {
 		position = smallest
 	}
 	return result
+}
+
+func minFixRoot(h minHeap) {
+	position := 0
+	for {
+		left := position*2 + 1
+		if left >= len(h) {
+			return
+		}
+		smallest := left
+		if right := left + 1; right < len(h) && h[right].score < h[left].score {
+			smallest = right
+		}
+		if h[position].score <= h[smallest].score {
+			return
+		}
+		h[position], h[smallest] = h[smallest], h[position]
+		position = smallest
+	}
 }

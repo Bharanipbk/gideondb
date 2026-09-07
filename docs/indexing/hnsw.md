@@ -48,19 +48,21 @@ will make replacement rebuilds less expensive in the production-storage phase.
 
 ## Persistence
 
-The JSON collection catalog persists HNSW configuration and per-shard WALs
-persist records, but neither persists graph edges. Startup replays records and
-loads immutable checkpoint records before WAL replay, then deterministically
-rebuilds the graph. A versioned, checksummed
-graph file is required before v0.1.0 and will be specified alongside immutable
-segments. Consequently, current startup time scales with graph construction.
+The JSON collection catalog persists HNSW configuration, per-shard WALs persist
+mutations, and every checkpoint publishes a versioned CRC32C-protected graph
+file alongside its record and vector columns. Recovery validates the graph's
+configuration, record order, entry point, levels, and neighbor ordinals before
+installing it, then applies only WAL mutations newer than the checkpoint. Older
+checkpoints without a graph remain readable through deterministic rebuilding.
 
 ## Memory accounting
 
 The index reports live/deleted nodes, vector bytes, directed graph edges,
 estimated edge bytes, and maximum level. This is owned-allocation accounting,
-not process RSS: slice headers, map buckets and allocator overhead are not yet
-included. Heap-profile calibration is required before publishing bytes/vector.
+not process RSS. For recovered immutable graphs, graph bytes include the packed
+neighbor and per-layer offset backing arrays. Slice headers, map buckets, and
+allocator overhead are not yet included. Heap-profile calibration is required
+before publishing bytes/vector.
 
 ## Quality validation
 
@@ -71,10 +73,16 @@ regression guard, not a production recall or scale claim.
 
 ## Known limitations
 
-- Graph adjacency currently uses Go slices rather than the planned packed
-  immutable representation.
+- Mutable graph construction uses editable per-node slices. Checkpoint recovery
+  loads adjacency into a contiguous packed neighbor array with per-node layer
+  offsets and rejects mutation of that immutable graph.
 - Construction/search are serialized against mutation by one graph lock.
-- No per-query `efSearch` override is exposed through REST.
-- Filter-aware traversal is implemented for mutable-segment scalar metadata;
-  selectivity-aware planning and persisted filter indexes are not.
-- Graph files, compaction rebuild, SIMD and quantization are not implemented.
+- REST and the Go client accept a per-query `ef_search` from 1 through 10,000;
+  omission uses the collection default.
+- Selective metadata bitmaps use an exact allowed-set scan. New checkpoints
+  restore versioned, checksummed filter indexes directly; legacy checkpoints
+  rebuild them from record metadata.
+- Graph persistence, checkpoint rebuild, and packed immutable recovery are
+  implemented. Architecture-specific SIMD remains deferred. Symmetric int8 was
+  evaluated but is not a storage or search option because its portable scoring
+  latency regressed despite strong synthetic recall and lower payload size.

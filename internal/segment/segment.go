@@ -28,6 +28,10 @@ type Segment struct {
 }
 
 func NewMapped(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }) (*Segment, error) {
+	return NewMappedWithMetadata(config, records, source, closer, nil)
+}
+
+func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) (*Segment, error) {
 	if source == nil || source.Dimension() != config.Dimension {
 		return nil, fmt.Errorf("%w: mapped source dimension mismatch", core.ErrInvalidArgument)
 	}
@@ -39,9 +43,13 @@ func NewMapped(config core.CollectionConfig, records []core.Record, source flat.
 	if err != nil {
 		return nil, err
 	}
+	loadedMetadata := metadataIndex != nil
+	if metadataIndex == nil {
+		metadataIndex = metadata.NewIndex()
+	}
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
-		ordinals: make(map[string]uint64, len(records)), metadata: metadata.NewIndex(), readOnly: true,
+		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
 		vectorAt: source.VectorCopy, closer: closer,
 	}
 	for position, record := range records {
@@ -49,7 +57,9 @@ func NewMapped(config core.CollectionConfig, records []core.Record, source flat.
 		record.Vector = nil
 		s.records[ordinal] = cloneRecord(record)
 		s.ordinals[key(record.Namespace, record.ID)] = ordinal
-		s.metadata.Upsert(ordinal, record.Metadata)
+		if !loadedMetadata {
+			s.metadata.Upsert(ordinal, record.Metadata)
+		}
 	}
 	return s, nil
 }
@@ -76,6 +86,54 @@ func New(config core.CollectionConfig) (*Segment, error) {
 		index: idx, nextID: 1, records: make(map[uint64]core.Record),
 		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(),
 	}, nil
+}
+
+func BuildHNSWGraph(config core.CollectionConfig, records []core.Record) ([]byte, error) {
+	idx, err := hnsw.New(indexConfig(config))
+	if err != nil {
+		return nil, err
+	}
+	for position, record := range records {
+		if err := idx.Upsert(uint64(position+1), record.Vector); err != nil {
+			return nil, err
+		}
+	}
+	return idx.MarshalGraph()
+}
+
+func NewHNSWFromGraph(config core.CollectionConfig, records []core.Record, graph []byte) (*Segment, error) {
+	return NewHNSWFromGraphWithMetadata(config, records, graph, nil)
+}
+
+func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.Record, graph []byte, metadataIndex *metadata.Index) (*Segment, error) {
+	ids := make([]uint64, len(records))
+	vectors := make([][]float32, len(records))
+	for position, record := range records {
+		ids[position] = uint64(position + 1)
+		vectors[position] = record.Vector
+	}
+	idx, err := hnsw.LoadGraph(indexConfig(config), ids, vectors, graph)
+	if err != nil {
+		return nil, err
+	}
+	loadedMetadata := metadataIndex != nil
+	if metadataIndex == nil {
+		metadataIndex = metadata.NewIndex()
+	}
+	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true}
+	for position, record := range records {
+		ordinal := uint64(position + 1)
+		s.records[ordinal] = cloneRecord(record)
+		s.ordinals[key(record.Namespace, record.ID)] = ordinal
+		if !loadedMetadata {
+			s.metadata.Upsert(ordinal, record.Metadata)
+		}
+	}
+	return s, nil
+}
+
+func indexConfig(config core.CollectionConfig) index.Config {
+	return index.Config{Dimension: config.Dimension, Metric: config.Metric, M: config.Index.M, EFConstruction: config.Index.EFConstruction, EFSearch: config.Index.EFSearch}
 }
 
 func key(namespace, id string) string { return namespace + "\x00" + id }
@@ -147,17 +205,21 @@ func (s *Segment) Search(namespace string, query []float32, k int) ([]core.Searc
 }
 
 func (s *Segment) SearchFiltered(namespace string, query []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
-	return s.SearchFilteredExcluding(namespace, query, k, filter, nil)
+	return s.SearchFilteredWithOptions(namespace, query, k, filter, nil, 0)
 }
 
 func (s *Segment) SearchFilteredExcluding(namespace string, query []float32, k int, filter *metadata.Expr, excluded map[string]struct{}) ([]core.SearchResult, error) {
+	return s.SearchFilteredWithOptions(namespace, query, k, filter, excluded, 0)
+}
+
+func (s *Segment) SearchFilteredWithOptions(namespace string, query []float32, k int, filter *metadata.Expr, excluded map[string]struct{}, efSearch int) ([]core.SearchResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var allowed *metadata.Set
 	if filter != nil {
 		allowed = s.metadata.Evaluate(filter)
 	}
-	candidates, err := s.index.SearchFiltered(query, k, func(id uint64) bool {
+	allow := func(id uint64) bool {
 		if allowed != nil && !allowed.Contains(id) {
 			return false
 		}
@@ -167,7 +229,18 @@ func (s *Segment) SearchFilteredExcluding(namespace string, query []float32, k i
 		}
 		_, blocked := excluded[key(record.Namespace, record.ID)]
 		return !blocked
-	})
+	}
+	var candidates []index.Candidate
+	var err error
+	if tunable, ok := s.index.(index.TunableVectorIndex); ok {
+		allowedCount := -1
+		if allowed != nil {
+			allowedCount = allowed.Len()
+		}
+		candidates, err = tunable.SearchWithOptions(query, k, index.SearchOptions{EFSearch: efSearch, Allowed: allow, AllowedCount: allowedCount})
+	} else {
+		candidates, err = s.index.SearchFiltered(query, k, allow)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -47,7 +47,9 @@ transport response whose `Partial` flag and `Outcomes` require inspection.
 `Search` and `BatchUpsert` use single-node routes. Clusters with static routing
 must use `DistributedSearch` and `DistributedBatchUpsert`. Partial distributed
 search is opt-in through `SearchOptions.AllowPartial`; the default fails closed
-when any shard is unavailable.
+when any shard is unavailable. Set `SearchOptions.EFSearch` from 1 through
+10,000 to override an HNSW collection's query breadth; zero uses its configured
+default and flat indexes ignore the option.
 
 `Scroll` browses records physically present on one node. Pass its opaque cursor
 unchanged for the next page; vectors require explicit inclusion:

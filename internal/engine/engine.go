@@ -16,6 +16,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/collection"
 	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/segment"
 	"github.com/Bharanipbk/gideondb/internal/storage"
 	"github.com/Bharanipbk/gideondb/internal/storage/segmentfile"
 	"github.com/Bharanipbk/gideondb/internal/wal"
@@ -138,6 +139,9 @@ func (e *Engine) DeleteCollection(name string) error {
 	if !ok {
 		return core.ErrNotFound
 	}
+	if c.HasPinnedReaders() {
+		return fmt.Errorf("%w: collection has pinned snapshot readers", core.ErrInvalidArgument)
+	}
 	for _, log := range e.logs[name] {
 		if log != nil {
 			if err := log.Close(); err != nil {
@@ -173,6 +177,16 @@ func (e *Engine) ListCollections() []core.CollectionConfig {
 	}
 	sort.Slice(configs, func(i, j int) bool { return configs[i].Name < configs[j].Name })
 	return configs
+}
+
+func (e *Engine) PinSnapshot(name string) (*collection.Snapshot, error) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	c, ok := e.collections[name]
+	if !ok {
+		return nil, core.ErrNotFound
+	}
+	return c.PinSnapshot()
 }
 
 func (e *Engine) DescribeCollection(name string) (core.CollectionConfig, int, error) {
@@ -481,19 +495,30 @@ func (e *Engine) InstallReplicaSnapshot(name string, shardID uint32, sequence ui
 	directory := e.shardSegmentDir(name, shardID)
 	segmentBase := fmt.Sprintf("segment-%020d", sequence)
 	manifestPath := filepath.Join(directory, "MANIFEST.json")
-	var oldFiles []string
-	if old, err := segmentfile.LoadManifest(manifestPath); err == nil {
-		if old.Format == 1 {
-			oldFiles = append(oldFiles, old.SegmentFile)
-		} else {
-			oldFiles = append(oldFiles, old.RecordsFile, old.VectorsFile)
-		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+	if _, err := segmentfile.LoadManifest(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	manifest, err := segmentfile.WriteBundle(directory, segmentBase, records, c.Config().Dimension, sequence)
 	if err != nil {
 		return err
+	}
+	filterData, err := metadata.MarshalRecords(records)
+	if err != nil {
+		return err
+	}
+	manifest.FilterFile = segmentBase + ".filter"
+	if err := segmentfile.WriteFilter(directory, manifest.FilterFile, filterData, manifest.RecordCount, manifest.MaxLSN); err != nil {
+		return err
+	}
+	if c.Config().Index.Type == core.IndexHNSW {
+		graph, err := segment.BuildHNSWGraph(c.Config(), records)
+		if err != nil {
+			return err
+		}
+		manifest.GraphFile = segmentBase + ".graph"
+		if err := segmentfile.WriteGraph(directory, manifest.GraphFile, graph); err != nil {
+			return err
+		}
 	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
@@ -507,9 +532,9 @@ func (e *Engine) InstallReplicaSnapshot(name string, shardID uint32, sequence ui
 	e.checkpointLSN[name][shardID] = sequence
 	e.mutations[name][shardID] = 0
 	e.walDigests[name][shardID] = make(map[uint64][32]byte)
-	for _, oldFile := range oldFiles {
-		if oldFile != manifest.RecordsFile && oldFile != manifest.VectorsFile {
-			_ = os.Remove(filepath.Join(directory, oldFile))
+	if !c.ShardHasPinnedReaders(shardID) {
+		if err := segmentfile.CleanupOrphans(directory, manifest); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -609,14 +634,22 @@ func (e *Engine) Search(name, namespace string, vector []float32, k int) ([]core
 }
 
 func (e *Engine) SearchFiltered(name, namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return e.SearchFilteredWithEF(name, namespace, vector, k, filter, 0)
+}
+
+func (e *Engine) SearchFilteredWithEF(name, namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
 	c, err := e.getCollection(name)
 	if err != nil {
 		return nil, err
 	}
-	return c.SearchFiltered(namespace, vector, k, filter)
+	return c.SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
 }
 
 func (e *Engine) SearchShardFiltered(name string, shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return e.SearchShardFilteredWithEF(name, shardID, namespace, vector, k, filter, 0)
+}
+
+func (e *Engine) SearchShardFilteredWithEF(name string, shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
 	if !e.shardOwned(name, shardID) {
 		return nil, core.ErrShardNotOwned
 	}
@@ -624,7 +657,7 @@ func (e *Engine) SearchShardFiltered(name string, shardID uint32, namespace stri
 	if err != nil {
 		return nil, err
 	}
-	return c.SearchShardFiltered(shardID, namespace, vector, k, filter)
+	return c.SearchShardFilteredWithEF(shardID, namespace, vector, k, filter, efSearch)
 }
 
 func (e *Engine) getCollection(name string) (*collection.Collection, error) {
@@ -776,11 +809,22 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 			if err != nil {
 				return fmt.Errorf("load column segment for %s shard %d: %w", config.Name, shardID, err)
 			}
+			var metadataIndex *metadata.Index
+			if manifest.FilterFile != "" {
+				payload, filterErr := segmentfile.ReadFilter(directory, manifest)
+				if filterErr != nil {
+					return fmt.Errorf("load filter index for %s shard %d: %w", config.Name, shardID, filterErr)
+				}
+				metadataIndex, filterErr = metadata.LoadBinary(payload, manifest.RecordCount)
+				if filterErr != nil {
+					return fmt.Errorf("restore filter index for %s shard %d: %w", config.Name, shardID, filterErr)
+				}
+			}
 			mapped, err := segmentfile.OpenMappedVectors(filepath.Join(directory, manifest.VectorsFile), manifest.Dimension, manifest.RecordCount, manifest.MaxLSN)
 			if err != nil {
 				return fmt.Errorf("map vector segment for %s shard %d: %w", config.Name, shardID, err)
 			}
-			if err := c.InstallMappedShard(uint32(shardID), records, mapped, mapped); err != nil {
+			if err := c.InstallMappedShardWithMetadata(uint32(shardID), records, mapped, mapped, metadataIndex); err != nil {
 				_ = mapped.Close()
 				return err
 			}
@@ -793,6 +837,27 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 			if err != nil {
 				return fmt.Errorf("load column segment for %s shard %d: %w", config.Name, shardID, err)
 			}
+			var metadataIndex *metadata.Index
+			if manifest.FilterFile != "" {
+				payload, filterErr := segmentfile.ReadFilter(directory, manifest)
+				if filterErr != nil {
+					return fmt.Errorf("load filter index for %s shard %d: %w", config.Name, shardID, filterErr)
+				}
+				metadataIndex, filterErr = metadata.LoadBinary(payload, manifest.RecordCount)
+				if filterErr != nil {
+					return fmt.Errorf("restore filter index for %s shard %d: %w", config.Name, shardID, filterErr)
+				}
+			}
+			if manifest.GraphFile != "" {
+				graph, err := segmentfile.ReadGraph(directory, manifest)
+				if err != nil {
+					return fmt.Errorf("load hnsw graph for %s shard %d: %w", config.Name, shardID, err)
+				}
+				if err := c.InstallHNSWShardWithMetadata(uint32(shardID), records, graph, metadataIndex); err != nil {
+					return fmt.Errorf("restore hnsw graph for %s shard %d: %w", config.Name, shardID, err)
+				}
+				records = nil
+			}
 		}
 		for _, record := range records {
 			if c.RouteShard(record.Namespace, record.ID) != uint32(shardID) {
@@ -801,6 +866,9 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 			if err := c.Restore(record); err != nil {
 				return err
 			}
+		}
+		if err := segmentfile.CleanupOrphans(directory, manifest); err != nil {
+			return fmt.Errorf("clean orphan segments for %s shard %d: %w", config.Name, shardID, err)
 		}
 		lsns[shardID] = manifest.MaxLSN
 	}
@@ -857,15 +925,27 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 	if err != nil {
 		return err
 	}
-	manifestPath := filepath.Join(directory, "MANIFEST.json")
-	var oldFiles []string
-	if old, err := segmentfile.LoadManifest(manifestPath); err == nil {
-		if old.Format == 1 {
-			oldFiles = append(oldFiles, old.SegmentFile)
-		} else {
-			oldFiles = append(oldFiles, old.RecordsFile, old.VectorsFile)
+	filterData, err := metadata.MarshalRecords(records)
+	if err != nil {
+		return err
+	}
+	manifest.FilterFile = segmentBase + ".filter"
+	if err := segmentfile.WriteFilter(directory, manifest.FilterFile, filterData, manifest.RecordCount, manifest.MaxLSN); err != nil {
+		return err
+	}
+	var graphData []byte
+	if c.Config().Index.Type == core.IndexHNSW {
+		graphData, err = segment.BuildHNSWGraph(c.Config(), records)
+		if err != nil {
+			return err
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
+		manifest.GraphFile = segmentBase + ".graph"
+		if err := segmentfile.WriteGraph(directory, manifest.GraphFile, graphData); err != nil {
+			return err
+		}
+	}
+	manifestPath := filepath.Join(directory, "MANIFEST.json")
+	if _, err := segmentfile.LoadManifest(manifestPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
@@ -884,16 +964,29 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 		if err != nil {
 			return err
 		}
-		if err := c.InstallMappedShard(shardID, baseRecords, mapped, mapped); err != nil {
+		metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
+		if err != nil {
 			_ = mapped.Close()
+			return err
+		}
+		if err := c.InstallMappedShardWithMetadata(shardID, baseRecords, mapped, mapped, metadataIndex); err != nil {
+			_ = mapped.Close()
+			return err
+		}
+	} else if c.Config().Index.Type == core.IndexHNSW {
+		metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
+		if err != nil {
+			return err
+		}
+		if err := c.InstallHNSWShardWithMetadata(shardID, records, graphData, metadataIndex); err != nil {
 			return err
 		}
 	}
 	e.checkpointLSN[name][shardID] = maxLSN
 	e.mutations[name][shardID] = 0
-	for _, oldFile := range oldFiles {
-		if oldFile != manifest.RecordsFile && oldFile != manifest.VectorsFile {
-			_ = os.Remove(filepath.Join(directory, oldFile))
+	if !c.ShardHasPinnedReaders(shardID) {
+		if err := segmentfile.CleanupOrphans(directory, manifest); err != nil {
+			return err
 		}
 	}
 	return nil

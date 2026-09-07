@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"runtime"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,74 @@ type Collection struct {
 	config  core.CollectionConfig
 	shards  []*shard.Shard
 	version atomic.Uint64
+}
+
+// Snapshot is a read-only view that pins one immutable generation per shard.
+type Snapshot struct {
+	config core.CollectionConfig
+	shards []*shard.Snapshot
+	once   sync.Once
+}
+
+func (s *Snapshot) Generations() []uint64 {
+	result := make([]uint64, len(s.shards))
+	for position, shardSnapshot := range s.shards {
+		result[position] = shardSnapshot.Generation()
+	}
+	return result
+}
+
+func (s *Snapshot) Get(namespace, id string) (core.Record, error) {
+	return s.shards[s.route(namespace, id)].Get(namespace, id)
+}
+
+func (s *Snapshot) Records() []core.Record {
+	var result []core.Record
+	for _, shardSnapshot := range s.shards {
+		result = append(result, shardSnapshot.Records()...)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Namespace < result[j].Namespace || (result[i].Namespace == result[j].Namespace && result[i].ID < result[j].ID)
+	})
+	return result
+}
+
+func (s *Snapshot) SearchFilteredWithEF(namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
+	if err := core.ValidateVector(vector, s.config.Dimension); err != nil {
+		return nil, err
+	}
+	if k <= 0 || efSearch < 0 || efSearch > 10000 {
+		return nil, fmt.Errorf("%w: invalid snapshot search options", core.ErrInvalidArgument)
+	}
+	perShard := make([][]core.SearchResult, len(s.shards))
+	for position, shardSnapshot := range s.shards {
+		results, err := shardSnapshot.SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
+		if err != nil {
+			return nil, err
+		}
+		perShard[position] = results
+	}
+	return mergeTopK(perShard, k), nil
+}
+
+func (s *Snapshot) Close() error {
+	var first error
+	s.once.Do(func() {
+		for _, shardSnapshot := range s.shards {
+			if err := shardSnapshot.Close(); err != nil && first == nil {
+				first = err
+			}
+		}
+	})
+	return first
+}
+
+func (s *Snapshot) route(namespace, id string) int {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(namespace))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(id))
+	return int(h.Sum64() % uint64(len(s.shards)))
 }
 
 func New(config core.CollectionConfig) (*Collection, error) {
@@ -39,6 +108,32 @@ func New(config core.CollectionConfig) (*Collection, error) {
 }
 
 func (c *Collection) Config() core.CollectionConfig { return c.config }
+
+func (c *Collection) PinSnapshot() (*Snapshot, error) {
+	result := &Snapshot{config: c.config, shards: make([]*shard.Snapshot, 0, len(c.shards))}
+	for _, current := range c.shards {
+		pinned, err := current.PinSnapshot()
+		if err != nil {
+			_ = result.Close()
+			return nil, err
+		}
+		result.shards = append(result.shards, pinned)
+	}
+	return result, nil
+}
+
+func (c *Collection) ShardHasPinnedReaders(shardID uint32) bool {
+	return int(shardID) < len(c.shards) && c.shards[shardID].HasPinnedReaders()
+}
+
+func (c *Collection) HasPinnedReaders() bool {
+	for _, current := range c.shards {
+		if current.HasPinnedReaders() {
+			return true
+		}
+	}
+	return false
+}
 
 func (c *Collection) Upsert(record core.Record) (core.Record, error) {
 	record, err := c.PrepareUpsert(record)
@@ -108,14 +203,21 @@ func (c *Collection) Search(namespace string, vector []float32, k int) ([]core.S
 }
 
 func (c *Collection) SearchFiltered(namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return c.SearchFilteredWithEF(namespace, vector, k, filter, 0)
+}
+
+func (c *Collection) SearchFilteredWithEF(namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
 	if err := core.ValidateVector(vector, c.config.Dimension); err != nil {
 		return nil, err
 	}
 	if k <= 0 {
 		return nil, fmt.Errorf("%w: top_k must be positive", core.ErrInvalidArgument)
 	}
+	if efSearch < 0 || efSearch > 10000 {
+		return nil, fmt.Errorf("%w: ef_search must be between 1 and 10000 when set", core.ErrInvalidArgument)
+	}
 	if len(c.shards) == 1 {
-		return c.shards[0].SearchFiltered(namespace, vector, k, filter)
+		return c.shards[0].SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
 	}
 	perShard := make([][]core.SearchResult, len(c.shards))
 	errorsByShard := make([]error, len(c.shards))
@@ -127,7 +229,7 @@ func (c *Collection) SearchFiltered(namespace string, vector []float32, k int, f
 		go func() {
 			defer wait.Done()
 			for shardID := range jobs {
-				perShard[shardID], errorsByShard[shardID] = c.shards[shardID].SearchFiltered(namespace, vector, k, filter)
+				perShard[shardID], errorsByShard[shardID] = c.shards[shardID].SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
 			}
 		}()
 	}
@@ -145,16 +247,23 @@ func (c *Collection) SearchFiltered(namespace string, vector []float32, k int, f
 }
 
 func (c *Collection) SearchShardFiltered(shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return c.SearchShardFilteredWithEF(shardID, namespace, vector, k, filter, 0)
+}
+
+func (c *Collection) SearchShardFilteredWithEF(shardID uint32, namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
 	if err := core.ValidateVector(vector, c.config.Dimension); err != nil {
 		return nil, err
 	}
 	if k <= 0 {
 		return nil, fmt.Errorf("%w: top_k must be positive", core.ErrInvalidArgument)
 	}
+	if efSearch < 0 || efSearch > 10000 {
+		return nil, fmt.Errorf("%w: ef_search must be between 1 and 10000 when set", core.ErrInvalidArgument)
+	}
 	if uint64(shardID) >= uint64(len(c.shards)) {
 		return nil, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
 	}
-	return c.shards[shardID].SearchFiltered(namespace, vector, k, filter)
+	return c.shards[shardID].SearchFilteredWithEF(namespace, vector, k, filter, efSearch)
 }
 
 type searchResultHeap []core.SearchResult
@@ -271,6 +380,10 @@ func (c *Collection) ReplaceShardRecords(shardID uint32, records []core.Record) 
 }
 
 func (c *Collection) InstallMappedShard(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }) error {
+	return c.InstallMappedShardWithMetadata(shardID, records, source, closer, nil)
+}
+
+func (c *Collection) InstallMappedShardWithMetadata(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) error {
 	if c.config.Index.Type != core.IndexFlat {
 		return fmt.Errorf("%w: mapped checkpoints require a flat index", core.ErrInvalidArgument)
 	}
@@ -288,7 +401,36 @@ func (c *Collection) InstallMappedShard(shardID uint32, records []core.Record, s
 			}
 		}
 	}
-	base, err := segment.NewMapped(c.config, records, source, closer)
+	base, err := segment.NewMappedWithMetadata(c.config, records, source, closer, metadataIndex)
+	if err != nil {
+		return err
+	}
+	return c.shards[shardID].InstallImmutable(base)
+}
+
+func (c *Collection) InstallHNSWShard(shardID uint32, records []core.Record, graph []byte) error {
+	return c.InstallHNSWShardWithMetadata(shardID, records, graph, nil)
+}
+
+func (c *Collection) InstallHNSWShardWithMetadata(shardID uint32, records []core.Record, graph []byte, metadataIndex *metadata.Index) error {
+	if c.config.Index.Type != core.IndexHNSW {
+		return fmt.Errorf("%w: graph checkpoints require an hnsw index", core.ErrInvalidArgument)
+	}
+	if int(shardID) >= len(c.shards) {
+		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
+	}
+	for _, record := range records {
+		if c.RouteShard(record.Namespace, record.ID) != shardID {
+			return fmt.Errorf("hnsw segment record routed to wrong shard")
+		}
+		for {
+			current := c.version.Load()
+			if current >= record.Version || c.version.CompareAndSwap(current, record.Version) {
+				break
+			}
+		}
+	}
+	base, err := segment.NewHNSWFromGraphWithMetadata(c.config, records, graph, metadataIndex)
 	if err != nil {
 		return err
 	}

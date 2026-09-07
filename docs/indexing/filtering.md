@@ -53,6 +53,8 @@ value column. The resulting bitmap is supplied to the vector index.
 Flat search skips disallowed ordinals. HNSW may traverse disallowed nodes to
 maintain graph connectivity but admits only matching ordinals to its result
 heap, preventing post-filter underfill caused by an unrelated top-k cutoff.
+When the metadata bitmap contains at most `max(ef_search, 4 * top_k)` entries,
+HNSW scores the allowed set exactly; larger sets retain graph traversal.
 
 Only top-level scalar metadata fields are indexed. Nested objects and arrays
 remain stored in the record but cannot be filtered yet. Namespace selection is
@@ -62,17 +64,21 @@ namespace—not all namespaces.
 ## Update and recovery behavior
 
 Upsert removes old postings before adding new ones, and delete removes the
-ordinal from the universe and every indexed field. Checkpoint recovery rebuilds
-metadata indexes from live segment records before WAL replay. Filter semantics
-are tested against explicit expected sets for every supported operator.
+ordinal from the universe and every indexed field. New checkpoints persist a
+versioned filter index containing the live universe, typed field values,
+adaptive equality postings, presence sets, and sorted numeric entries. Recovery
+validates its checksum, manifest count/LSN, ordinal coverage, posting/value
+consistency, and numeric entries before installing it directly. Older
+checkpoints without the file rebuild indexes from records for compatibility.
+Filter semantics are tested against explicit expected sets for every supported
+operator.
 
 Dense bitmaps are effective because segment ordinals are compact. Sparse or
 very large ordinal spaces will require a compressed/Roaring representation.
 Numeric inserts append to the mutable delta in `O(1)`. At 4,096 pending entries
 or invalidations, current values merge into a replacement sorted base. This
 amortizes sorting but a merge still pauses mutation under the segment write
-lock. Persisted immutable blocks and background merge scheduling remain planned
-with multi-segment storage.
+lock. Background merge scheduling remains planned with multi-segment storage.
 
 See the [metadata benchmark](../benchmarks/metadata-filtering.md) for the first
 before/after allocation evidence.

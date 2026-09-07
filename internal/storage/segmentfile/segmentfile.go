@@ -5,11 +5,13 @@ package segmentfile
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const (
@@ -26,6 +28,8 @@ type Manifest struct {
 	SegmentFile string `json:"segment_file,omitempty"`
 	RecordsFile string `json:"records_file,omitempty"`
 	VectorsFile string `json:"vectors_file,omitempty"`
+	GraphFile   string `json:"graph_file,omitempty"`
+	FilterFile  string `json:"filter_file,omitempty"`
 	Dimension   uint32 `json:"dimension,omitempty"`
 	MaxLSN      uint64 `json:"max_lsn"`
 	RecordCount uint64 `json:"record_count"`
@@ -130,13 +134,74 @@ func LoadManifest(path string) (Manifest, error) {
 		}
 	case 2:
 		if manifest.RecordsFile == "" || manifest.VectorsFile == "" || manifest.Dimension == 0 ||
-			!safeBase(manifest.RecordsFile) || !safeBase(manifest.VectorsFile) {
+			!safeBase(manifest.RecordsFile) || !safeBase(manifest.VectorsFile) ||
+			(manifest.GraphFile != "" && !safeBase(manifest.GraphFile)) ||
+			(manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) {
 			return Manifest{}, fmt.Errorf("invalid column segment manifest")
 		}
 	default:
 		return Manifest{}, fmt.Errorf("unsupported segment manifest format %d", manifest.Format)
 	}
 	return manifest, nil
+}
+
+// CleanupOrphans removes temporary, obsolete, and unpublished segment files
+// after the current manifest and all of its referenced files have been
+// validated. Unknown files are preserved so this routine cannot erase operator
+// data or files introduced by a newer format.
+func CleanupOrphans(directory string, manifest Manifest) error {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		return err
+	}
+	referenced := map[string]struct{}{"MANIFEST.json": {}}
+	for _, name := range []string{manifest.SegmentFile, manifest.RecordsFile, manifest.VectorsFile, manifest.GraphFile, manifest.FilterFile} {
+		if name != "" {
+			referenced[name] = struct{}{}
+		}
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if _, keep := referenced[name]; keep {
+			continue
+		}
+		if !orphanCandidate(name) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(directory, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove orphan segment %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func WriteGraph(directory, name string, data []byte) error {
+	if !safeBase(name) || !strings.HasSuffix(name, ".graph") {
+		return fmt.Errorf("unsafe graph file name")
+	}
+	return writeAtomic(filepath.Join(directory, name), data, 0o640)
+}
+
+func ReadGraph(directory string, manifest Manifest) ([]byte, error) {
+	if manifest.GraphFile == "" || !safeBase(manifest.GraphFile) {
+		return nil, fmt.Errorf("manifest does not reference a valid graph file")
+	}
+	return os.ReadFile(filepath.Join(directory, manifest.GraphFile))
+}
+
+func orphanCandidate(name string) bool {
+	if strings.HasPrefix(name, ".tmp-") {
+		return true
+	}
+	if !strings.HasPrefix(name, "segment-") {
+		return false
+	}
+	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".filter"} {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func safeBase(value string) bool {

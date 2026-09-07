@@ -2,6 +2,7 @@
 package shard
 
 import (
+	"fmt"
 	"sort"
 	"sync"
 
@@ -15,9 +16,41 @@ type Shard struct {
 	id         uint32
 	config     core.CollectionConfig
 	active     *segment.Segment
-	immutable  *segment.Segment
+	immutable  *generation
+	nextGen    uint64
+	pinned     int
+	closed     bool
 	tombstones map[string]struct{}
 	count      int
+}
+
+type generation struct {
+	id      uint64
+	segment *segment.Segment
+	readers int
+	retired bool
+}
+
+// Snapshot pins one immutable shard generation until Close is called.
+type Snapshot struct {
+	shard      *Shard
+	generation *generation
+	once       sync.Once
+}
+
+func (r *Snapshot) Generation() uint64 { return r.generation.id }
+func (r *Snapshot) ShardID() uint32    { return r.shard.id }
+func (r *Snapshot) Get(namespace, id string) (core.Record, error) {
+	return r.generation.segment.Get(namespace, id)
+}
+func (r *Snapshot) Records() []core.Record { return r.generation.segment.Records() }
+func (r *Snapshot) SearchFilteredWithEF(namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
+	return r.generation.segment.SearchFilteredWithOptions(namespace, vector, k, filter, nil, efSearch)
+}
+func (r *Snapshot) Close() error {
+	var closeErr error
+	r.once.Do(func() { closeErr = r.shard.release(r.generation) })
+	return closeErr
 }
 
 func New(id uint32, config core.CollectionConfig) (*Shard, error) {
@@ -38,7 +71,7 @@ func (s *Shard) Upsert(record core.Record) error {
 	key := recordKey(record.Namespace, record.ID)
 	existed := s.active.Has(record.Namespace, record.ID)
 	if !existed && s.immutable != nil && !hasKey(s.tombstones, key) {
-		existed = s.immutable.Has(record.Namespace, record.ID)
+		existed = s.immutable.segment.Has(record.Namespace, record.ID)
 	}
 	if err := s.active.Upsert(record); err != nil {
 		return err
@@ -61,7 +94,7 @@ func (s *Shard) Get(namespace, id string) (core.Record, error) {
 	if _, deleted := s.tombstones[recordKey(namespace, id)]; deleted || s.immutable == nil {
 		return core.Record{}, core.ErrNotFound
 	}
-	return s.immutable.Get(namespace, id)
+	return s.immutable.segment.Get(namespace, id)
 }
 
 func (s *Shard) Delete(namespace, id string) error {
@@ -71,7 +104,7 @@ func (s *Shard) Delete(namespace, id string) error {
 	_, activeErr := s.active.Get(namespace, id)
 	immutableExists := false
 	if s.immutable != nil {
-		_, immutableErr := s.immutable.Get(namespace, id)
+		_, immutableErr := s.immutable.segment.Get(namespace, id)
 		immutableExists = immutableErr == nil
 		if immutableErr != nil && immutableErr != core.ErrNotFound {
 			return immutableErr
@@ -100,9 +133,13 @@ func (s *Shard) Search(namespace string, vector []float32, k int) ([]core.Search
 }
 
 func (s *Shard) SearchFiltered(namespace string, vector []float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return s.SearchFilteredWithEF(namespace, vector, k, filter, 0)
+}
+
+func (s *Shard) SearchFilteredWithEF(namespace string, vector []float32, k int, filter *metadata.Expr, efSearch int) ([]core.SearchResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	results, err := s.active.SearchFiltered(namespace, vector, k, filter)
+	results, err := s.active.SearchFilteredWithOptions(namespace, vector, k, filter, nil, efSearch)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +148,7 @@ func (s *Shard) SearchFiltered(namespace string, vector []float32, k int, filter
 		for key := range s.tombstones {
 			excluded[key] = struct{}{}
 		}
-		base, err := s.immutable.SearchFilteredExcluding(namespace, vector, k, filter, excluded)
+		base, err := s.immutable.segment.SearchFilteredWithOptions(namespace, vector, k, filter, excluded, efSearch)
 		if err != nil {
 			return nil, err
 		}
@@ -131,7 +168,7 @@ func (s *Shard) Records() []core.Record {
 	defer s.mu.RUnlock()
 	merged := make(map[string]core.Record)
 	if s.immutable != nil {
-		for _, record := range s.immutable.Records() {
+		for _, record := range s.immutable.segment.Records() {
 			merged[recordKey(record.Namespace, record.ID)] = record
 		}
 	}
@@ -161,21 +198,73 @@ func (s *Shard) InstallImmutable(base *segment.Segment) error {
 		return err
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	old := s.immutable
-	s.immutable, s.active, s.tombstones = base, active, make(map[string]struct{})
+	s.nextGen++
+	s.immutable, s.active, s.tombstones = &generation{id: s.nextGen, segment: base}, active, make(map[string]struct{})
 	s.count = base.Len()
+	var closeOld *segment.Segment
 	if old != nil {
-		return old.Close()
+		old.retired = true
+		if old.readers == 0 {
+			closeOld = old.segment
+		}
+	}
+	s.mu.Unlock()
+	if closeOld != nil {
+		return closeOld.Close()
+	}
+	return nil
+}
+
+func (s *Shard) PinSnapshot() (*Snapshot, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, fmt.Errorf("shard is closed")
+	}
+	if s.immutable == nil {
+		return nil, fmt.Errorf("%w: shard has no checkpoint generation", core.ErrInvalidArgument)
+	}
+	s.immutable.readers++
+	s.pinned++
+	return &Snapshot{shard: s, generation: s.immutable}, nil
+}
+
+func (s *Shard) HasPinnedReaders() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.pinned > 0
+}
+
+func (s *Shard) release(value *generation) error {
+	s.mu.Lock()
+	if value.readers <= 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	value.readers--
+	s.pinned--
+	shouldClose := value.retired && value.readers == 0
+	s.mu.Unlock()
+	if shouldClose {
+		return value.segment.Close()
 	}
 	return nil
 }
 
 func (s *Shard) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.closed = true
+	var closeCurrent *segment.Segment
 	if s.immutable != nil {
-		return s.immutable.Close()
+		s.immutable.retired = true
+		if s.immutable.readers == 0 {
+			closeCurrent = s.immutable.segment
+		}
+	}
+	s.mu.Unlock()
+	if closeCurrent != nil {
+		return closeCurrent.Close()
 	}
 	return nil
 }

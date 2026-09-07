@@ -17,6 +17,7 @@ const columnHeaderSize = 48
 
 var recordMagic = [4]byte{'V', 'R', 'E', 'C'}
 var vectorMagic = [4]byte{'V', 'V', 'E', 'C'}
+var filterMagic = [4]byte{'V', 'F', 'L', 'T'}
 
 type storedRecord struct {
 	ID        string         `json:"id"`
@@ -144,6 +145,27 @@ func ReadRecordColumn(directory string, manifest Manifest) ([]core.Record, error
 		records[position] = core.Record{ID: item.ID, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace}
 	}
 	return records, nil
+}
+
+func WriteFilter(directory, name string, data []byte, recordCount, maxLSN uint64) error {
+	if !safeBase(name) || filepath.Ext(name) != ".filter" {
+		return fmt.Errorf("unsafe filter index file name")
+	}
+	return writeColumn(filepath.Join(directory, name), filterMagic, 0, recordCount, maxLSN, data)
+}
+
+func ReadFilter(directory string, manifest Manifest) ([]byte, error) {
+	if manifest.FilterFile == "" || !safeBase(manifest.FilterFile) {
+		return nil, fmt.Errorf("manifest does not reference a valid filter index file")
+	}
+	count, maxLSN, payload, err := readColumn(filepath.Join(directory, manifest.FilterFile), filterMagic, 0)
+	if err != nil {
+		return nil, err
+	}
+	if count != manifest.RecordCount || maxLSN != manifest.MaxLSN {
+		return nil, fmt.Errorf("filter index manifest mismatch")
+	}
+	return payload, nil
 }
 
 func writeColumn(path string, magic [4]byte, dimension uint32, count, maxLSN uint64, payload []byte) error {

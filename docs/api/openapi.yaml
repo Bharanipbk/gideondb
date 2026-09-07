@@ -475,6 +475,7 @@ paths:
                   type: array
                   items: {type: number, format: float}
                 top_k: {type: integer, minimum: 1}
+                ef_search: {type: integer, minimum: 1, maximum: 10000, description: Optional HNSW query breadth override; ignored by flat indexes.}
                 namespace: {type: string}
                 filter:
                   type: object
@@ -505,6 +506,7 @@ paths:
               properties:
                 vector: {type: array, items: {type: number, format: float}}
                 top_k: {type: integer, minimum: 1}
+                ef_search: {type: integer, minimum: 1, maximum: 10000}
                 namespace: {type: string}
                 filter: {type: object, additionalProperties: true}
               required: [vector, top_k]
@@ -770,6 +772,7 @@ paths:
               properties:
                 vector: {type: array, items: {type: number, format: float}}
                 top_k: {type: integer, minimum: 1}
+                ef_search: {type: integer, minimum: 1, maximum: 10000, description: Optional HNSW query breadth override forwarded to every shard.}
                 namespace: {type: string}
                 filter: {type: object, additionalProperties: true}
                 allow_partial: {type: boolean, default: false}

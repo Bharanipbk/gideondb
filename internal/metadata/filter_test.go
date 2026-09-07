@@ -64,6 +64,29 @@ func TestIndexUpdateAndDelete(t *testing.T) {
 	}
 }
 
+func TestPersistedIndexRoundTripAndValidation(t *testing.T) {
+	index := NewIndex()
+	index.Upsert(1, map[string]any{"kind": "guide", "year": 2024})
+	index.Upsert(2, map[string]any{"kind": "api", "year": 2026})
+	index.Upsert(3, nil)
+	payload, err := index.MarshalBinary(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := LoadBinary(payload, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expr, _ := Parse(map[string]any{"year": map[string]any{"$gte": 2025}})
+	matched := restored.Evaluate(expr)
+	if matched.Len() != 1 || !matched.Contains(2) {
+		t.Fatalf("restored numeric posting = %#v", setIDs(matched))
+	}
+	if _, err := LoadBinary(payload, 4); err == nil {
+		t.Fatal("accepted persisted metadata index with wrong record count")
+	}
+}
+
 func TestParseRejectsInvalidFilters(t *testing.T) {
 	for _, raw := range []map[string]any{
 		{"$unknown": true},
