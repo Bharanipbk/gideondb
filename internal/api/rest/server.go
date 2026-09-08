@@ -58,6 +58,7 @@ type Server struct {
 	requireInternalMTLS bool
 	draining            atomic.Bool
 	rateLimiter         *requestRateLimiter
+	dashboardAuth       *dashboardAuthenticator
 }
 
 func New(e *engine.Engine, logger *slog.Logger) *Server {
@@ -77,6 +78,9 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 		events = newPersistentEventLog(options.EventLogPath, retention)
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
+	if options.DashboardUsername != "" && options.DashboardPassword != "" {
+		s.dashboardAuth = newDashboardAuthenticator(options.DashboardUsername, options.DashboardPassword)
+	}
 	if options.RateLimitPerSecond > 0 && options.RateLimitBurst > 0 {
 		s.rateLimiter = newRequestRateLimiter(options.RateLimitPerSecond, options.RateLimitBurst)
 	}
@@ -145,6 +149,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /docs/_content/{path...}", s.docsContent)
 	s.mux.HandleFunc("GET /dashboard", s.dashboard)
 	s.mux.HandleFunc("GET /dashboard/", s.dashboard)
+	s.mux.HandleFunc("POST /v1/dashboard/session", s.dashboardLogin)
+	s.mux.HandleFunc("GET /v1/dashboard/session", s.dashboardSession)
+	s.mux.HandleFunc("DELETE /v1/dashboard/session", s.dashboardLogout)
 	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("GET /v1/ready", s.ready)
 	s.mux.HandleFunc("GET /metrics", s.protected(s.serveMetrics))
@@ -166,6 +173,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/internal/shards/{collection}/{shard}/search", s.protected(s.internalShardSearch))
 	s.mux.HandleFunc("GET /v1/internal/shards/{collection}/{shard}/vectors", s.protected(s.internalShardScroll))
 	s.mux.HandleFunc("POST /v1/internal/shards/{collection}/{shard}/vectors/batch", s.protected(s.internalShardBatchUpsert))
+	s.mux.HandleFunc("DELETE /v1/internal/shards/{collection}/{shard}/vectors/{id}", s.protected(s.internalShardDelete))
 	s.mux.HandleFunc("POST /v1/internal/replicas/{collection}/{shard}/append", s.protected(s.internalReplicaAppend))
 	s.mux.HandleFunc("POST /v1/internal/replicas/{collection}/{shard}/snapshot", s.protected(s.internalReplicaSnapshot))
 	s.mux.HandleFunc("GET /v1/internal/replicas/{collection}/{shard}/status", s.protected(s.internalReplicaStatus))
@@ -184,6 +192,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/cluster/collections/{name}/search", s.protected(s.distributedSearch))
 	s.mux.HandleFunc("GET /v1/cluster/collections/{name}/vectors", s.protected(s.distributedScroll))
 	s.mux.HandleFunc("POST /v1/cluster/collections/{name}/vectors/batch", s.protected(s.distributedBatchUpsert))
+	s.mux.HandleFunc("DELETE /v1/cluster/collections/{name}/vectors/{id}", s.protected(s.distributedDelete))
 	s.mux.HandleFunc("POST /v1/collections", s.protected(s.createCollection))
 	s.mux.HandleFunc("GET /v1/collections/{name}", s.protected(s.describeCollection))
 	s.mux.HandleFunc("DELETE /v1/collections/{name}", s.protected(s.deleteCollection))

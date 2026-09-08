@@ -56,6 +56,7 @@ func main() {
 	nodeTLSKeyFile := flag.String("node-tls-key-file", "", "outbound node-client private key; defaults to tls-key-file")
 	backupTo := flag.String("backup-to", "", "create a consistent backup archive and exit")
 	restoreFrom := flag.String("restore-from", "", "restore an archive into the data path and exit (destination must not exist)")
+	grpcRestorePath := flag.String("grpc-restore-path", "", "empty destination for administrative gRPC restore streams; disabled when empty")
 	verifyData := flag.Bool("verify-data", false, "open and validate the data path, then exit")
 	migrateData := flag.Bool("migrate-data", false, "validate and rewrite legacy checkpoints to the current persistent format, then exit")
 	validateConfig := flag.Bool("validate-config", false, "validate effective configuration, then exit")
@@ -136,10 +137,23 @@ func main() {
 		return
 	}
 	var apiKey string
+	dashboardUsername, dashboardPassword := os.Getenv("GIDEONDB_DASHBOARD_USERNAME"), os.Getenv("GIDEONDB_DASHBOARD_PASSWORD")
 	offline := *backupTo != "" || *verifyData || *migrateData
 	if !offline {
 		if _, err := rest.ParseAddress(*address); err != nil {
 			logger.Error("invalid HTTP address", "error", err)
+			os.Exit(2)
+		}
+		if dashboardUsername == "" && dashboardPassword == "" && rest.IsLoopbackAddress(*address) {
+			dashboardUsername, dashboardPassword = "admin", "admin123"
+			logger.Warn("dashboard development bootstrap credential enabled; set GIDEONDB_DASHBOARD_USERNAME and GIDEONDB_DASHBOARD_PASSWORD")
+		}
+		if (dashboardUsername == "") != (dashboardPassword == "") {
+			logger.Error("dashboard username and password must both be configured")
+			os.Exit(2)
+		}
+		if !rest.IsLoopbackAddress(*address) && dashboardUsername == "" {
+			logger.Error("non-loopback dashboard requires GIDEONDB_DASHBOARD_USERNAME and GIDEONDB_DASHBOARD_PASSWORD")
 			os.Exit(2)
 		}
 		if *grpcAddress != "" {
@@ -286,7 +300,7 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst})
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardUsername: dashboardUsername, DashboardPassword: dashboardPassword})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
@@ -323,9 +337,12 @@ func main() {
 			RaftStore: raftStore, RaftStatus: raftRuntime, PrincipalResolver: principalResolver,
 			RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst,
 			AuditRecorder: apiServer, DistributedSearch: apiServer.DistributedSearchHandler(),
-			DistributedScroll: apiServer.DistributedScrollHandler(),
-			DistributedUpsert: apiServer.DistributedBatchUpsertHandler(),
-			ServerOptions:     grpcOptions,
+			DistributedScroll:  apiServer.DistributedScrollHandler(),
+			DistributedUpsert:  apiServer.DistributedBatchUpsertHandler(),
+			DistributedDelete:  apiServer.DistributedDeleteHandler(),
+			RestoreDirectory:   *grpcRestorePath,
+			ClusterSnapshotter: apiServer,
+			ServerOptions:      grpcOptions,
 		})
 		defer grpcServer.Stop()
 	}

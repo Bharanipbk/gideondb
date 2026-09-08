@@ -41,6 +41,7 @@ replication.
 | POST | `/collections/{name}/search` | Dense, sparse, or hybrid search |
 | POST | `/internal/shards/{collection}/{shard}/search` | Fenced single-shard internal search |
 | POST | `/cluster/collections/{name}/search` | Experimental placement-aware distributed search |
+| DELETE | `/cluster/collections/{name}/vectors/{id}` | Placement-aware, quorum-replicated record deletion |
 | POST | `/internal/shards/{collection}/{shard}/vectors/batch` | Fenced single-shard WAL-backed batch write |
 | POST | `/cluster/collections/{name}/vectors/batch` | Experimental distributed batch-write coordinator |
 

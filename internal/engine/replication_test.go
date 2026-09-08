@@ -66,6 +66,45 @@ func TestApplyReplicaBatchOrdersDeduplicatesAndRecovers(t *testing.T) {
 	}
 }
 
+func TestApplyReplicaDeleteOrdersDeduplicatesAndRecovers(t *testing.T) {
+	path := t.TempDir()
+	config := core.CollectionConfig{Name: "replicated-delete", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}
+	follower, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := follower.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	record := core.Record{ID: "one", Vector: []float32{1, 2}, Version: 1, Timestamp: 1}
+	if err := follower.ApplyReplicaBatch(config.Name, 0, 1, []core.Record{record}); err != nil {
+		t.Fatal(err)
+	}
+	if err := follower.ApplyReplicaDelete(config.Name, 0, 2, "", record.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := follower.ApplyReplicaDelete(config.Name, 0, 2, "", record.ID); err != nil {
+		t.Fatalf("identical retry: %v", err)
+	}
+	if err := follower.ApplyReplicaDelete(config.Name, 0, 2, "", "different"); !errors.Is(err, core.ErrReplicationConflict) {
+		t.Fatalf("conflicting retry error=%v", err)
+	}
+	if _, err := follower.Get(config.Name, "", record.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("record survived delete: %v", err)
+	}
+	if err := follower.Close(); err != nil {
+		t.Fatal(err)
+	}
+	follower, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer follower.Close()
+	if _, err := follower.Get(config.Name, "", record.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("delete did not survive recovery: %v", err)
+	}
+}
+
 func TestInstallReplicaSnapshotPersistsSequenceAndReplacement(t *testing.T) {
 	path := t.TempDir()
 	config := core.CollectionConfig{Name: "snapshot", Dimension: 2, Metric: core.MetricDot, ShardCount: 1}

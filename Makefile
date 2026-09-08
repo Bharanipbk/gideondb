@@ -53,6 +53,7 @@ test-dotnet-sdk:
 
 test-dashboard:
 	node --check internal/api/rest/dashboard/app.js
+	cd internal/api/rest/dashboard && npm test
 
 race:
 	go test -race ./...

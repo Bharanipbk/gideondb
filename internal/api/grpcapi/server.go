@@ -32,6 +32,7 @@ import (
 
 const maxMessageBytes = 16 << 20
 const snapshotChunkBytes = 1 << 20
+const maxRestoreArchiveBytes = 64 << 30
 
 type Server struct {
 	v1.UnimplementedGideonDBServiceServer
@@ -47,6 +48,10 @@ type RaftStatus interface {
 
 type AuditRecorder interface {
 	RecordGRPCAudit(method string, statusCode int, duration time.Duration)
+}
+
+type ClusterSnapshotter interface {
+	CreateClusterBackup(context.Context, string, string) error
 }
 
 type Options struct {
@@ -68,6 +73,9 @@ type Options struct {
 	DistributedSearch   http.Handler
 	DistributedScroll   http.Handler
 	DistributedUpsert   http.Handler
+	DistributedDelete   http.Handler
+	RestoreDirectory    string
+	ClusterSnapshotter  ClusterSnapshotter
 	ServerOptions       []grpc.ServerOption
 }
 
@@ -195,7 +203,10 @@ func (s *Server) BatchUpsert(ctx context.Context, request *v1.BatchUpsertRequest
 	return &v1.BatchUpsertResponse{Records: result}, nil
 }
 
-func (s *Server) Delete(_ context.Context, request *v1.DeleteRequest) (*v1.DeleteResponse, error) {
+func (s *Server) Delete(ctx context.Context, request *v1.DeleteRequest) (*v1.DeleteResponse, error) {
+	if s.options.EnableStaticRouting && s.options.DistributedDelete != nil {
+		return s.distributedDelete(ctx, request)
+	}
 	if err := s.engine.Delete(request.GetCollection(), request.GetNamespace(), request.GetId()); err != nil {
 		return nil, mapError(err)
 	}
@@ -426,9 +437,6 @@ func (s *Server) Stats(ctx context.Context, request *v1.StatsRequest) (*v1.Stats
 }
 
 func (s *Server) Snapshot(request *v1.SnapshotRequest, stream grpc.ServerStreamingServer[v1.SnapshotResponse]) error {
-	if request.GetClusterWide() {
-		return status.Error(codes.Unimplemented, "cluster-wide gRPC snapshot is not implemented")
-	}
 	if expected := request.GetExpectedMetadataEpoch(); expected != 0 && expected != s.metadataEpoch() {
 		return status.Error(codes.FailedPrecondition, "metadata epoch does not match")
 	}
@@ -442,7 +450,14 @@ func (s *Server) Snapshot(request *v1.SnapshotRequest, stream grpc.ServerStreami
 	}
 	defer os.RemoveAll(temporaryDirectory)
 	archivePath := filepath.Join(temporaryDirectory, "snapshot.tar.gz")
-	if err := s.engine.Backup(archivePath); err != nil {
+	if request.GetClusterWide() {
+		if s.options.ClusterSnapshotter == nil {
+			return status.Error(codes.FailedPrecondition, "cluster snapshot coordinator is not configured")
+		}
+		if err := s.options.ClusterSnapshotter.CreateClusterBackup(stream.Context(), operationID, archivePath); err != nil {
+			return status.Error(codes.Unavailable, "create coordinated cluster snapshot")
+		}
+	} else if err := s.engine.Backup(archivePath); err != nil {
 		return status.Error(codes.Internal, "create consistent snapshot")
 	}
 	archive, err := os.Open(archivePath)
@@ -474,6 +489,120 @@ func (s *Server) Snapshot(request *v1.SnapshotRequest, stream grpc.ServerStreami
 		}
 	}
 	return stream.Send(&v1.SnapshotResponse{OperationId: operationID, Offset: offset, ArchiveSha256: hash.Sum(nil), Eof: true})
+}
+
+// Restore accepts one checksum-addressed node archive and atomically publishes
+// it into the configured, nonexistent restore directory. It never mutates the
+// running engine's data path; an operator can inspect and promote the restored
+// directory through the normal offline workflow.
+func (s *Server) Restore(stream grpc.ClientStreamingServer[v1.RestoreRequest, v1.RestoreResponse]) error {
+	if s.options.RestoreDirectory == "" {
+		return status.Error(codes.FailedPrecondition, "gRPC restore directory is not configured")
+	}
+	if _, err := os.Lstat(s.options.RestoreDirectory); err == nil {
+		return status.Error(codes.AlreadyExists, "gRPC restore directory already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return status.Error(codes.Internal, "inspect gRPC restore directory")
+	}
+	temporaryDirectory, err := os.MkdirTemp("", "gideondb-grpc-restore-*")
+	if err != nil {
+		return status.Error(codes.Internal, "create restore staging directory")
+	}
+	defer os.RemoveAll(temporaryDirectory)
+	archivePath := filepath.Join(temporaryDirectory, "restore.tar.gz")
+	archive, err := os.OpenFile(archivePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return status.Error(codes.Internal, "create staged restore archive")
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = archive.Close()
+		}
+	}()
+	hash := sha256.New()
+	var operationID string
+	var offset uint64
+	for {
+		chunk, receiveErr := stream.Recv()
+		if receiveErr == io.EOF {
+			return status.Error(codes.InvalidArgument, "restore stream ended before eof chunk")
+		}
+		if receiveErr != nil {
+			return receiveErr
+		}
+		if operationID == "" {
+			operationID = chunk.GetOperationId()
+			if !validOperationID(operationID) {
+				return status.Error(codes.InvalidArgument, "restore operation_id must be 32 lowercase hexadecimal characters")
+			}
+		}
+		if chunk.GetOperationId() != operationID || chunk.GetOffset() != offset {
+			return status.Error(codes.InvalidArgument, "restore operation or offset mismatch")
+		}
+		if len(chunk.GetData()) > snapshotChunkBytes || offset+uint64(len(chunk.GetData())) > maxRestoreArchiveBytes {
+			return status.Error(codes.ResourceExhausted, "restore archive exceeds chunk or archive limit")
+		}
+		if len(chunk.GetData()) != 0 {
+			if _, err := archive.Write(chunk.GetData()); err != nil {
+				return status.Error(codes.Internal, "write staged restore archive")
+			}
+			_, _ = hash.Write(chunk.GetData())
+			offset += uint64(len(chunk.GetData()))
+		}
+		if !chunk.GetEof() {
+			if len(chunk.GetArchiveSha256()) != 0 {
+				return status.Error(codes.InvalidArgument, "restore checksum is allowed only on eof chunk")
+			}
+			continue
+		}
+		if len(chunk.GetArchiveSha256()) != sha256.Size || subtle.ConstantTimeCompare(chunk.GetArchiveSha256(), hash.Sum(nil)) != 1 {
+			return status.Error(codes.InvalidArgument, "restore archive checksum mismatch")
+		}
+		if err := archive.Sync(); err != nil {
+			return status.Error(codes.Internal, "sync staged restore archive")
+		}
+		if err := archive.Close(); err != nil {
+			return status.Error(codes.Internal, "close staged restore archive")
+		}
+		closed = true
+		if err := engine.RestoreBackup(archivePath, s.options.RestoreDirectory); err != nil {
+			return status.Error(codes.InvalidArgument, "restore archive validation failed")
+		}
+		restored, err := engine.Open(s.options.RestoreDirectory)
+		if err != nil {
+			return status.Error(codes.Internal, "open restored view")
+		}
+		var vectorCount uint64
+		for _, collection := range restored.ListCollections() {
+			var afterNamespace, afterID string
+			for {
+				records, more, scrollErr := restored.Scroll(collection.Name, "", afterNamespace, afterID, 200)
+				if scrollErr != nil {
+					_ = restored.Close()
+					return status.Error(codes.Internal, "inspect restored view")
+				}
+				vectorCount += uint64(len(records))
+				if !more || len(records) == 0 {
+					break
+				}
+				last := records[len(records)-1]
+				afterNamespace, afterID = last.Namespace, last.ID
+			}
+		}
+		if err := restored.Close(); err != nil {
+			return status.Error(codes.Internal, "close restored view")
+		}
+		return stream.SendAndClose(&v1.RestoreResponse{OperationId: operationID, MetadataEpoch: s.metadataEpoch(), VectorCount: vectorCount})
+	}
+}
+
+func validOperationID(value string) bool {
+	if len(value) != 32 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == 16 && value == strings.ToLower(value)
 }
 
 func newOperationID() (string, error) {

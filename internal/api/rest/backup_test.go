@@ -2,9 +2,12 @@ package rest
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -121,5 +124,18 @@ func TestLeaderCoordinatesRecoveryPointAcrossNodesAndReleasesBarriers(t *testing
 	}
 	if err := follower.releaseBackup("verification"); err != nil {
 		t.Fatal(err)
+	}
+	archive := filepath.Join(t.TempDir(), "cluster.tar.gz")
+	if err := leader.CreateClusterBackup(context.Background(), "cluster-backup-2", archive); err != nil {
+		t.Fatalf("create cluster archive: %v", err)
+	}
+	restored := filepath.Join(t.TempDir(), "restored")
+	if err := engine.RestoreClusterBackup(archive, restored); err != nil {
+		t.Fatalf("restore cluster archive: %v", err)
+	}
+	for _, nodeID := range []string{nodeA, nodeB} {
+		if _, err := os.Stat(filepath.Join(restored, "nodes", nodeID, engine.RestoredRecoveryPointFile)); err != nil {
+			t.Fatalf("restored node %s: %v", nodeID, err)
+		}
 	}
 }

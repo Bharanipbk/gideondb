@@ -30,6 +30,7 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 		"/dashboard/":                  {"text/html", "request-rate-chart"},
 		"/dashboard/app.js":            {"text/javascript", "recordPerformance"},
 		"/dashboard/styles.css":        {"text/css", "--accent"},
+		"/dashboard/dashboard-v2.css":  {"text/css", "--sidebar-width"},
 		"/dashboard/performance.css":   {"text/css", ".chart-grid"},
 		"/dashboard/explorer.css":      {"text/css", ".explorer-tools"},
 		"/dashboard/configuration.css": {"text/css", ".configuration-details"},
@@ -49,6 +50,13 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 		policy := response.Header().Get("Content-Security-Policy")
 		if !strings.Contains(policy, "default-src 'self'") || !strings.Contains(policy, "connect-src 'self'") {
 			t.Fatalf("%s policy=%q", asset, policy)
+		}
+	}
+	root := httptest.NewRecorder()
+	handler.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
+	for _, marker := range []string{"Skip to content", `aria-controls="sidebar"`, `aria-live="polite"`, "dashboard-v2.css", `id="view-resilience"`, "Open recovery runbook"} {
+		if !strings.Contains(root.Body.String(), marker) {
+			t.Errorf("dashboard HTML is missing accessibility marker %q", marker)
 		}
 	}
 }

@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-//go:embed dashboard/*
+//go:embed dashboard/*.html dashboard/*.css dashboard/*.js
 var dashboardAssets embed.FS
 
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
@@ -19,6 +19,9 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(path.Clean("/"+strings.TrimPrefix(r.URL.Path, "/dashboard/")), "/")
 	if name == "." || name == "" {
 		name = "index.html"
+	}
+	if s.dashboardAuth != nil && name == "index.html" && !s.dashboardAuth.validRequest(r) {
+		name = "login.html"
 	}
 	assets, err := fs.Sub(dashboardAssets, "dashboard")
 	if err != nil {

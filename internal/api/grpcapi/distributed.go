@@ -160,6 +160,29 @@ func distributedSearchHTTPError(code int) error {
 	}
 }
 
+func (s *Server) distributedDelete(ctx context.Context, request *v1.DeleteRequest) (*v1.DeleteResponse, error) {
+	query := url.Values{}
+	if request.GetNamespace() != "" {
+		query.Set("namespace", request.GetNamespace())
+	}
+	path := "/v1/cluster/collections/" + url.PathEscape(request.GetCollection()) + "/vectors/" + url.PathEscape(request.GetId())
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "construct distributed delete request")
+	}
+	httpRequest.SetPathValue("name", request.GetCollection())
+	httpRequest.SetPathValue("id", request.GetId())
+	capture := &responseCapture{header: make(http.Header)}
+	s.options.DistributedDelete.ServeHTTP(capture, httpRequest)
+	if capture.status != http.StatusOK {
+		return nil, distributedWriteHTTPError(capture.status)
+	}
+	return &v1.DeleteResponse{}, nil
+}
+
 func (s *Server) distributedBatchUpsert(ctx context.Context, collection string, records []core.Record, acknowledgement v1.Acknowledgement) (*v1.BatchUpsertResponse, error) {
 	level := map[v1.Acknowledgement]string{
 		v1.Acknowledgement_ACKNOWLEDGEMENT_UNSPECIFIED: "quorum",

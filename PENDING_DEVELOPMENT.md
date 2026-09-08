@@ -11,14 +11,21 @@ automated tests, and user-facing documentation are all finished.
   deferred. Run `make validate-kubernetes` manually when Kubernetes validation
   resumes. It must deploy the three-node StatefulSet, verify readiness and TLS,
   replace the elected leader, and return the cluster to three ready members.
-- [ ] **Complete the gRPC server transport.** Generated Go bindings and an
+- [x] **Complete the gRPC server transport.** Generated Go bindings and an
   opt-in listener now expose collection/record CRUD, local search, batch search,
   local scroll, cluster/node/shard inspection, health, stats, and checksummed
   local snapshot streaming with bearer authentication, required
   deadlines, 16 MiB message limits, canonical status mapping, TLS support, and
   an interoperability test. Distributed scroll now delegates to the existing
-  authoritative placement/fencing coordinator. Still implement placement-aware
-  delete and cluster-wide snapshot and restore streams. Search and batch
+  authoritative placement/fencing coordinator. Placement-aware delete now
+  routes to the authoritative leader, persists and replicates an ordered WAL
+  tombstone, enforces metadata/leader fencing, and requires quorum
+  acknowledgement. The admin-only restore stream validates operation identity,
+  offsets, bounded chunks and archive size, SHA-256, and backup structure before
+  atomically publishing to an explicitly configured empty destination.
+  Cluster-wide snapshots now hold every voter barrier through recovery-point
+  capture and node-archive collection, then stream one checksummed package.
+  Search and batch
   search now delegate to authoritative shard owners when static routing is
   active and preserve partial failure and epoch metadata. Upsert and batch
   upsert now use the authoritative distributed coordinator and retain
@@ -123,6 +130,34 @@ automated tests, and user-facing documentation are all finished.
 
 ## Security and operations
 
+- [x] Improve the administration dashboard UI for production operations,
+  including responsive navigation, clearer cluster and shard health, accessible
+  loading/error/empty states, safer destructive-action confirmations, and
+  operator-focused backup, restore, replication, and alert views. The responsive
+  operations shell, mobile navigation drawer, route context, live refresh state,
+  accessible landmarks/focus states, and clearer health summary are complete.
+  The resilience view now adds derived readiness, peer-health, replication-lag,
+  server-error, and authentication alerts plus a truthful cluster-backup
+  readiness checklist and recovery runbook. Pinned Playwright desktop and mobile
+  projects now cover navigation, responsive drawer behavior, resilience signals,
+  tab-scoped API credentials, and exact destructive confirmation against an
+  isolated live server. The dashboard preserves its bounded read model.
+- [ ] Add dashboard login and session authentication. Local development may
+  bootstrap with username `admin` and password `admin123`, but these credentials
+  must never be compiled into or silently enabled in a production build.
+  Production startup must require an operator-supplied secret, store only a
+  strong password hash, use secure HTTP-only same-site cookies, enforce CSRF and
+  login throttling, rotate sessions, record sanitized audit events, and require
+  the bootstrap password to be changed before administrative access is granted.
+  The first implementation slice is complete: the dashboard now has a dedicated
+  sign-in screen, opaque eight-hour server-side sessions, HTTP-only strict
+  same-site cookies, CSRF checks on every cookie-authenticated mutation, logout
+  invalidation, per-client login throttling, and sanitized request auditing.
+  The `admin` / `admin123` bootstrap is enabled only on loopback listeners;
+  non-loopback startup requires explicit `GIDEONDB_DASHBOARD_USERNAME` and
+  `GIDEONDB_DASHBOARD_PASSWORD` values. Remaining work is persistent standard
+  password hashing, mandatory first-login password replacement, session rotation,
+  secret-file/manager provisioning, and expanded browser regression coverage.
 - [x] Support API-key rotation without restarting and multiple principals with
   role-based authorization and tenant isolation. A secure reloadable principals
   file provides reader, writer, and admin roles; non-admin collection-prefix

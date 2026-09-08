@@ -24,7 +24,21 @@ search use the same authoritative shard coordinator and retain partial failure
 details and the serving metadata epoch. Upsert and batch upsert likewise use the
 distributed coordinator, including leader/quorum/all acknowledgement policies
 and explicit per-shard committed, failed, or unknown outcomes. Placement-aware
-delete, cluster-wide snapshot, and restore remain pending.
+With `cluster_wide=true`, snapshot requires the metadata-Raft leader and a
+converged authoritative placement. It freezes every committed voter, captures
+one canonical recovery point, collects a recovery-point-bound archive from
+each node while all barriers remain held, packages the checksummed node
+archives, and streams that package through the same offset and SHA-256
+contract. Barriers are released on success and failure. Delete is
+placement-aware when static routing is enabled: the authoritative shard leader
+commits an ordered WAL tombstone and waits for quorum replication before gRPC
+reports success.
+
+Restore is an admin-only client stream into the explicitly configured
+`-grpc-restore-path`. It validates the operation ID, contiguous offsets, 1 MiB
+chunk bound, 64 GiB archive bound, terminal SHA-256 digest, and backup format
+before atomically publishing a new directory. It never replaces the running
+engine data path.
 
 ```sh
 gideondb -http-address 127.0.0.1:6333 -grpc-address 127.0.0.1:6334

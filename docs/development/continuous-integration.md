@@ -13,7 +13,8 @@ The workflow enforces:
   generated-binding reproducibility;
 - OpenAPI structure and repository-local Markdown links;
 - Python SDK and framework integrations, TypeScript, Java, Rust, and .NET SDKs,
-  plus dashboard JavaScript syntax; and
+  plus dashboard JavaScript syntax and pinned desktop/mobile Chromium
+  interaction tests; and
 - two byte-identical, trimmed Linux builds with fixed version metadata.
 
 Staticcheck runs all checks except package-comment diagnostics for generated

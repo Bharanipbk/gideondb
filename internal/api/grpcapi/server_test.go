@@ -31,6 +31,12 @@ type recordedAudit struct {
 
 type auditRecorder struct{ events []recordedAudit }
 
+type clusterSnapshotterFunc func(context.Context, string, string) error
+
+func (f clusterSnapshotterFunc) CreateClusterBackup(ctx context.Context, operation, destination string) error {
+	return f(ctx, operation, destination)
+}
+
 func (r *auditRecorder) RecordGRPCAudit(method string, statusCode int, _ time.Duration) {
 	r.events = append(r.events, recordedAudit{method: method, status: statusCode})
 }
@@ -44,10 +50,18 @@ func TestServerLifecycleAndGuards(t *testing.T) {
 
 	listener := bufconn.Listen(1 << 20)
 	const nodeID = "11111111111111111111111111111111"
+	restorePath := filepath.Join(t.TempDir(), "grpc-restored")
 	server := NewServerWithOptions(db, Options{
 		APIKey: "test-secret", NodeID: nodeID,
 		ClusterID: "22222222222222222222222222222222", AdvertiseAddress: "127.0.0.1:6333",
 		MetadataEpoch: 1, ReplicationFactor: 1, PlacementCapacity: 1,
+		RestoreDirectory: restorePath,
+		ClusterSnapshotter: clusterSnapshotterFunc(func(_ context.Context, operation, destination string) error {
+			if len(operation) != 32 {
+				t.Errorf("cluster snapshot operation = %q", operation)
+			}
+			return os.WriteFile(destination, []byte("cluster-archive"), 0o600)
+		}),
 		PrincipalResolver: func(token string) (*Principal, error) {
 			switch token {
 			case "reader-token":
@@ -268,12 +282,62 @@ func TestServerLifecycleAndGuards(t *testing.T) {
 	if _, err := snapshot.Recv(); err != io.EOF {
 		t.Fatalf("snapshot terminal receive = %v, want EOF", err)
 	}
+	clusterSnapshot, err := client.Snapshot(ctx, &v1.SnapshotRequest{ClusterWide: true, ExpectedMetadataEpoch: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clusterData, err := clusterSnapshot.Recv()
+	if err != nil || string(clusterData.GetData()) != "cluster-archive" || clusterData.GetOffset() != 0 {
+		t.Fatalf("cluster snapshot data=%+v err=%v", clusterData, err)
+	}
+	clusterEOF, err := clusterSnapshot.Recv()
+	expectedClusterHash := sha256.Sum256([]byte("cluster-archive"))
+	if err != nil || !clusterEOF.GetEof() || clusterEOF.GetOffset() != uint64(len("cluster-archive")) || string(clusterEOF.GetArchiveSha256()) != string(expectedClusterHash[:]) {
+		t.Fatalf("cluster snapshot eof=%+v err=%v", clusterEOF, err)
+	}
 	if err := archive.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restorePath := filepath.Join(t.TempDir(), "restored")
-	if err := engine.RestoreBackup(archivePath, restorePath); err != nil {
+	archiveBytes, err := os.ReadFile(archivePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore, err := client.Restore(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreHash := sha256.Sum256(archiveBytes)
+	for start := 0; start < len(archiveBytes); start += snapshotChunkBytes {
+		end := min(start+snapshotChunkBytes, len(archiveBytes))
+		if err := restore.Send(&v1.RestoreRequest{OperationId: operationID, Offset: uint64(start), Data: archiveBytes[start:end]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restoredResponse, err := restore.CloseAndRecv()
+	if err == nil {
+		t.Fatal("restore without eof unexpectedly succeeded")
+	}
+	// A failed stream cannot be resumed; send the complete archive again with
+	// the checksum on a distinct final marker.
+	restore, err = client.Restore(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for start := 0; start < len(archiveBytes); start += snapshotChunkBytes {
+		end := min(start+snapshotChunkBytes, len(archiveBytes))
+		if err := restore.Send(&v1.RestoreRequest{OperationId: operationID, Offset: uint64(start), Data: archiveBytes[start:end]}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := restore.Send(&v1.RestoreRequest{OperationId: operationID, Offset: uint64(len(archiveBytes)), ArchiveSha256: restoreHash[:], Eof: true}); err != nil {
+		t.Fatal(err)
+	}
+	restoredResponse, err = restore.CloseAndRecv()
+	if err != nil {
 		t.Fatalf("restore streamed snapshot: %v", err)
+	}
+	if restoredResponse.GetOperationId() != operationID || restoredResponse.GetVectorCount() != 2 || restoredResponse.GetMetadataEpoch() != 1 {
+		t.Fatalf("unexpected Restore response: %+v", restoredResponse)
 	}
 	restored, err := engine.Open(restorePath)
 	if err != nil {
@@ -438,5 +502,27 @@ func TestDistributedUpsertBridge(t *testing.T) {
 	}
 	if _, err := server.Upsert(context.Background(), &v1.UpsertRequest{Collection: "tenant-a.docs", Acknowledgement: v1.Acknowledgement_ACKNOWLEDGEMENT_ALL, Record: &v1.Record{Id: "two", Vector: []float32{1}}}); status.Code(err) != codes.Unavailable {
 		t.Fatalf("ambiguous Upsert code = %v, want %v", status.Code(err), codes.Unavailable)
+	}
+}
+
+func TestDistributedDeleteBridge(t *testing.T) {
+	called := false
+	handler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		called = true
+		if request.Method != http.MethodDelete || request.PathValue("name") != "tenant-a.docs" || request.PathValue("id") != "record/one" || request.URL.Query().Get("namespace") != "space" {
+			t.Errorf("translated delete request = %s %s values=%q/%q query=%q", request.Method, request.URL.Path, request.PathValue("name"), request.PathValue("id"), request.URL.RawQuery)
+		}
+		_ = json.NewEncoder(response).Encode(map[string]any{"status": "committed"})
+	})
+	server := &Server{options: Options{EnableStaticRouting: true, DistributedDelete: handler}}
+	if _, err := server.Delete(context.Background(), &v1.DeleteRequest{Collection: "tenant-a.docs", Namespace: "space", Id: "record/one"}); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("distributed delete handler was not called")
+	}
+	server.options.DistributedDelete = http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) { response.WriteHeader(http.StatusConflict) })
+	if _, err := server.Delete(context.Background(), &v1.DeleteRequest{Collection: "tenant-a.docs", Id: "one"}); status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("failed distributed Delete code = %v, want %v", status.Code(err), codes.FailedPrecondition)
 	}
 }

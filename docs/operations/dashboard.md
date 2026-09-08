@@ -1,5 +1,24 @@
 # Administration dashboard
 
+The console uses a responsive operations shell with grouped workspace and
+operations navigation, a mobile drawer, visible connection and refresh state,
+route context, keyboard focus indicators, reduced-motion support, and a skip
+link. Health summary cards distinguish catalog, record, membership, and
+placement-epoch signals while keeping the existing bounded API read model.
+
+The Resilience workspace derives active signals from the already bounded
+readiness, membership, replication-lag, request-error, and authentication
+posture responses. Its backup panel is a preflight and runbook—not a backup
+success indicator. It reports whether cluster snapshot prerequisites appear
+ready and directs administrators to the coordinated gRPC snapshot and offline
+restore workflow.
+
+Browser regressions run against an isolated live GideonDB process in pinned
+desktop and mobile Chromium projects. The suite covers route context,
+responsive drawer state, resilience signals, tab-scoped API-key behavior, and
+typed confirmation that prevents accidental collection deletion. Run it with
+`make test-dashboard` after installing the locked dashboard dependencies.
+
 GideonDB embeds an experimental administration dashboard in the server binary.
 Open `/dashboard/` on a running node; for the default development address this
 is `http://127.0.0.1:6333/dashboard/`.

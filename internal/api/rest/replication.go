@@ -12,6 +12,9 @@ type replicaAppendRequest struct {
 	Sequence          uint64        `json:"sequence"`
 	ReplicationFactor int           `json:"replication_factor"`
 	Records           []core.Record `json:"records"`
+	Operation         string        `json:"operation,omitempty"`
+	Namespace         string        `json:"namespace,omitempty"`
+	ID                string        `json:"id,omitempty"`
 }
 
 type replicaSnapshotRequest struct {
@@ -92,8 +95,22 @@ func (s *Server) internalReplicaAppend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, apiError{Code: "not_a_replica", Message: "local node is not assigned to this replica set"})
 		return
 	}
-	if err := s.engine.ApplyReplicaBatch(config.Name, shardID, request.Sequence, request.Records); err != nil {
-		writeError(w, err)
+	var applyErr error
+	switch request.Operation {
+	case "", "upsert":
+		applyErr = s.engine.ApplyReplicaBatch(config.Name, shardID, request.Sequence, request.Records)
+	case "delete":
+		if len(request.Records) != 0 {
+			writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_replica_delete", Message: "delete append must not contain records"})
+			return
+		}
+		applyErr = s.engine.ApplyReplicaDelete(config.Name, shardID, request.Sequence, request.Namespace, request.ID)
+	default:
+		writeJSON(w, http.StatusBadRequest, apiError{Code: "invalid_replica_operation", Message: "replica operation must be upsert or delete"})
+		return
+	}
+	if applyErr != nil {
+		writeError(w, applyErr)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sequence": request.Sequence, "shard_id": shardID, "metadata_epoch": s.currentMetadataEpoch(), "status": "appended"})

@@ -41,6 +41,8 @@ type Options struct {
 	RequireInternalMTLS                         bool
 	RateLimitPerSecond                          int
 	RateLimitBurst                              int
+	DashboardUsername                           string
+	DashboardPassword                           string
 }
 
 type Principal struct {
@@ -204,10 +206,20 @@ func IsLoopbackAddress(address string) bool {
 }
 
 func (s *Server) protected(next http.HandlerFunc) http.HandlerFunc {
-	if s.apiKeyHash == nil && s.principals == nil {
+	if s.apiKeyHash == nil && s.principals == nil && s.dashboardAuth == nil {
 		return next
 	}
 	return func(w http.ResponseWriter, r *http.Request) {
+		if s.dashboardAuth != nil {
+			if session, ok := s.dashboardAuth.session(r); ok {
+				if r.Method != http.MethodGet && r.Method != http.MethodHead && subtle.ConstantTimeCompare([]byte(session.csrf), []byte(r.Header.Get("X-GideonDB-CSRF"))) != 1 {
+					writeJSON(w, http.StatusForbidden, apiError{Code: "csrf_rejected", Message: "valid CSRF token required"})
+					return
+				}
+				next(w, r)
+				return
+			}
+		}
 		const prefix = "Bearer "
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, prefix) {

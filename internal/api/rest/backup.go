@@ -1,12 +1,14 @@
 package rest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +16,133 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/cluster"
 	"github.com/Bharanipbk/gideondb/internal/engine"
 )
+
+// CreateClusterBackup coordinates a recovery point across the committed view,
+// retains every node's write barrier while collecting its archive, and packages
+// the result atomically at destination.
+func (s *Server) CreateClusterBackup(ctx context.Context, operation, destination string) error {
+	if operation == "" || len(operation) > 128 {
+		return fmt.Errorf("invalid backup operation")
+	}
+	status, ok := s.raftProtocol.(interface {
+		Status() (cluster.RaftRole, string, uint64)
+	})
+	if !ok {
+		return fmt.Errorf("metadata Raft status is required")
+	}
+	role, leaderID, _ := status.Status()
+	if role != cluster.RaftLeader {
+		return fmt.Errorf("local node is not metadata Raft leader; leader is %s", leaderID)
+	}
+	if !s.staticPlacementReady() {
+		return fmt.Errorf("authoritative converged placement is required")
+	}
+	peers, err := s.membershipPeers()
+	if err != nil {
+		return err
+	}
+	backupCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	frozen := make([]cluster.Peer, 0, len(peers))
+	if err := s.freezeBackup(operation); err != nil {
+		return err
+	}
+	defer func() {
+		for _, peer := range frozen {
+			_ = s.remoteBackupCall(context.Background(), peer, http.MethodPost, "/v1/internal/backup/release", operation, nil)
+		}
+		_ = s.releaseBackup(operation)
+	}()
+	for _, peer := range peers {
+		if err := s.remoteBackupCall(backupCtx, peer, http.MethodPost, "/v1/internal/backup/freeze", operation, nil); err != nil {
+			return fmt.Errorf("freeze node %s: %w", peer.NodeID, err)
+		}
+		frozen = append(frozen, peer)
+	}
+	view, err := s.viewDigests()
+	if err != nil {
+		return err
+	}
+	local, err := s.engine.CaptureRecoveryPoint(s.currentMetadataEpoch(), s.nodeID, view.Placement, view.CapacityManifest)
+	if err != nil {
+		return err
+	}
+	points := []engine.NodeRecoveryPoint{local}
+	pointByNode := map[string]engine.NodeRecoveryPoint{s.nodeID: local}
+	for _, peer := range peers {
+		var point engine.NodeRecoveryPoint
+		if err := s.remoteBackupCall(backupCtx, peer, http.MethodGet, "/v1/internal/backup/recovery-point", operation, &point); err != nil {
+			return fmt.Errorf("capture node %s: %w", peer.NodeID, err)
+		}
+		points = append(points, point)
+		pointByNode[peer.NodeID] = point
+	}
+	manifest, err := engine.MergeRecoveryPoints(points)
+	if err != nil {
+		return err
+	}
+	temporaryDirectory, err := os.MkdirTemp("", ".gideondb-cluster-snapshot-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(temporaryDirectory)
+	archives := make(map[string]string, len(manifest.Nodes))
+	localArchive := filepath.Join(temporaryDirectory, s.nodeID+".tar.gz")
+	if err := s.engine.BackupAtRecoveryPoint(localArchive, local); err != nil {
+		return fmt.Errorf("archive local node: %w", err)
+	}
+	archives[s.nodeID] = localArchive
+	for _, peer := range peers {
+		path := filepath.Join(temporaryDirectory, peer.NodeID+".tar.gz")
+		if err := s.remoteBackupArchive(backupCtx, peer, operation, pointByNode[peer.NodeID], path); err != nil {
+			return fmt.Errorf("archive node %s: %w", peer.NodeID, err)
+		}
+		archives[peer.NodeID] = path
+	}
+	return engine.CreateClusterBackup(destination, manifest, archives)
+}
+
+func (s *Server) remoteBackupArchive(ctx context.Context, peer cluster.Peer, operation string, point engine.NodeRecoveryPoint, destination string) error {
+	payload, err := json.Marshal(point)
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, peer.SeedURL+"/v1/internal/backup/archive", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
+	request.Header.Set("X-GideonDB-Target-Node-ID", peer.NodeID)
+	request.Header.Set("X-GideonDB-Metadata-Epoch", strconv.FormatUint(s.currentMetadataEpoch(), 10))
+	request.Header.Set(backupOperationHeader, operation)
+	if s.peerAPIKey != "" {
+		request.Header.Set("Authorization", "Bearer "+s.peerAPIKey)
+	}
+	response, err := s.internalClient.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return fmt.Errorf("peer returned HTTP %d: %s", response.StatusCode, body)
+	}
+	file, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(file, response.Body)
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
+}
 
 const backupOperationHeader = "X-GideonDB-Backup-Operation"
 

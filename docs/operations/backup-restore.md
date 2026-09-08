@@ -61,6 +61,12 @@ all nodes into a sibling staging directory; compares every embedded node point
 with the outer manifest; and atomically publishes only the completely verified
 cluster directory.
 
+The admin-only gRPC `Snapshot` call performs this complete coordination when
+`cluster_wide` is true. It is accepted only by the metadata-Raft leader with a
+converged placement view. The response is the cluster package split into
+ordered chunks with a terminal SHA-256 digest; callers do not need access to
+any server filesystem path.
+
 Restore planning now selects the highest durable sequence among every backed-up
 replica, with source node ID as a deterministic tie-breaker, and maps that
 source onto a caller-supplied target replica placement. Old node identities are
@@ -93,3 +99,11 @@ deleted, or overwritten.
 After restoration, normal engine startup performs its usual manifest, segment,
 and WAL validation. Backup format 1 is guaranteed within the same pre-1.0 minor
 line; cross-minor restore support is stated in each release's migration notes.
+
+The administrative gRPC `Restore` stream is disabled unless the server starts
+with `-grpc-restore-path`. That path must not exist. The stream requires one
+32-character operation ID, contiguous absolute offsets, chunks no larger than
+1 MiB, a maximum 64 GiB archive, and the exact SHA-256 digest on its terminal
+marker. A validated node archive is atomically published to the configured path
+without modifying the running engine. Stop the server and promote or inspect
+that restored directory through the normal offline workflow.

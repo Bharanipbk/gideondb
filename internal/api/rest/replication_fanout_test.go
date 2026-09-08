@@ -98,6 +98,15 @@ func TestLeaderFanoutRequiresQuorumAndPreservesPreparedRecord(t *testing.T) {
 	if err != nil || replicated.Version != prepared[0].Version || replicated.Timestamp != prepared[0].Timestamp {
 		t.Fatalf("replicated=%#v err=%v prepared=%#v", replicated, err, prepared[0])
 	}
+	acknowledged, ambiguous, err = leader.commitLeaderShardDelete(context.Background(), config.Name, leaderShard, "", record.ID, "quorum", "")
+	if err != nil || ambiguous || acknowledged != 2 {
+		t.Fatalf("delete acknowledged=%d ambiguous=%v err=%v", acknowledged, ambiguous, err)
+	}
+	for label, db := range map[string]*engine.Engine{"leader": leaderDB, "follower": followerDB} {
+		if _, err := db.Get(config.Name, "", record.ID); !errors.Is(err, core.ErrNotFound) {
+			t.Fatalf("%s retained replicated deletion target: %v", label, err)
+		}
+	}
 
 	fail.Store(true)
 	unavailable := recordForShard("unavailable")

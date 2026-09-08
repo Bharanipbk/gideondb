@@ -100,6 +100,10 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Select stable Rust toolchain
         run: rustup default stable
+      - name: Install dashboard browser dependencies
+        run: |
+          npm ci --prefix internal/api/rest/dashboard
+          npx --prefix internal/api/rest/dashboard playwright install --with-deps chromium
       - run: make test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard
 
   reproducible-build:

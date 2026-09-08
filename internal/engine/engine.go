@@ -481,6 +481,60 @@ func (e *Engine) ApplyReplicaBatch(name string, shardID uint32, sequence uint64,
 	return nil
 }
 
+// ApplyReplicaDelete appends a leader-issued tombstone at an exact follower
+// WAL sequence before making the deletion visible. Replays are idempotent only
+// when the retained canonical payload matches the requested sequence.
+func (e *Engine) ApplyReplicaDelete(name string, shardID uint32, sequence uint64, namespace, id string) error {
+	if sequence == 0 || id == "" {
+		return fmt.Errorf("%w: invalid replica delete", core.ErrInvalidArgument)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	c, ok := e.collections[name]
+	if !ok {
+		return core.ErrNotFound
+	}
+	if !e.shardOwned(name, shardID) {
+		return core.ErrShardNotOwned
+	}
+	if int(shardID) >= c.Config().ShardCount || c.RouteShard(namespace, id) != shardID {
+		return fmt.Errorf("%w: delete does not route to shard %d", core.ErrInvalidArgument, shardID)
+	}
+	payload, err := json.Marshal(walMutation{Namespace: namespace, ID: id})
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(payload)
+	log := e.logs[name][shardID]
+	last := log.LastLSN()
+	if sequence <= last {
+		retained, exists := e.walDigests[name][shardID][sequence]
+		if !exists {
+			return core.ErrReplicationCompacted
+		}
+		if retained != digest {
+			return core.ErrReplicationConflict
+		}
+		return nil
+	}
+	if sequence != last+1 {
+		return fmt.Errorf("%w: expected %d, received %d", core.ErrReplicationGap, last+1, sequence)
+	}
+	lsn, err := log.Append(wal.OperationDelete, payload)
+	if err != nil {
+		return err
+	}
+	if lsn != sequence {
+		return fmt.Errorf("replica WAL assigned unexpected sequence %d", lsn)
+	}
+	if err := c.ApplyDelete(namespace, id); err != nil && !errors.Is(err, core.ErrNotFound) {
+		return fmt.Errorf("apply replica WAL delete: %w", err)
+	}
+	e.walDigests[name][shardID][sequence] = digest
+	e.mutations[name][shardID]++
+	return nil
+}
+
 // ExportReplicaSnapshot returns a consistent materialized shard and the WAL
 // sequence through which it is current.
 func (e *Engine) ExportReplicaSnapshot(name string, shardID uint32) (uint64, []core.Record, error) {
@@ -691,6 +745,44 @@ func (e *Engine) Delete(name, namespace, id string) error {
 		return err
 	}
 	return e.afterMutationLocked(name, c, shardID)
+}
+
+// DeleteShardWithSequence durably commits a tombstone on its authoritative
+// shard and returns the WAL sequence used for replica fanout.
+func (e *Engine) DeleteShardWithSequence(name string, shardID uint32, namespace, id string) (uint64, error) {
+	if id == "" {
+		return 0, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	c, ok := e.collections[name]
+	if !ok {
+		return 0, core.ErrNotFound
+	}
+	if int(shardID) >= c.Config().ShardCount || c.RouteShard(namespace, id) != shardID {
+		return 0, fmt.Errorf("%w: delete does not route to shard %d", core.ErrInvalidArgument, shardID)
+	}
+	if !e.shardOwned(name, shardID) {
+		return 0, core.ErrShardNotOwned
+	}
+	if _, err := c.Get(namespace, id); err != nil {
+		return 0, err
+	}
+	payload, err := json.Marshal(walMutation{Namespace: namespace, ID: id})
+	if err != nil {
+		return 0, err
+	}
+	sequence, err := e.logs[name][shardID].Append(wal.OperationDelete, payload)
+	if err != nil {
+		return 0, err
+	}
+	if err := c.ApplyDelete(namespace, id); err != nil {
+		return 0, err
+	}
+	if err := e.afterMutationLocked(name, c, shardID); err != nil {
+		return 0, err
+	}
+	return sequence, nil
 }
 
 func (e *Engine) Search(name, namespace string, vector []float32, k int) ([]core.SearchResult, error) {

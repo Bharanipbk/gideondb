@@ -40,3 +40,7 @@ dist/
 .DS_Store
 .idea/
 .vscode/
+internal/api/rest/dashboard/node_modules/
+internal/api/rest/dashboard/test-results/
+internal/api/rest/dashboard/playwright-report/
+.dashboard-test-results/

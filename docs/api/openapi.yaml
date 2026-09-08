@@ -878,6 +878,21 @@ paths:
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
+  /cluster/collections/{name}/vectors/{id}:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+      - {name: id, in: path, required: true, schema: {type: string}}
+      - {name: namespace, in: query, schema: {type: string}}
+    delete:
+      operationId: distributedDeleteVector
+      description: Route a tombstone to the authoritative shard leader and require quorum replication.
+      responses:
+        "200": {description: Tombstone committed and acknowledged by a replica quorum.}
+        "400": {$ref: "#/components/responses/Error"}
+        "401": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "409": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
 components:
   securitySchemes:
     bearerAuth:
