@@ -1,6 +1,6 @@
 # gRPC API
 
-Maturity: **contract implemented; server transport planned**.
+Maturity: **local data-plane transport implemented; distributed and administrative RPCs planned**.
 
 The versioned public protobuf contract is
 [`gideondb.v1.GideonDBService`](../../api/proto/gideondb/v1/gideondb.proto).
@@ -13,9 +13,37 @@ It covers the 18 operations required by the technical design:
 - health and bounded operational statistics; and
 - server-streamed snapshots plus client-streamed restores.
 
-The current Go process does not yet listen for gRPC traffic. Publishing the
-schema before wiring a server makes field numbering, error mapping, streaming
-bounds, and public versus internal protocol ownership independently reviewable.
+The Go process can expose an opt-in gRPC listener with `-grpc-address`, the
+`GIDEONDB_GRPC_ADDRESS` environment variable, or the `grpc_address` JSON field.
+It implements collection CRUD, record CRUD, local search and batch search,
+local and distributed scroll, cluster status, node/shard listings, health,
+statistics, and local snapshot streaming. Distributed scroll reuses the REST
+coordinator's authoritative placement, peer fencing, bounded merge, and
+epoch-bound cursor semantics. With static routing active, search and batch
+search use the same authoritative shard coordinator and retain partial failure
+details and the serving metadata epoch. Upsert and batch upsert likewise use the
+distributed coordinator, including leader/quorum/all acknowledgement policies
+and explicit per-shard committed, failed, or unknown outcomes. Placement-aware
+delete, cluster-wide snapshot, and restore remain pending.
+
+```sh
+gideondb -http-address 127.0.0.1:6333 -grpc-address 127.0.0.1:6334
+```
+
+The listener uses the configured bearer API key, reloadable principals file,
+and TLS identity. The legacy API key has administrator authority. Principals
+enforce reader, writer, and administrator roles plus collection-prefix tenant
+isolation; collection listings are filtered to the caller's allowed prefixes.
+Every RPC must carry a client deadline, and inbound and outbound messages are
+capped at 16 MiB. Non-loopback startup applies the same explicit authentication
+and cleartext opt-in rules as the REST listener. Per-credential token buckets
+use `rate_limit_per_second` and `rate_limit_burst`; exhausted calls return
+`RESOURCE_EXHAUSTED` with `retry-after-ms` response metadata. The limiter keeps
+at most 4,096 credential identities and stores hashes rather than bearer tokens.
+Every completed or rejected RPC records only its stable method name, mapped
+outcome status, and duration in the same bounded durable audit stream as REST;
+bearer tokens, request bodies, collection names, and record identifiers are not
+recorded.
 
 ## Authentication, deadlines, and errors
 
@@ -59,15 +87,16 @@ non-empty restore destination.
 
 The root [`buf.yaml`](../../buf.yaml) enables the Buf `STANDARD` lint category
 and `FILE` breaking-change policy. [`buf.gen.yaml`](../../buf.gen.yaml) defines
-Go message and service generation. Until Buf is installed, the normal repository
-suite still runs a dependency-free structural gate that verifies the package,
-service, complete RPC set, and declaration comments.
+Go message and service generation. Generated Go bindings are checked in so
+ordinary `go test ./...` validates the transport without requiring Buf. The
+normal repository suite also runs a dependency-free structural gate that
+verifies the package, service, complete RPC set, and declaration comments.
 
 ```sh
 make test-proto-contract
+make test-proto-compatibility
 buf lint
 buf format --diff --exit-code
+buf generate
+go test ./internal/api/grpcapi
 ```
-
-Generated Go transport code and the actual server are deliberately deferred to
-the next implementation increment; the source schema remains authoritative.

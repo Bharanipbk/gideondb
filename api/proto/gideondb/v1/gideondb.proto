@@ -37,7 +37,7 @@ service GideonDBService {
   // Returns one exact record, including its vector.
   rpc Get(GetRequest) returns (GetResponse);
 
-  // Searches one node and returns results in deterministic score order.
+  // Searches authoritative shard owners when distributed routing is enabled.
   rpc Search(SearchRequest) returns (SearchResponse);
   // Executes multiple independent searches in request order.
   rpc BatchSearch(BatchSearchRequest) returns (BatchSearchResponse);

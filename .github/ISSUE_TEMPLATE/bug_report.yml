@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible GideonDB defect
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: For vulnerabilities, stop and follow SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and configuration
+      description: Include OS, architecture, deployment topology, and relevant non-secret settings.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and sanitized logs
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed credentials, personal data, and sensitive infrastructure details.
+          required: true

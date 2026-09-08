@@ -1,4 +1,4 @@
-.PHONY: build test test-proto-contract test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard race benchmark vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard race benchmark vet fmt run docker validate-single-node validate-kubernetes
 
 DOTNET ?= dotnet
 
@@ -27,6 +27,10 @@ test:
 
 test-proto-contract:
 	python3 scripts/check-proto-contract.py
+	$(MAKE) test-proto-compatibility
+
+test-proto-compatibility:
+	go test ./internal/api/grpcapi -run '^TestV1WireCompatibility$$'
 
 test-python-sdk:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src python3 -m unittest discover -s sdk/python/tests -v

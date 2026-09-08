@@ -7,6 +7,8 @@ info:
     url: https://github.com/Bharanipbk/gideondb
 servers:
   - url: http://127.0.0.1:6333/v1
+security:
+  - bearerAuth: []
 paths:
   /internal/replicas/{collection}/{shard}/status:
     get:
@@ -37,6 +39,7 @@ paths:
   /health:
     get:
       operationId: health
+      security: []
       responses:
         "200":
           description: Process is healthy.
@@ -111,6 +114,7 @@ paths:
   /ready:
     get:
       operationId: readiness
+      security: []
       description: Probe-safe readiness status without cluster topology details.
       responses:
         "200":
@@ -875,6 +879,10 @@ paths:
         "409": {$ref: "#/components/responses/Error"}
         "503": {$ref: "#/components/responses/Error"}
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   parameters:
     CollectionName:
       name: name

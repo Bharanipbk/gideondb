@@ -1,0 +1,34 @@
+name: Feature request
+description: Propose a scoped GideonDB improvement
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user or operator problem before proposing a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and operational impact
+      description: Consider APIs, storage, upgrades, security, performance, and deployment.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: I checked the roadmap and pending-development checklist for related work.
+          required: true

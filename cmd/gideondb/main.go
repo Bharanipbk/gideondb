@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,12 +15,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Bharanipbk/gideondb/internal/api/grpcapi"
 	"github.com/Bharanipbk/gideondb/internal/api/rest"
 	"github.com/Bharanipbk/gideondb/internal/cluster"
 	appconfig "github.com/Bharanipbk/gideondb/internal/config"
 	"github.com/Bharanipbk/gideondb/internal/engine"
 	"github.com/Bharanipbk/gideondb/internal/tlsreload"
 	"github.com/Bharanipbk/gideondb/internal/wal"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 )
 
 var version, commit, buildDate = "dev", "unknown", "unknown"
@@ -28,6 +32,7 @@ func main() {
 	defaults := appconfig.Default()
 	configFile := flag.String("config", "", "strict JSON configuration file")
 	address := flag.String("http-address", defaults.HTTPAddress, "REST listen address")
+	grpcAddress := flag.String("grpc-address", defaults.GRPCAddress, "gRPC listen address; disabled when empty")
 	advertiseAddress := flag.String("advertise-address", defaults.AdvertiseAddress, "address advertised to other nodes; defaults to HTTP address")
 	clusterID := flag.String("cluster-id", defaults.ClusterID, "shared 32-character hexadecimal cluster ID; generated and persisted when omitted")
 	peers := flag.String("peers", strings.Join(defaults.Peers, ","), "comma-separated static peer base URLs")
@@ -100,7 +105,7 @@ func main() {
 		logger.Error("invalid configuration", "error", err)
 		os.Exit(2)
 	}
-	*address, *advertiseAddress, *dataPath, *walSync, *checkpointEvery = settings.HTTPAddress, settings.AdvertiseAddress, settings.DataPath, settings.WALSync, settings.CheckpointEvery
+	*address, *grpcAddress, *advertiseAddress, *dataPath, *walSync, *checkpointEvery = settings.HTTPAddress, settings.GRPCAddress, settings.AdvertiseAddress, settings.DataPath, settings.WALSync, settings.CheckpointEvery
 	*replicationFactor = settings.ReplicationFactor
 	*placementCapacity = uint(settings.PlacementCapacity)
 	*rateLimitPerSecond, *rateLimitBurst = settings.RateLimitPerSecond, settings.RateLimitBurst
@@ -137,6 +142,12 @@ func main() {
 			logger.Error("invalid HTTP address", "error", err)
 			os.Exit(2)
 		}
+		if *grpcAddress != "" {
+			if _, err := rest.ParseAddress(*grpcAddress); err != nil {
+				logger.Error("invalid gRPC address", "error", err)
+				os.Exit(2)
+			}
+		}
 		if *advertiseAddress == "" {
 			*advertiseAddress = *address
 		}
@@ -164,6 +175,14 @@ func main() {
 		}
 		if (apiKey != "" || *principalsFile != "") && !rest.IsLoopbackAddress(*address) && *tlsCertFile == "" && !*allowInsecureHTTP {
 			logger.Error("refusing bearer authentication over non-loopback cleartext HTTP", "hint", "configure TLS or explicitly set -allow-insecure-http")
+			os.Exit(2)
+		}
+		if *grpcAddress != "" && apiKey == "" && *principalsFile == "" && !rest.IsLoopbackAddress(*grpcAddress) && !*allowUnauthenticated {
+			logger.Error("refusing unauthenticated non-loopback gRPC listener", "address", *grpcAddress, "hint", "configure -api-key-file or explicitly set -allow-unauthenticated")
+			os.Exit(2)
+		}
+		if *grpcAddress != "" && (apiKey != "" || *principalsFile != "") && !rest.IsLoopbackAddress(*grpcAddress) && *tlsCertFile == "" && !*allowInsecureHTTP {
+			logger.Error("refusing bearer authentication over non-loopback cleartext gRPC", "hint", "configure TLS or explicitly set -allow-insecure-http")
 			os.Exit(2)
 		}
 	}
@@ -274,6 +293,42 @@ func main() {
 		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second,
 	}
 	server.TLSConfig = serverTLSConfig
+	var grpcServer *grpc.Server
+	var grpcListener net.Listener
+	if *grpcAddress != "" {
+		grpcListener, err = net.Listen("tcp", *grpcAddress)
+		if err != nil {
+			logger.Error("listen for gRPC", "address", *grpcAddress, "error", err)
+			os.Exit(1)
+		}
+		grpcOptions := make([]grpc.ServerOption, 0, 1)
+		if serverTLSConfig != nil {
+			grpcOptions = append(grpcOptions, grpc.Creds(credentials.NewTLS(serverTLSConfig.Clone())))
+		}
+		var principalResolver func(string) (*grpcapi.Principal, error)
+		if *principalsFile != "" {
+			principalResolver = func(token string) (*grpcapi.Principal, error) {
+				principal, err := rest.AuthenticatePrincipalFile(*principalsFile, token)
+				if err != nil || principal == nil {
+					return nil, err
+				}
+				return &grpcapi.Principal{Name: principal.Name, Role: principal.Role, CollectionPrefixes: append([]string(nil), principal.CollectionPrefixes...)}, nil
+			}
+		}
+		grpcServer = grpcapi.NewServerWithOptions(db, grpcapi.Options{
+			APIKey: apiKey, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID,
+			AdvertiseAddress: *advertiseAddress, MetadataEpoch: metadataEpoch,
+			ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity),
+			EnableStaticRouting: *enableStaticRouting, PeerProvider: discovery,
+			RaftStore: raftStore, RaftStatus: raftRuntime, PrincipalResolver: principalResolver,
+			RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst,
+			AuditRecorder: apiServer, DistributedSearch: apiServer.DistributedSearchHandler(),
+			DistributedScroll: apiServer.DistributedScrollHandler(),
+			DistributedUpsert: apiServer.DistributedBatchUpsertHandler(),
+			ServerOptions:     grpcOptions,
+		})
+		defer grpcServer.Stop()
+	}
 
 	signalContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -294,8 +349,26 @@ func main() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancelShutdown()
 		_ = server.Shutdown(shutdownContext)
+		if grpcServer != nil {
+			grpcStopped := make(chan struct{})
+			go func() { grpcServer.GracefulStop(); close(grpcStopped) }()
+			select {
+			case <-grpcStopped:
+			case <-shutdownContext.Done():
+				grpcServer.Stop()
+			}
+		}
 	}()
-	logger.Info("server starting", "address", *address, "advertise_address", *advertiseAddress, "node_id", identity.ID, "cluster_id", clusterMetadata.ClusterID, "metadata_epoch", metadataEpoch, "peers", len(settings.Peers), "static_routing", *enableStaticRouting, "replication_factor", *replicationFactor, "data_path", *dataPath)
+	if grpcServer != nil {
+		go func() {
+			logger.Info("gRPC server starting", "address", *grpcAddress, "tls", serverTLSConfig != nil)
+			if err := grpcServer.Serve(grpcListener); err != nil {
+				logger.Error("gRPC server stopped", "error", err)
+				stop()
+			}
+		}()
+	}
+	logger.Info("server starting", "address", *address, "grpc_address", *grpcAddress, "advertise_address", *advertiseAddress, "node_id", identity.ID, "cluster_id", clusterMetadata.ClusterID, "metadata_epoch", metadataEpoch, "peers", len(settings.Peers), "static_routing", *enableStaticRouting, "replication_factor", *replicationFactor, "data_path", *dataPath)
 	var serveErr error
 	if *tlsCertFile != "" {
 		serveErr = server.ListenAndServeTLS("", "")

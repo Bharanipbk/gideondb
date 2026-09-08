@@ -15,16 +15,16 @@ func TestLayeredConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	environment := map[string]string{"GIDEONDB_HTTP_ADDRESS": "127.0.0.1:8000", "GIDEONDB_CHECKPOINT_EVERY": "75", "GIDEONDB_REPLICATION_FACTOR": "2", "GIDEONDB_PLACEMENT_CAPACITY": "3", "GIDEONDB_ALLOW_INSECURE_HTTP": "false", "GIDEONDB_ENABLE_STATIC_ROUTING": "true", "GIDEONDB_PEERS": "http://two:6333, http://three:6333"}
+	environment := map[string]string{"GIDEONDB_HTTP_ADDRESS": "127.0.0.1:8000", "GIDEONDB_GRPC_ADDRESS": "127.0.0.1:8001", "GIDEONDB_CHECKPOINT_EVERY": "75", "GIDEONDB_REPLICATION_FACTOR": "2", "GIDEONDB_PLACEMENT_CAPACITY": "3", "GIDEONDB_ALLOW_INSECURE_HTTP": "false", "GIDEONDB_ENABLE_STATIC_ROUTING": "true", "GIDEONDB_PEERS": "http://two:6333, http://three:6333"}
 	loaded, err = ApplyEnv(loaded, func(name string) (string, bool) { value, ok := environment[name]; return value, ok })
 	if err != nil {
 		t.Fatal(err)
 	}
-	loaded, err = ApplyFlags(loaded, map[string]string{"http-address": "127.0.0.1:9000", "checkpoint-every": "100", "replication-factor": "3", "placement-capacity": "4", "peers": "http://four:6333", "enable-static-routing": "false"})
+	loaded, err = ApplyFlags(loaded, map[string]string{"http-address": "127.0.0.1:9000", "grpc-address": "127.0.0.1:9001", "checkpoint-every": "100", "replication-factor": "3", "placement-capacity": "4", "peers": "http://four:6333", "enable-static-routing": "false"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.HTTPAddress != "127.0.0.1:9000" || loaded.CheckpointEvery != 100 || loaded.ReplicationFactor != 3 || loaded.PlacementCapacity != 4 || loaded.AllowInsecureHTTP || loaded.EnableStaticRouting {
+	if loaded.HTTPAddress != "127.0.0.1:9000" || loaded.GRPCAddress != "127.0.0.1:9001" || loaded.CheckpointEvery != 100 || loaded.ReplicationFactor != 3 || loaded.PlacementCapacity != 4 || loaded.AllowInsecureHTTP || loaded.EnableStaticRouting {
 		t.Fatalf("unexpected layered config: %#v", loaded)
 	}
 	if loaded.DataPath != "./data" || loaded.WALSync != "always" {

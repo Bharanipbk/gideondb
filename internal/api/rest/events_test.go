@@ -127,6 +127,22 @@ func TestPersistentEventLogRecoversBoundsAndCompacts(t *testing.T) {
 	}
 }
 
+func TestGRPCAuditSharesPersistentEventLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	server := NewWithOptions(db, nil, Options{EventLogPath: path, EventLogRetention: 256})
+	server.RecordGRPCAudit("/gideondb.v1.GideonDBService/Get", http.StatusForbidden, 2*time.Millisecond)
+	recovered := newPersistentEventLog(path, 256)
+	events := recovered.recent(1, "warn")
+	if len(events) != 1 || events[0].Event != "grpc.server.request" || events[0].Method != "RPC" || events[0].Route != "/gideondb.v1.GideonDBService/Get" || events[0].Status != http.StatusForbidden {
+		t.Fatalf("recovered gRPC audit event = %+v", events)
+	}
+}
+
 func TestEventLogEvictsOldestEntry(t *testing.T) {
 	log := newEventLog(2)
 	for status := 200; status < 203; status++ {

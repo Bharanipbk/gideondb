@@ -11,21 +11,37 @@ automated tests, and user-facing documentation are all finished.
   deferred. Run `make validate-kubernetes` manually when Kubernetes validation
   resumes. It must deploy the three-node StatefulSet, verify readiness and TLS,
   replace the elected leader, and return the cluster to three ready members.
-- [ ] **Implement the gRPC server transport.** Generate the Go bindings from
-  `api/proto/gideondb/v1/gideondb.proto`, expose the documented RPCs, map REST
-  error semantics to gRPC status codes, enforce authentication/deadlines/stream
-  limits, and add interoperability and compatibility tests. REST is currently
-  the only active public transport. See [the gRPC contract](docs/api/grpc.md).
-- [ ] **Complete open-source release files and policy.** Add the final
-  `LICENSE`, contribution guide, code of conduct, security policy, issue and PR
-  templates, and select/document DCO or CLA handling. The README and package
-  metadata declare Apache-2.0; add the canonical repository license text and
-  maintainer attribution before the first public release.
-- [ ] **Establish the full CI baseline.** Add appropriately scoped formatting,
-  vet/lint, unit, race, integration, fuzz-smoke, documentation/link,
-  OpenAPI/protobuf compatibility, and reproducible-build checks before a public
-  release. Kubernetes CI may be restored as a separate, manually triggered or
-  path-filtered job when it becomes useful.
+- [ ] **Complete the gRPC server transport.** Generated Go bindings and an
+  opt-in listener now expose collection/record CRUD, local search, batch search,
+  local scroll, cluster/node/shard inspection, health, stats, and checksummed
+  local snapshot streaming with bearer authentication, required
+  deadlines, 16 MiB message limits, canonical status mapping, TLS support, and
+  an interoperability test. Distributed scroll now delegates to the existing
+  authoritative placement/fencing coordinator. Still implement placement-aware
+  delete and cluster-wide snapshot and restore streams. Search and batch
+  search now delegate to authoritative shard owners when static routing is
+  active and preserve partial failure and epoch metadata. Upsert and batch
+  upsert now use the authoritative distributed coordinator and retain
+  acknowledgement, per-shard committed/failed/unknown outcomes, and epoch
+  metadata. Bounded per-credential gRPC token buckets share the configured rate
+  and burst limits and return retry metadata. Reloadable principals enforce
+  reader, writer, and admin roles plus collection-prefix isolation. Published v1 field numbers,
+  wire types, enum values, RPC types, and streaming shapes are now guarded by
+  an additive descriptor compatibility test. Sanitized gRPC outcomes now share
+  the bounded durable operational audit log with REST. See
+  [the gRPC contract](docs/api/grpc.md).
+- [x] **Complete open-source release files and policy.** The repository now
+  includes the canonical Apache-2.0 `LICENSE`, contribution and governance
+  guides, code of conduct, private security-reporting policy, structured issue
+  and pull-request templates, maintainer attribution, and a documented DCO 1.1
+  sign-off policy instead of a CLA.
+- [x] **Establish the full CI baseline.** The read-only GitHub Actions workflow
+  now enforces formatting, vet, pinned Staticcheck, unit, race, uncached
+  integration, bounded fuzz-smoke, documentation links, OpenAPI/protobuf and
+  generated-binding compatibility, all SDK/integration suites, dashboard
+  syntax, and byte-identical trimmed Linux builds. Kubernetes remains an
+  explicit manual gate because it requires real Docker, kind, CNI, and storage
+  behavior. See [continuous integration](docs/development/continuous-integration.md).
 
 ## Storage and indexing
 

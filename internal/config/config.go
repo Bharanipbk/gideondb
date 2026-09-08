@@ -15,6 +15,7 @@ import (
 
 type Config struct {
 	HTTPAddress          string   `json:"http_address"`
+	GRPCAddress          string   `json:"grpc_address,omitempty"`
 	AdvertiseAddress     string   `json:"advertise_address,omitempty"`
 	ClusterID            string   `json:"cluster_id,omitempty"`
 	Peers                []string `json:"peers,omitempty"`
@@ -68,7 +69,7 @@ func ApplyEnv(value Config, getenv func(string) (string, bool)) (Config, error) 
 		name   string
 		target *string
 	}{
-		{"GIDEONDB_HTTP_ADDRESS", &value.HTTPAddress}, {"GIDEONDB_DATA_PATH", &value.DataPath},
+		{"GIDEONDB_HTTP_ADDRESS", &value.HTTPAddress}, {"GIDEONDB_GRPC_ADDRESS", &value.GRPCAddress}, {"GIDEONDB_DATA_PATH", &value.DataPath},
 		{"GIDEONDB_ADVERTISE_ADDRESS", &value.AdvertiseAddress},
 		{"GIDEONDB_CLUSTER_ID", &value.ClusterID},
 		{"GIDEONDB_WAL_SYNC", &value.WALSync}, {"GIDEONDB_API_KEY_FILE", &value.APIKeyFile},
@@ -141,6 +142,8 @@ func ApplyFlags(value Config, values map[string]string) (Config, error) {
 		switch name {
 		case "http-address":
 			value.HTTPAddress = raw
+		case "grpc-address":
+			value.GRPCAddress = raw
 		case "advertise-address":
 			value.AdvertiseAddress = raw
 		case "peers":

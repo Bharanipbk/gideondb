@@ -47,3 +47,9 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Rolling upgrades](operations/rolling-upgrades.md)
 - [Compatibility and data migration](operations/compatibility.md)
 - [Network partitions](operations/network-partitions.md)
+
+## Develop and release
+
+- [Continuous integration](development/continuous-integration.md)
+- [Contributing](../CONTRIBUTING.md)
+- [Project governance](../GOVERNANCE.md)

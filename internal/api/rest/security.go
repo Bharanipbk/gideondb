@@ -110,6 +110,12 @@ func (s *principalStore) authenticate(key string) (*Principal, error) {
 	return nil, nil
 }
 
+// AuthenticatePrincipalFile resolves one bearer key against the reloadable
+// principals file. The returned principal never contains credential material.
+func AuthenticatePrincipalFile(path, key string) (*Principal, error) {
+	return (&principalStore{path: path}).authenticate(key)
+}
+
 func principalFromRequest(r *http.Request) *Principal {
 	p, _ := r.Context().Value(principalContextKey{}).(*Principal)
 	return p

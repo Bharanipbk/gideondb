@@ -37,8 +37,8 @@ cluster metadata; deterministic placement and rebalancing; backup/restore;
 Prometheus metrics; structured tracing; REST APIs; Go, Python, TypeScript, Java,
 Rust, and .NET SDKs; Python embedding/framework integrations; and a web dashboard.
 
-Known release gaps include the external Kubernetes gate, gRPC server transport, and final
-open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
+Known release gaps include the external Kubernetes gate, remaining distributed
+and administrative gRPC RPCs, and final open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
 for phase status and [pending development](PENDING_DEVELOPMENT.md) for the
 maintained implementation checklist.
 
@@ -194,10 +194,20 @@ The project includes a non-root multi-stage [Docker image](docs/operations/docke
 and one-shot [operational CLI modes](docs/operations/cli.md) for validation,
 health checks, backup, restore, and build-version reporting.
 
+## Contributing and security
+
+Contributions are welcome under the [contribution guide](CONTRIBUTING.md) and
+[code of conduct](CODE_OF_CONDUCT.md). The project uses DCO 1.1 commit sign-off
+instead of a CLA. See [project governance](GOVERNANCE.md) for decision-making
+and maintainer responsibilities.
+
+Report suspected vulnerabilities privately by following the
+[security policy](SECURITY.md); do not disclose them in public issues.
+
 ## License
 
 GideonDB is open-source software licensed under the
-[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). You may use,
+[Apache License 2.0](LICENSE). You may use,
 modify, and distribute the project in accordance with that license. Unless
 required by applicable law or agreed to in writing, the software is provided
 without warranties or conditions of any kind.

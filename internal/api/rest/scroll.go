@@ -31,6 +31,12 @@ type shardScrollOutcome struct {
 	err     error
 }
 
+// DistributedScrollHandler exposes the placement-aware coordinator to other
+// in-process transports without reapplying public HTTP middleware.
+func (s *Server) DistributedScrollHandler() http.Handler {
+	return http.HandlerFunc(s.distributedScroll)
+}
+
 func (s *Server) scroll(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {

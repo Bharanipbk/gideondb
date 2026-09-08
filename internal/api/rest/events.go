@@ -77,7 +77,9 @@ func (l *eventLog) add(event httpEvent) {
 	defer l.mu.Unlock()
 	l.next++
 	event.Sequence = l.next
-	event.Event = "http.server.request"
+	if event.Event == "" {
+		event.Event = "http.server.request"
+	}
 	event.Level = "info"
 	if event.Status >= 500 {
 		event.Level = "error"
@@ -91,6 +93,12 @@ func (l *eventLog) add(event httpEvent) {
 		l.events = append(l.events, event)
 	}
 	l.persistLocked(event)
+}
+
+// RecordGRPCAudit appends one sanitized gRPC request outcome to the same
+// bounded persistent event stream used by the REST transport.
+func (s *Server) RecordGRPCAudit(method string, statusCode int, duration time.Duration) {
+	s.events.add(httpEvent{Timestamp: time.Now().UTC(), Event: "grpc.server.request", Method: "RPC", Route: method, Status: statusCode, DurationMS: float64(duration.Microseconds()) / 1000})
 }
 
 func (l *eventLog) persistLocked(event httpEvent) {

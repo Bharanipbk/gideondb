@@ -39,6 +39,12 @@ type shardWriteOutcome struct {
 	Error                string        `json:"error,omitempty"`
 }
 
+// DistributedBatchUpsertHandler exposes the authoritative write coordinator to
+// other in-process transports without reapplying public HTTP middleware.
+func (s *Server) DistributedBatchUpsertHandler() http.Handler {
+	return http.HandlerFunc(s.distributedBatchUpsert)
+}
+
 func (s *Server) internalShardBatchUpsert(w http.ResponseWriter, r *http.Request) {
 	if !s.validateInternalFence(w, r) {
 		return

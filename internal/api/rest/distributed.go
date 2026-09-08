@@ -36,6 +36,12 @@ type shardSearchOutcome struct {
 	failure *shardSearchFailure
 }
 
+// DistributedSearchHandler exposes the authoritative coordinator to other
+// in-process transports without reapplying public HTTP middleware.
+func (s *Server) DistributedSearchHandler() http.Handler {
+	return http.HandlerFunc(s.distributedSearch)
+}
+
 func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuthoritativePlacement(w) {
 		return
