@@ -12,7 +12,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cd ../../../..
-GOCACHE="${TMPDIR:-/tmp}/gideondb-go-cache" go run ./cmd/gideondb \
+GIDEONDB_DASHBOARD_USERNAME=admin GIDEONDB_DASHBOARD_PASSWORD=browser-test-password GOCACHE="${TMPDIR:-/tmp}/gideondb-go-cache" go run ./cmd/gideondb \
   -http-address 127.0.0.1:16334 \
   -grpc-address '' \
   -data-path "$data_path" &

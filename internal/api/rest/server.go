@@ -78,8 +78,14 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 		events = newPersistentEventLog(options.EventLogPath, retention)
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
-	if options.DashboardUsername != "" && options.DashboardPassword != "" {
-		s.dashboardAuth = newDashboardAuthenticator(options.DashboardUsername, options.DashboardPassword)
+	if options.DashboardCredentialsFile != "" {
+		var authErr error
+		s.dashboardAuth, authErr = loadDashboardAuthenticator(options.DashboardCredentialsFile)
+		if authErr != nil {
+			logger.Error("load dashboard credentials", "error", authErr)
+		}
+	} else if options.DashboardUsername != "" && options.DashboardPassword != "" {
+		s.dashboardAuth = newDashboardAuthenticator(options.DashboardUsername, options.DashboardPassword, "", options.DashboardBootstrap)
 	}
 	if options.RateLimitPerSecond > 0 && options.RateLimitBurst > 0 {
 		s.rateLimiter = newRequestRateLimiter(options.RateLimitPerSecond, options.RateLimitBurst)
@@ -152,6 +158,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /v1/dashboard/session", s.dashboardLogin)
 	s.mux.HandleFunc("GET /v1/dashboard/session", s.dashboardSession)
 	s.mux.HandleFunc("DELETE /v1/dashboard/session", s.dashboardLogout)
+	s.mux.HandleFunc("POST /v1/dashboard/session/refresh", s.dashboardRefreshSession)
+	s.mux.HandleFunc("POST /v1/dashboard/password", s.dashboardChangePassword)
 	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("GET /v1/ready", s.ready)
 	s.mux.HandleFunc("GET /metrics", s.protected(s.serveMetrics))

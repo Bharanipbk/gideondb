@@ -68,4 +68,4 @@ fmt:
 	gofmt -w cmd internal pkg
 
 run:
-	go run ./cmd/gideondb -data-path ./data -http-address 127.0.0.1:6333
+	./run-gideondb.sh -data-path ./data -http-address 127.0.0.1:6333

@@ -138,22 +138,41 @@ func main() {
 	}
 	var apiKey string
 	dashboardUsername, dashboardPassword := os.Getenv("GIDEONDB_DASHBOARD_USERNAME"), os.Getenv("GIDEONDB_DASHBOARD_PASSWORD")
+	dashboardPasswordFile := os.Getenv("GIDEONDB_DASHBOARD_PASSWORD_FILE")
+	dashboardBootstrap := strings.EqualFold(os.Getenv("GIDEONDB_DASHBOARD_BOOTSTRAP"), "true")
 	offline := *backupTo != "" || *verifyData || *migrateData
 	if !offline {
+		if dashboardPassword != "" && dashboardPasswordFile != "" {
+			logger.Error("configure only one of GIDEONDB_DASHBOARD_PASSWORD or GIDEONDB_DASHBOARD_PASSWORD_FILE")
+			os.Exit(2)
+		}
+		if dashboardPasswordFile != "" {
+			var passwordErr error
+			dashboardPassword, passwordErr = rest.LoadDashboardPasswordFile(dashboardPasswordFile)
+			if passwordErr != nil {
+				logger.Error("load dashboard password file", "error", passwordErr)
+				os.Exit(2)
+			}
+		}
 		if _, err := rest.ParseAddress(*address); err != nil {
 			logger.Error("invalid HTTP address", "error", err)
 			os.Exit(2)
-		}
-		if dashboardUsername == "" && dashboardPassword == "" && rest.IsLoopbackAddress(*address) {
-			dashboardUsername, dashboardPassword = "admin", "admin123"
-			logger.Warn("dashboard development bootstrap credential enabled; set GIDEONDB_DASHBOARD_USERNAME and GIDEONDB_DASHBOARD_PASSWORD")
 		}
 		if (dashboardUsername == "") != (dashboardPassword == "") {
 			logger.Error("dashboard username and password must both be configured")
 			os.Exit(2)
 		}
-		if !rest.IsLoopbackAddress(*address) && dashboardUsername == "" {
-			logger.Error("non-loopback dashboard requires GIDEONDB_DASHBOARD_USERNAME and GIDEONDB_DASHBOARD_PASSWORD")
+		_, dashboardCredentialErr := os.Stat(filepath.Join(*dataPath, "dashboard-credentials.json"))
+		if dashboardUsername == "" && os.IsNotExist(dashboardCredentialErr) {
+			logger.Error("new data directory requires GIDEONDB_DASHBOARD_USERNAME and a dashboard password source")
+			os.Exit(2)
+		}
+		if dashboardBootstrap && !rest.IsLoopbackAddress(*address) {
+			logger.Error("GIDEONDB_DASHBOARD_BOOTSTRAP is restricted to loopback listeners")
+			os.Exit(2)
+		}
+		if !rest.IsLoopbackAddress(*address) && *tlsCertFile == "" {
+			logger.Error("non-loopback dashboard authentication requires HTTPS", "hint", "configure -tls-cert-file and -tls-key-file")
 			os.Exit(2)
 		}
 		if *grpcAddress != "" {
@@ -237,6 +256,13 @@ func main() {
 			logger.Error("close engine", "error", err)
 		}
 	}()
+	dashboardCredentialsPath := filepath.Join(*dataPath, "dashboard-credentials.json")
+	if !offline {
+		if err := rest.PrepareDashboardCredentials(dashboardCredentialsPath, dashboardUsername, dashboardPassword, dashboardBootstrap); err != nil {
+			logger.Error("prepare dashboard credentials", "error", err)
+			os.Exit(2)
+		}
+	}
 	if *backupTo != "" {
 		if err := db.Backup(*backupTo); err != nil {
 			logger.Error("create backup", "error", err)
@@ -300,7 +326,7 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardUsername: dashboardUsername, DashboardPassword: dashboardPassword})
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,

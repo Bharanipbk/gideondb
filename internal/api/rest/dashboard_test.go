@@ -29,6 +29,7 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 	for asset, expected := range map[string][2]string{
 		"/dashboard/":                  {"text/html", "request-rate-chart"},
 		"/dashboard/app.js":            {"text/javascript", "recordPerformance"},
+		"/dashboard/theme.js":          {"text/javascript", "gideondb-theme"},
 		"/dashboard/styles.css":        {"text/css", "--accent"},
 		"/dashboard/dashboard-v2.css":  {"text/css", "--sidebar-width"},
 		"/dashboard/performance.css":   {"text/css", ".chart-grid"},

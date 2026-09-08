@@ -28,6 +28,7 @@ func TestDocumentationWebsite(t *testing.T) {
 		"/docs/":           "GideonDB Docs",
 		"/docs/styles.css": "--accent",
 		"/docs/app.js":     "loadDocument",
+		"/docs/theme.js":   "gideondb-theme",
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, target, nil))

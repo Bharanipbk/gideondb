@@ -1,3 +1,37 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a0d0f"><title>Sign in · GideonDB</title><link rel="stylesheet" href="/dashboard/styles.css"><link rel="stylesheet" href="/dashboard/dashboard-v2.css"></head>
-<body class="login-page"><main class="login-shell"><section class="panel login-panel"><div class="brand"><span class="mark">G</span><span><strong>GideonDB</strong><small>Operations console</small></span></div><p class="eyebrow">ADMINISTRATION</p><h1>Sign in</h1><p class="muted">Use the dashboard administrator credentials for this deployment.</p><div id="login-error" class="notice hidden" role="alert"></div><form id="login-form"><label>Username<input id="username" name="username" autocomplete="username" required autofocus></label><label>Password<input id="password" name="password" type="password" autocomplete="current-password" required></label><button type="submit">Sign in</button></form></section></main><script type="module" src="/dashboard/login.js"></script></body></html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0a0d0f"><title>Sign in · GideonDB</title>
+  <script src="/dashboard/theme.js"></script>
+  <link rel="stylesheet" href="/dashboard/styles.css"><link rel="stylesheet" href="/dashboard/dashboard-v2.css">
+</head>
+<body class="login-page hold-transition">
+  <button class="theme-toggle login-theme-toggle" type="button" data-theme-toggle><span data-theme-icon>☀</span><span data-theme-label>Light</span></button>
+  <main class="login-shell">
+    <section class="login-story" aria-label="GideonDB operations console">
+      <div class="brand"><span class="mark">G</span><span><strong>GideonDB</strong><small>Operations console</small></span></div>
+      <div class="story-copy"><p class="eyebrow">VECTOR OPERATIONS</p><h2>Control your data plane with confidence.</h2><p>Monitor cluster health, inspect collections, test retrieval, and manage resilience from one focused workspace.</p></div>
+      <div class="security-note"><span aria-hidden="true">✓</span><div><strong>Protected administration</strong><small>Opaque sessions · CSRF protection · audited access</small></div></div>
+    </section>
+    <section class="login-panel">
+      <div class="auth-step"><span id="auth-step-number">01</span><span id="auth-step-label">Identity verification</span></div>
+      <p class="eyebrow">ADMINISTRATION</p><h1 id="auth-title">Welcome back</h1>
+      <p id="auth-help" class="muted">Sign in with the dashboard administrator credentials for this deployment.</p>
+      <div id="login-error" class="notice hidden" role="alert"></div>
+      <form id="login-form">
+        <div class="field"><label for="username">Username</label><div class="field-wrap"><span aria-hidden="true">@</span><input id="username" name="username" autocomplete="username" placeholder="Administrator username" required autofocus></div></div>
+        <div class="field"><label for="password">Password</label><div class="field-wrap"><span aria-hidden="true">●</span><input id="password" name="password" type="password" autocomplete="current-password" placeholder="Enter your password" required><button class="reveal-password" type="button" data-reveal="password" aria-label="Show password">Show</button></div></div>
+        <button class="auth-submit" type="submit"><span>Sign in securely</span><span aria-hidden="true">→</span></button>
+      </form>
+      <form id="change-form" class="hidden">
+        <div class="field"><label for="new-password">New password</label><div class="field-wrap"><span aria-hidden="true">●</span><input id="new-password" name="newPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Create a secure password" required><button class="reveal-password" type="button" data-reveal="new-password" aria-label="Show new password">Show</button></div></div>
+        <div class="field"><label for="confirm-password">Confirm new password</label><div class="field-wrap"><span aria-hidden="true">●</span><input id="confirm-password" name="confirmPassword" type="password" minlength="12" autocomplete="new-password" placeholder="Repeat your new password" required></div></div>
+        <div class="password-requirements" aria-live="polite"><span id="length-check">○ At least 12 characters</span><span id="variety-check">○ Letters and a number or symbol</span><span id="match-check">○ Passwords match</span></div>
+        <button class="auth-submit" type="submit"><span>Save and continue</span><span aria-hidden="true">→</span></button>
+      </form>
+      <p class="auth-footnote"><span aria-hidden="true">◆</span> Credentials are sent only to this GideonDB node.</p>
+    </section>
+  </main>
+  <script type="module" src="/dashboard/login.js"></script>
+</body></html>

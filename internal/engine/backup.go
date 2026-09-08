@@ -28,6 +28,7 @@ type backupHeader struct {
 }
 
 const RestoredRecoveryPointFile = "BACKUP_RECOVERY_POINT.json"
+const dashboardCredentialsFile = "dashboard-credentials.json"
 
 // Backup creates a crash-consistent archive after checkpointing every shard.
 // The destination must not already exist.
@@ -117,7 +118,7 @@ func (e *Engine) backup(destination string, recoveryPoint *NodeRecoveryPoint) er
 		if err != nil {
 			return err
 		}
-		if clean := filepath.Clean(relative); clean == cluster.IdentityFile || clean == cluster.MetadataFile || clean == cluster.RaftStateFile || clean == OwnershipFile {
+		if clean := filepath.Clean(relative); clean == cluster.IdentityFile || clean == cluster.MetadataFile || clean == cluster.RaftStateFile || clean == OwnershipFile || clean == dashboardCredentialsFile {
 			return nil
 		}
 		return writeTarFile(tarWriter, filepath.ToSlash(relative), path, info)

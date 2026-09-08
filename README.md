@@ -63,15 +63,27 @@ Start the development server with:
 make run
 ```
 
-The equivalent command, including the default durability settings, is:
+Or use the repository-root launcher directly on macOS/Linux:
 
 ```bash
-go run ./cmd/gideondb \
+./run-gideondb.sh \
   -data-path ./data \
   -http-address 127.0.0.1:6333 \
   -wal-sync always \
   -checkpoint-every 1000
 ```
+
+On Windows Command Prompt, use:
+
+```bat
+run-gideondb.bat -data-path .\data -http-address 127.0.0.1:6333
+```
+
+Both launchers explicitly provision the local dashboard bootstrap as
+`admin` / `admin123` for a new data directory. The dashboard requires replacing
+that password before administrative access is granted. Existing environment
+variables override the launcher defaults, and additional arguments are passed
+through to the Go application.
 
 GideonDB listens at `http://127.0.0.1:6333` and persists its data in `./data`.
 The directory is created automatically. Check that the server is ready from a

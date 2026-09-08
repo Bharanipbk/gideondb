@@ -142,7 +142,7 @@ automated tests, and user-facing documentation are all finished.
   projects now cover navigation, responsive drawer behavior, resilience signals,
   tab-scoped API credentials, and exact destructive confirmation against an
   isolated live server. The dashboard preserves its bounded read model.
-- [ ] Add dashboard login and session authentication. Local development may
+- [x] Add dashboard login and session authentication. Local development may
   bootstrap with username `admin` and password `admin123`, but these credentials
   must never be compiled into or silently enabled in a production build.
   Production startup must require an operator-supplied secret, store only a
@@ -153,11 +153,19 @@ automated tests, and user-facing documentation are all finished.
   sign-in screen, opaque eight-hour server-side sessions, HTTP-only strict
   same-site cookies, CSRF checks on every cookie-authenticated mutation, logout
   invalidation, per-client login throttling, and sanitized request auditing.
-  The `admin` / `admin123` bootstrap is enabled only on loopback listeners;
-  non-loopback startup requires explicit `GIDEONDB_DASHBOARD_USERNAME` and
-  `GIDEONDB_DASHBOARD_PASSWORD` values. Remaining work is persistent standard
-  password hashing, mandatory first-login password replacement, session rotation,
-  secret-file/manager provisioning, and expanded browser regression coverage.
+  The `admin` / `admin123` bootstrap is now supplied only by the explicit
+  `scripts/run-local-dev.sh` workflow and is absent from the compiled server;
+  new data directories require explicit dashboard credentials. Persistent owner-only credentials now
+  contain only a 600,000-iteration salted PBKDF2-SHA-256 verifier and are
+  excluded from backup archives. Bootstrap sessions cannot use administrative
+  APIs until a new 12-character-or-longer password is persisted; replacement
+  invalidates every prior session and rotates the active cookie and CSRF token.
+  Production bootstrap now also accepts an owner-only mounted secret through
+  `GIDEONDB_DASHBOARD_PASSWORD_FILE`, suitable for container secret-manager
+  integrations without exposing the password in process arguments. Active
+  dashboard sessions renew every 15 minutes by atomically rotating both the
+  opaque cookie and CSRF token. Dedicated Go and browser regressions now cover
+  bootstrap replacement, stale-session rejection, and periodic renewal.
 - [x] Support API-key rotation without restarting and multiple principals with
   role-based authorization and tenant isolation. A secure reloadable principals
   file provides reader, writer, and admin roles; non-admin collection-prefix

@@ -3,7 +3,10 @@
 The console uses a responsive operations shell with grouped workspace and
 operations navigation, a mobile drawer, visible connection and refresh state,
 route context, keyboard focus indicators, reduced-motion support, and a skip
-link. Health summary cards distinguish catalog, record, membership, and
+link. Its self-contained presentation follows AdminLTE 4 application-shell
+conventions: a compact top navbar, graphite sidebar, Bootstrap-like type scale,
+status widgets, and restrained card containers without requiring CDN assets or
+an additional browser runtime. Health summary cards distinguish catalog, record, membership, and
 placement-epoch signals while keeping the existing bounded API read model.
 
 The Resilience workspace derives active signals from the already bounded
@@ -23,8 +26,39 @@ GideonDB embeds an experimental administration dashboard in the server binary.
 Open `/dashboard/` on a running node; for the default development address this
 is `http://127.0.0.1:6333/dashboard/`.
 
+The dashboard has its own administrator login, separate from bearer credentials
+used by API clients. For an explicit local-only bootstrap, run
+`./run-gideondb.sh` on macOS/Linux or `run-gideondb.bat` on Windows; they
+provision `admin` / `admin123` outside the
+compiled server and requires that password to be replaced before any
+administrative API can be used. The replacement must contain at least 12
+characters. New data directories otherwise require both
+`GIDEONDB_DASHBOARD_USERNAME` and `GIDEONDB_DASHBOARD_PASSWORD` when the data
+directory has no existing dashboard credential.
+
+Custom local bootstrap credentials can set the same username/password variables
+plus `GIDEONDB_DASHBOARD_BOOTSTRAP=true`. Bootstrap mode is rejected on a
+non-loopback listener. Production binaries contain no default dashboard
+credential and never silently create one.
+
+For container and secret-manager deployments, set
+`GIDEONDB_DASHBOARD_PASSWORD_FILE` to an owner-readable (`0600`) mounted secret
+instead of placing the password directly in the environment. Configure only one
+password source. The mounted secret is consumed only while creating the
+persistent verifier; subsequent starts use that verifier.
+
+Only a salted PBKDF2-SHA-256 verifier is persisted in
+`dashboard-credentials.json`; the file is owner-only and is deliberately
+excluded from data backup archives. Password replacement invalidates all old
+sessions and issues a new opaque session and CSRF token. Dashboard sessions use
+HTTP-only strict same-site cookies, and TLS listeners also mark them secure.
+An active console renews and rotates its opaque session cookie and CSRF token
+every 15 minutes without extending beyond the server's normal authentication
+checks.
+
 The current dashboard provides:
 
+- a persistent dark/light appearance switch shared by login and console views;
 - node health, runtime identity, leadership, and catalog totals;
 - collection creation, inspection, and confirmation-gated deletion;
 - cursor-based, node-local record browsing, exact-ID lookup, record insertion,
