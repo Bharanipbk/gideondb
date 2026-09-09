@@ -16,3 +16,4 @@
 .markdown a{color:var(--link)}.markdown a:hover{color:var(--link-hover)}
 .markdown code{color:var(--inline-code)}.markdown pre code{color:var(--code-text)}
 @media(max-width:720px){.sidebar{box-shadow:24px 0 70px var(--shadow)}.theme-toggle{padding:7px 9px}.theme-toggle [data-theme-label]{display:none}}
+.radix-icon{display:block;width:15px;height:15px;fill:currentColor}

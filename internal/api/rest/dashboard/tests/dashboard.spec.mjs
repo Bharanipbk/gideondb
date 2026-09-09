@@ -38,6 +38,36 @@ test("dashboard surfaces use a flat design without drop shadows", async ({ page 
   }
 });
 
+test("dashboard cards do not use grey borders", async ({ page }) => {
+  for (const selector of [".hero", ".panel", ".stats article", ".details > div"]) {
+    const card = page.locator(selector).first();
+    await expect(card).toHaveCSS("border-top-width", "0px");
+    await expect(card).toHaveCSS("border-right-width", "0px");
+    await expect(card).toHaveCSS("border-bottom-width", "0px");
+    await expect(card).toHaveCSS("border-left-width", "0px");
+  }
+});
+
+test("sidebar uses icon-led navigation with bottom utilities", async ({ page }, testInfo) => {
+  if (testInfo.project.name.startsWith("mobile")) await page.getByRole("button", { name: "Open navigation" }).click();
+  await expect(page.locator(".sidebar-menu .nav-icon")).toHaveCount(10);
+  await expect(page.getByRole("link", { name: "Documentation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Configuration/ })).toBeVisible();
+  await expect(page.locator(".connection")).toBeVisible();
+  await expect(page.locator(".sidebar-menu .nav-icon svg.radix-icon")).toHaveCount(10);
+});
+
+test("header toggle collapses and expands the desktop sidebar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name.startsWith("mobile"), "desktop sidebar behavior");
+  await expect(page.locator(".title-row > div")).not.toBeVisible();
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
+  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "72px");
+  await page.getByRole("button", { name: "Expand navigation" }).click();
+  await expect(page.locator("body")).not.toHaveClass(/sidebar-collapsed/);
+  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "250px");
+});
+
 test("logs paginate retained events", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.startsWith("mobile"), "covered once on desktop");
   await page.evaluate(() => Promise.all(Array.from({ length: 16 }, () => fetch("/v1/health"))));
@@ -85,7 +115,7 @@ test("navigation exposes operational context and resilience signals", async ({ p
 
 test("mobile navigation opens and closes without obscuring the selected view", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.name.startsWith("mobile"), "mobile-only interaction");
-  const menu = page.getByRole("button", { name: "Open navigation" });
+  const menu = page.locator("#menu-toggle");
   await expect(menu).toHaveAttribute("aria-expanded", "false");
   await menu.click();
   await expect(menu).toHaveAttribute("aria-expanded", "true");
@@ -100,6 +130,31 @@ test("API key stays tab-scoped and refresh remains operational", async ({ page }
   await page.getByRole("button", { name: "Save for session" }).click();
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("gideondb-api-key"))).toBe("browser-test-key");
   await expect(page.locator("#connection-label")).toHaveText("Connected");
+});
+
+test("data explorer has structured controls and an empty state", async ({ page }, testInfo) => {
+  if (testInfo.project.name.startsWith("mobile")) await page.locator("#menu-toggle").click();
+  await page.getByRole("button", { name: /Data explorer/ }).click();
+  await expect(page.locator(".explorer-tools")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Browse" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Insert record" })).toBeVisible();
+  await expect(page.locator(".explorer-results-summary")).toContainText("Vectors redacted");
+  await page.getByRole("button", { name: "Browse" }).click();
+  await expect(page.locator("#record-list")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "No records to display" })).toBeVisible();
+  const verticalOrder = await page.evaluate(() => [".page-action", ".explorer-tools", ".explorer-results-summary", "#record-list"].map(selector => document.querySelector(`#view-explorer > ${selector}`)?.getBoundingClientRect().top));
+  expect(verticalOrder.every((top, index) => Number.isFinite(top) && (index === 0 || top >= verticalOrder[index - 1]))).toBeTruthy();
+});
+
+test("data explorer stays hidden outside its navigation view", async ({ page }) => {
+  await expect(page.locator("#view-overview")).toBeVisible();
+  await expect(page.locator("#view-explorer")).toBeHidden();
+});
+
+test("logout invalidates the dashboard session", async ({ page }) => {
+  await page.getByRole("button", { name: "Logout" }).click();
+  await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem("gideondb-dashboard-csrf"))).toBeNull();
 });
 
 test("collection deletion requires exact typed confirmation", async ({ page }, testInfo) => {

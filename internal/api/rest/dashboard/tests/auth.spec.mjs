@@ -25,6 +25,32 @@ test("login theme switch is accessible and persistent", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", expected);
 });
 
+test("login presents a flat responsive operator workspace", async ({ page }, testInfo) => {
+  await page.goto("/dashboard/");
+  await expect(page.locator(".login-shell")).toHaveCSS("box-shadow", "none");
+  await expect(page.locator(".login-panel")).toHaveCSS("box-shadow", "none");
+  await expect(page.locator(".login-panel svg.radix-icon")).toHaveCount(7);
+  const formWidth = await page.locator("#login-form").evaluate(node => node.getBoundingClientRect().width);
+  expect(formWidth).toBeLessThanOrEqual(410);
+  if (!testInfo.project.name.startsWith("mobile")) {
+    await expect(page.getByText("Operator workspace", { exact: true })).toBeVisible();
+    await expect(page.locator(".login-capabilities li", { hasText: "Live cluster and shard health" })).toBeVisible();
+  }
+});
+
+test("login shell fills the complete viewport", async ({ page }) => {
+  await page.goto("/dashboard/");
+  const dimensions = await page.locator(".login-shell").evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return { left: box.left, width: box.width, height: box.height, viewportWidth: innerWidth, viewportHeight: innerHeight, pageWidth: document.documentElement.scrollWidth, pageHeight: document.documentElement.scrollHeight };
+  });
+  expect(dimensions.left).toBe(0);
+  expect(Math.abs(dimensions.width - dimensions.viewportWidth)).toBeLessThanOrEqual(1);
+  expect(Math.abs(dimensions.height - dimensions.viewportHeight)).toBeLessThanOrEqual(1);
+  expect(dimensions.pageWidth).toBe(dimensions.viewportWidth);
+  expect(dimensions.pageHeight).toBe(dimensions.viewportHeight);
+});
+
 test("active dashboard renews its session and CSRF token", async ({ page }) => {
   await page.goto("/dashboard/");
   await page.clock.install();

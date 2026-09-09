@@ -180,8 +180,12 @@ automated tests, and user-facing documentation are all finished.
   server certificates, client certificates, keys, and CA roots; separate node
   client flags fall back to the server pair for backward compatibility, and
   cryptographic regression tests exercise certificate and issuer rotation.
-- [ ] Document and automate certificate lifecycle and secret rotation for
-  supported deployment targets.
+- [x] Document and automate certificate lifecycle and secret rotation for
+  supported deployment targets. The Kubernetes helper validates certificate
+  expiry, issuer trust, and key matching before atomically updating the
+  projected TLS Secret. The security runbook documents leaf rotation,
+  three-stage CA overlap, per-pod verification, rollback, container-mounted
+  equivalents, and the separate bearer-principal rotation path.
 - [ ] Validate Kubernetes behavior on the intended production storage class,
   ingress/load balancer, CNI NetworkPolicy implementation, and failure domains.
 - [ ] Run repeatable workload-specific soak, backup/restore, rolling-upgrade,

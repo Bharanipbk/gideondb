@@ -42,6 +42,13 @@ against `ca.crt`. Every `/v1/internal/*` request additionally requires a
 verified client certificate. Probe and public API routes use TLS but do not
 require a client certificate; public APIs remain protected by the bearer key.
 
+Rotate mounted TLS material with `scripts/rotate-kubernetes-tls.sh`. It checks
+expiry, issuer trust, and certificate/key agreement before atomically updating
+the Secret. Leaf rotation and the required three-stage overlap for changing a
+CA are documented in the [security runbook](security.md#certificate-lifecycle-and-rotation).
+Because the StatefulSet uses a projected Secret volume rather than `subPath`,
+new handshakes adopt the updated files without restarting the pods.
+
 ## Probe semantics
 
 - Startup calls `/v1/health` for up to ten minutes, allowing WAL and segment

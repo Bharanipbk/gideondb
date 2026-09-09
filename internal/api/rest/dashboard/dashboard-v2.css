@@ -243,3 +243,56 @@ button,.actions button,button.secondary,.theme-toggle,.button-link,.button-link.
 .collection:hover{transform:none;border-color:var(--accent)}
 .nav.active{border-left:3px solid var(--accent);box-shadow:none}
 button:hover{transform:none}
+
+/* Flat, focused operator authentication layout. */
+.login-page{display:grid;place-items:center;min-height:100vh;padding:32px;background:var(--theme-content)}
+.login-page,.login-page *,.login-page *::before,.login-page *::after{box-shadow:none!important}
+.login-shell{grid-template-columns:minmax(330px,.92fr) minmax(390px,1.08fr);width:min(920px,100%);min-height:560px;border:1px solid var(--theme-border);border-radius:16px;background:var(--theme-card)}
+.login-story{padding:36px 40px;background:#222d32;color:#f4f7f8}
+.login-story::after{display:none}
+.login-story .brand{gap:11px}.login-story .brand .mark{width:36px;height:36px;border-radius:8px;background:#3c8dbc}.login-story .brand small{color:#aebbc2}
+.story-copy{margin:58px 0 36px}.story-copy .eyebrow{margin:20px 0 8px;color:#79bee5}.story-copy h2{max-width:390px;margin-bottom:14px;font-size:36px;line-height:1.12;letter-spacing:-.035em}.story-copy>p:last-of-type{max-width:380px;color:#bec9ce;font-size:14px;line-height:1.6}
+.operator-badge{display:inline-flex;padding:5px 9px;border:1px solid #526169;border-radius:999px;color:#dce5e9;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.login-capabilities{display:grid;gap:10px;margin:26px 0 0;padding:0;list-style:none;color:#dce5e9;font-size:12px}.login-capabilities li{display:flex;align-items:center;gap:10px}.login-capabilities li span{color:#79bee5;font:700 10px ui-monospace,SFMono-Regular,monospace}
+.security-note{margin-top:auto;padding:13px 0 0;border-top:1px solid #425058;border-radius:0;background:transparent}.security-note>span{border-radius:50%;background:#314149;color:#79bee5}.security-note small{color:#9eacb3}
+.login-panel{padding:48px 56px;background:var(--theme-card)}.login-panel>form,.login-panel>p,.login-panel>h1,.login-panel>.auth-step,.login-panel>.notice{width:100%;max-width:410px;margin-left:auto;margin-right:auto}.auth-step{margin-bottom:30px;padding-bottom:14px;border-bottom:1px solid var(--theme-border-soft)}.login-panel h1{margin-top:5px;font-size:31px;font-weight:600}.login-panel #auth-help{line-height:1.55}.login-panel form{gap:18px;margin-top:28px}.login-panel label{font-size:12px}.field-wrap{min-height:46px;border-radius:7px}.field-wrap input{padding:12px 10px}.auth-submit{min-height:46px;border-radius:7px}.auth-footnote{margin-top:24px;font-size:11px}.login-theme-toggle{right:20px;top:18px;border-radius:7px;background:var(--theme-card)}
+:root[data-theme="light"] .login-story{background:#e8f0f5;color:#263238}:root[data-theme="light"] .login-story .brand{color:#263238}:root[data-theme="light"] .login-story .brand small,:root[data-theme="light"] .story-copy>p:last-of-type,:root[data-theme="light"] .security-note small{color:#536772}:root[data-theme="light"] .operator-badge{border-color:#b7c8d2;color:#405762}:root[data-theme="light"] .login-capabilities{color:#334a55}:root[data-theme="light"] .security-note{border-color:#c8d5dc}:root[data-theme="light"] .security-note>span{background:#d4e4ed;color:#277da8}
+@media(max-width:760px){.login-page{padding:16px}.login-shell{max-width:520px;border-radius:12px}.login-story{padding:22px 24px}.story-copy{margin:28px 0 12px}.story-copy h2{font-size:27px}.login-capabilities{display:none}.login-panel{padding:34px 24px}.login-theme-toggle{right:12px;top:10px}.security-note{display:none}}
+@media(max-width:420px){.login-page{padding:0;align-items:stretch}.login-shell{min-height:100vh;border:0;border-radius:0}.login-story,.login-panel{border-radius:0}.login-story{padding:18px 20px}.story-copy{margin:24px 0 6px}.story-copy h2{font-size:24px}.operator-badge{display:none}.login-panel{padding:28px 20px}.login-theme-toggle [data-theme-label]{display:none}.login-theme-toggle{min-width:40px}}
+
+/* Reference-inspired sidebar: quiet surface, icon-led rows, bottom utilities. */
+.app-sidebar{width:250px;padding:0 12px 14px;border-right:1px solid var(--theme-border);background:var(--theme-sidebar);backdrop-filter:none}
+.app-main{margin-left:250px}
+.brand-link{height:58px;min-height:58px;margin:0 -12px 12px;padding:0 22px;border-bottom:0}
+.brand-link .mark{width:32px;height:32px;border-radius:8px;background:var(--accent);font-size:14px}.brand-link small{margin-top:2px;font-size:9px;letter-spacing:.07em}
+.sidebar-menu{display:flex!important;flex:1;min-height:0;flex-direction:column;gap:3px!important;overflow-y:auto;padding:0 4px}
+.nav-group{margin:18px 12px 7px;color:var(--theme-sidebar-muted);font-size:11px;font-weight:600;letter-spacing:0;text-transform:none}
+.nav{min-height:42px;padding:9px 11px;border:0;border-left:0;border-radius:7px;background:transparent;color:var(--theme-sidebar-text);font-size:13px;font-weight:500;line-height:1.2;text-decoration:none}
+.nav .nav-icon{display:inline-grid;place-items:center;min-width:22px;width:22px;height:22px;color:currentColor;font:500 19px/1 "Segoe UI Symbol","Apple Symbols",sans-serif}
+.nav:hover{background:var(--theme-sidebar-hover);color:var(--theme-sidebar-text);transform:none}.nav.active{border-left:0;background:var(--theme-sidebar-hover);color:var(--theme-text);font-weight:650}.nav.active .nav-icon{color:var(--accent)}
+.sidebar-spacer{flex:1;min-height:28px}.utility-heading{margin-top:10px}.sidebar-link{display:flex;align-items:center;gap:11px}
+.connection{min-height:58px;margin:10px 4px 0;padding:10px 11px;border:1px solid var(--theme-border);border-radius:9px;background:transparent}.connection .dot{flex:0 0 auto}.connection>span:nth-child(2){min-width:0;flex:1}.connection-menu{color:var(--theme-sidebar-muted);font-size:19px;line-height:1}
+@media(max-width:980px){.app-main{margin-left:0}.app-sidebar{width:min(290px,88vw);padding:0 12px 14px}.brand-link{margin-inline:-12px}.sidebar-menu{display:flex!important}}
+
+/* Full-page authentication shell. */
+.login-page{display:block;width:100%;height:100vh;height:100dvh;min-height:0;padding:0;overflow:hidden}
+.login-shell{grid-template-columns:minmax(360px,44%) minmax(420px,56%);width:100%;max-width:none;height:100%;min-height:0;margin:0;padding:0;border:0;border-radius:0;overflow:hidden}
+.login-story{height:100%;min-height:0;padding:clamp(32px,5vw,72px);overflow:hidden}
+.login-panel{height:100%;min-height:0;padding:clamp(40px,7vw,96px);overflow-y:auto}
+.login-theme-toggle{position:fixed;right:24px;top:20px}
+@media(max-width:760px){.login-page{display:block;padding:0}.login-shell{display:grid;grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);width:100%;max-width:none;height:100%;min-height:0;margin:0;border:0;border-radius:0}.login-story{height:auto;min-height:0;padding:20px 24px}.login-panel{height:auto;min-height:0;padding:30px 24px;overflow-y:auto}.login-story,.login-panel{border-radius:0}.story-copy{margin:20px 0 4px}.story-copy>p:last-of-type{margin-bottom:0}}
+@media(max-width:420px){.login-story{padding:16px 20px}.story-copy{margin:16px 0 2px}.story-copy h2{margin-bottom:4px;font-size:22px}.story-copy>p:last-of-type{display:none}.login-panel{padding:24px 20px}}
+
+/* Card surfaces stay flat and borderless; controls retain functional outlines. */
+.hero,.panel,.stats article,.collection,.alert-item,.chart,.details>div,.list-item,.result,.runbook-steps>div,.metric-row,.security-note,.login-shell{border:0!important}
+.collection:hover{border-color:transparent}
+
+/* Replace the visible route name with a desktop/mobile sidebar toggle. */
+.title-row>div{display:none}
+.app-header .icon-button{display:inline-grid;place-items:center;width:38px;height:38px;padding:0;background:transparent;border:1px solid var(--theme-border);color:var(--theme-text);font-size:18px}
+.app-sidebar,.app-main{transition:width .18s ease,margin-left .18s ease}
+@media(min-width:981px){body.sidebar-collapsed .app-sidebar{width:72px;padding-inline:8px}body.sidebar-collapsed .app-main{margin-left:72px}body.sidebar-collapsed .brand-link{justify-content:center;margin-inline:-8px;padding:0}body.sidebar-collapsed .brand-link>span:last-child,body.sidebar-collapsed .nav-group{display:none}body.sidebar-collapsed .nav,body.sidebar-collapsed .sidebar-link{justify-content:center;gap:0;padding-inline:8px;font-size:0}body.sidebar-collapsed .nav .nav-icon{width:24px;min-width:24px;font-size:19px}body.sidebar-collapsed .connection{justify-content:center;padding-inline:8px}body.sidebar-collapsed .connection>span:nth-child(2),body.sidebar-collapsed .connection-menu{display:none}}
+.radix-icon{display:block;width:15px;height:15px;flex:0 0 15px;fill:currentColor}.nav .nav-icon .radix-icon{width:18px;height:18px}.icon-button .radix-icon{width:18px;height:18px}.alert-symbol .radix-icon,.auth-submit .radix-icon{width:16px;height:16px}
+.password-requirements span{display:flex;align-items:center;gap:7px}.password-requirements .radix-icon{width:13px;height:13px}
+.app-header .actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:38px;padding:8px 11px}.app-header .actions .radix-icon{width:15px;height:15px}.logout-action .radix-icon{transform:rotate(180deg)}.logout-action:hover{color:var(--danger);border-color:var(--danger)}
+@media(max-width:680px){.app-header .actions button{width:38px;min-width:38px;padding:0;font-size:0}.app-header .actions button .radix-icon,.app-header .actions button [data-theme-icon]{width:16px;height:16px;font-size:16px}.app-header .actions .theme-toggle{min-width:38px}.app-header .actions [data-theme-label]{display:none}}

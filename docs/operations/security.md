@@ -68,5 +68,46 @@ Keep old and new issuers in the CA bundle during an issuer rotation.
 
 ## Current limitations
 
-Automated certificate management remains pending. Audit retention, rate limits,
-certificate reload, and separate server/client node identities are supported.
+### Certificate lifecycle and rotation
+
+Use a private CA managed outside GideonDB. Issue short-lived leaf certificates,
+monitor expiry externally, retain the private CA key outside the workload, and
+mount `ca.crt`, `tls.crt`, and `tls.key` read-only. New TLS handshakes reload all
+three files; existing connections keep their negotiated identity until they
+reconnect.
+
+For the supported Kubernetes deployment, validate and publish a replacement:
+
+```sh
+scripts/rotate-kubernetes-tls.sh \
+  --ca-bundle ./ca-bundle.pem --cert ./tls.crt --key ./tls.key --dry-run
+scripts/rotate-kubernetes-tls.sh \
+  --ca-bundle ./ca-bundle.pem --cert ./tls.crt --key ./tls.key
+```
+
+The helper rejects unreadable files, certificates expiring within 24 hours,
+untrusted leaves, and certificate/key mismatches before changing the Secret.
+Kubernetes updates projected Secret volumes asynchronously, so wait for every
+pod mount to change and verify a fresh TLS connection to each pod before
+removing old material. Do not use `subPath` mounts because they do not receive
+projected Secret updates.
+
+For a leaf-only rotation, publish the new leaf and unchanged CA bundle, verify
+each pod with a new connection, then revoke the old leaf. For an issuer change:
+
+1. Publish a bundle containing both old and new CA certificates with the old
+   leaf. Verify old-issuer traffic still succeeds.
+2. Publish the same overlap bundle with the new-issuer leaf. Verify every pod
+   accepts and presents the new identity; keep the old issuer available for
+   rollback.
+3. After all clients and peers trust the new issuer, publish the new CA alone.
+   Verify readiness and peer convergence before revoking the old issuer.
+
+Rollback by republishing the last known-good bundle, certificate, and key with
+the same helper. Copy the equivalent validated files into an atomic projected
+secret for non-Kubernetes containers. API bearer-key rotation is independent:
+use the reloadable principals file for zero-restart rotation; legacy
+`-api-key-file` changes require a controlled rolling restart.
+
+Audit retention, rate limits, certificate reload, and separate server/client
+node identities are supported.

@@ -1,4 +1,4 @@
-.PHONY: build test test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard race benchmark vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark vet fmt run docker validate-single-node validate-kubernetes
 
 DOTNET ?= dotnet
 
@@ -24,6 +24,10 @@ test:
 	$(MAKE) test-rust-sdk
 	$(MAKE) test-dotnet-sdk
 	$(MAKE) test-dashboard
+	$(MAKE) test-operations-scripts
+
+test-operations-scripts:
+	./scripts/test-rotate-kubernetes-tls.sh
 
 test-proto-contract:
 	python3 scripts/check-proto-contract.py
