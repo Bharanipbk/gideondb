@@ -1,4 +1,4 @@
-.PHONY: build test test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-e2e test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark vet fmt run docker validate-single-node validate-kubernetes
 
 DOTNET ?= dotnet
 
@@ -16,6 +16,7 @@ validate-kubernetes:
 
 test:
 	go test ./...
+	$(MAKE) test-e2e
 	$(MAKE) test-proto-contract
 	$(MAKE) test-python-sdk
 	$(MAKE) test-python-integrations
@@ -25,6 +26,9 @@ test:
 	$(MAKE) test-dotnet-sdk
 	$(MAKE) test-dashboard
 	$(MAKE) test-operations-scripts
+
+test-e2e:
+	go test -tags=e2e -count=1 ./tests/e2e
 
 test-operations-scripts:
 	./scripts/test-rotate-kubernetes-tls.sh

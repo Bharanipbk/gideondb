@@ -39,6 +39,7 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Docker](operations/docker.md)
 - [Kubernetes](operations/kubernetes.md)
 - [Future AWS ECS storage plan](operations/aws-ecs-storage-plan.md)
+- [Production deployment execution plan](operations/production-deployment-plan.md)
 - [Configuration](operations/configuration.md)
 - [Security](operations/security.md)
 - [Backup and restore](operations/backup-restore.md)

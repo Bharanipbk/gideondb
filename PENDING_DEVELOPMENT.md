@@ -6,6 +6,13 @@ automated tests, and user-facing documentation are all finished.
 
 ## High priority: release blockers
 
+- [x] **Establish a local black-box application E2E suite.** The tagged Go
+  suite builds and starts the deployable binary, exercises authenticated REST,
+  dashboard login, collection and vector lifecycle, filtered search, bounded
+  redacted scrolling, metrics, embedded documentation, graceful restart,
+  durable recovery, and deletion. `make test-e2e` runs it without Docker, AWS,
+  or external services, and CI executes it as a dedicated job.
+
 - [ ] **Run the Kubernetes gate before release.** The local gate exists at
   `scripts/kubernetes-gate.sh`, but automatic GitHub execution is intentionally
   deferred. Run `make validate-kubernetes` manually when Kubernetes validation
@@ -188,6 +195,8 @@ automated tests, and user-facing documentation are all finished.
   equivalents, and the separate bearer-principal rotation path.
 - [ ] Validate Kubernetes behavior on the intended production storage class,
   ingress/load balancer, CNI NetworkPolicy implementation, and failure domains.
+  Execute and retain evidence through the staged
+  [production deployment plan](docs/operations/production-deployment-plan.md).
 - [ ] Run repeatable workload-specific soak, backup/restore, rolling-upgrade,
   partition, repair, rebalance, and disaster-recovery drills before recommending
   production use.

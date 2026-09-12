@@ -8,6 +8,10 @@ The workflow enforces:
 
 - Go formatting, `go vet`, pinned Staticcheck, and all unit tests;
 - the race detector plus uncached REST and cluster integration suites;
+- a black-box application lifecycle that builds and starts the release binary,
+  verifies authentication, collection and vector operations, search, cursor
+  privacy, metrics, dashboard and docs availability, then restarts the process
+  and verifies durable recovery and deletion;
 - a bounded metadata-filter parser fuzz smoke test;
 - protobuf structure, additive wire compatibility, Buf lint/format, and
   generated-binding reproducibility;
@@ -29,6 +33,8 @@ kind cluster, CNI behavior, and storage lifecycle. Run it separately with:
 make validate-kubernetes
 ```
 
-Developers can reproduce most CI jobs through `make test`, `make vet`,
-`make race`, and `make test-proto-contract`. Contract-specific scripts are
-dependency-free and may be run directly from `scripts/`.
+Developers can reproduce most CI jobs through `make test`, `make test-e2e`,
+`make vet`, `make race`, and `make test-proto-contract`. The end-to-end suite
+uses only Go and the built GideonDB binary; it does not require Docker, AWS, or
+external services. Contract-specific scripts are dependency-free and may be
+run directly from `scripts/`.
