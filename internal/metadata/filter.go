@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
 )
@@ -25,6 +26,9 @@ const (
 	OpIn
 	OpNotIn
 	OpExists
+	// OpText matches string values containing every word of the operand,
+	// case-insensitively. It scans the field's values; it has no posting list.
+	OpText
 )
 
 type Kind uint8
@@ -34,6 +38,21 @@ const (
 	KindAnd
 	KindOr
 	KindNot
+	// KindGeo matches records whose latitude/longitude fields lie within a
+	// radius; Value holds a GeoRadius.
+	KindGeo
+)
+
+// GeoRadius selects points within Meters of (Lat, Lon). LatField and
+// LonField name the numeric metadata fields holding degrees.
+type GeoRadius struct {
+	LatField, LonField string
+	Lat, Lon, Meters   float64
+}
+
+const (
+	earthRadiusMeters = 6_371_008.8
+	maxTextQueryBytes = 1024
 )
 
 type Expr struct {
@@ -123,6 +142,12 @@ func Parse(raw map[string]any) (*Expr, error) {
 				logical.Children = append(logical.Children, child)
 			}
 			children = append(children, logical)
+		case "$geo_radius":
+			geo, err := parseGeoRadius(value)
+			if err != nil {
+				return nil, err
+			}
+			children = append(children, &Expr{Kind: KindGeo, Value: geo})
 		case "$not":
 			object, ok := value.(map[string]any)
 			if !ok {
@@ -181,6 +206,11 @@ func parseField(field string, value any) (*Expr, error) {
 			if _, ok := operand.(bool); !ok {
 				return nil, invalid("$exists requires a boolean")
 			}
+		} else if op == OpText {
+			text, ok := operand.(string)
+			if !ok || len(textWords(text)) == 0 || len(text) > maxTextQueryBytes {
+				return nil, invalid("$text requires a string of 1 to %d bytes with at least one word", maxTextQueryBytes)
+			}
 		} else if err := validateScalar(operand); err != nil {
 			return nil, err
 		}
@@ -212,6 +242,8 @@ func parseOperator(value string) (Operator, error) {
 		return OpNotIn, nil
 	case "$exists":
 		return OpExists, nil
+	case "$text":
+		return OpText, nil
 	default:
 		return 0, invalid("unknown field operator %q", value)
 	}
@@ -423,9 +455,123 @@ func (i *Index) Evaluate(expr *Expr) *Set {
 		return difference(i.universe, i.Evaluate(expr.Children[0]))
 	case KindPredicate:
 		return i.predicate(expr)
+	case KindGeo:
+		return i.geoRadius(expr.Value.(GeoRadius))
 	default:
 		return newSet(0)
 	}
+}
+
+// geoRadius narrows candidates with the numeric index using a bounding box,
+// then checks the great-circle distance of each.
+func (i *Index) geoRadius(geo GeoRadius) *Set {
+	deltaLat := geo.Meters / earthRadiusMeters * 180 / math.Pi
+	minLat, maxLat := geo.Lat-deltaLat, geo.Lat+deltaLat
+	candidates := intersect(i.numericRange(geo.LatField, OpGTE, minLat), i.numericRange(geo.LatField, OpLTE, maxLat))
+	// Near a pole the box spans every longitude.
+	if minLat > -90 && maxLat < 90 {
+		deltaLon := deltaLat / math.Cos(geo.Lat*math.Pi/180)
+		minLon, maxLon := geo.Lon-deltaLon, geo.Lon+deltaLon
+		var lon *Set
+		switch {
+		case deltaLon >= 180:
+			lon = clone(i.present[geo.LonField])
+		case minLon < -180:
+			lon = union(i.numericRange(geo.LonField, OpGTE, minLon+360), i.numericRange(geo.LonField, OpLTE, maxLon))
+		case maxLon > 180:
+			lon = union(i.numericRange(geo.LonField, OpGTE, minLon), i.numericRange(geo.LonField, OpLTE, maxLon-360))
+		default:
+			lon = intersect(i.numericRange(geo.LonField, OpGTE, minLon), i.numericRange(geo.LonField, OpLTE, maxLon))
+		}
+		candidates = intersect(candidates, lon)
+	}
+	result := newSet(uint64(len(i.universe.words) * 64))
+	lats, lons := i.values[geo.LatField], i.values[geo.LonField]
+	for word, bitsSet := range candidates.words {
+		for bitsSet != 0 {
+			id := uint64(word*64 + bits.TrailingZeros64(bitsSet))
+			bitsSet &= bitsSet - 1
+			lat, latOK := number(lats[id])
+			lon, lonOK := number(lons[id])
+			if latOK && lonOK && haversineMeters(geo.Lat, geo.Lon, lat, lon) <= geo.Meters {
+				result.Add(id)
+			}
+		}
+	}
+	return result
+}
+
+func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
+	toRadians := math.Pi / 180
+	dLat, dLon := (lat2-lat1)*toRadians, (lon2-lon1)*toRadians
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(lat1*toRadians)*math.Cos(lat2*toRadians)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 2 * earthRadiusMeters * math.Asin(math.Min(1, math.Sqrt(a)))
+}
+
+func parseGeoRadius(value any) (GeoRadius, error) {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return GeoRadius{}, invalid("$geo_radius requires an object")
+	}
+	geo := GeoRadius{LatField: "lat", LonField: "lon"}
+	var haveLat, haveLon, haveMeters bool
+	for key, raw := range object {
+		switch key {
+		case "lat_field", "lon_field":
+			name, ok := raw.(string)
+			if !ok || name == "" || strings.HasPrefix(name, "$") {
+				return GeoRadius{}, invalid("$geo_radius %s must be a field name", key)
+			}
+			if key == "lat_field" {
+				geo.LatField = name
+			} else {
+				geo.LonField = name
+			}
+		case "lat", "lon", "meters":
+			number, ok := number(raw)
+			if !ok {
+				return GeoRadius{}, invalid("$geo_radius %s must be a finite number", key)
+			}
+			switch key {
+			case "lat":
+				geo.Lat, haveLat = number, true
+			case "lon":
+				geo.Lon, haveLon = number, true
+			default:
+				geo.Meters, haveMeters = number, true
+			}
+		default:
+			return GeoRadius{}, invalid("unknown $geo_radius key %q", key)
+		}
+	}
+	if !haveLat || !haveLon || !haveMeters {
+		return GeoRadius{}, invalid("$geo_radius requires lat, lon and meters")
+	}
+	if geo.Lat < -90 || geo.Lat > 90 || geo.Lon < -180 || geo.Lon > 180 || geo.Meters <= 0 || geo.Meters > math.Pi*earthRadiusMeters {
+		return GeoRadius{}, invalid("$geo_radius needs lat in [-90, 90], lon in [-180, 180] and meters in (0, 20015000]")
+	}
+	return geo, nil
+}
+
+// textWords splits text into lowercase words on anything that is not a
+// letter or digit.
+func textWords(text string) []string {
+	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func containsWords(value string, words []string) bool {
+	have := make(map[string]struct{}, 16)
+	for _, word := range textWords(value) {
+		have[word] = struct{}{}
+	}
+	for _, word := range words {
+		if _, ok := have[word]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (i *Index) predicate(expr *Expr) *Set {
@@ -441,6 +587,15 @@ func (i *Index) predicate(expr *Expr) *Set {
 		return i.postingSet(expr.Field, expr.Value)
 	case OpNe:
 		return difference(i.present[expr.Field], i.postingSet(expr.Field, expr.Value))
+	case OpText:
+		words := textWords(expr.Value.(string))
+		result := newSet(uint64(len(i.universe.words) * 64))
+		for id, value := range values {
+			if text, ok := value.(string); ok && containsWords(text, words) {
+				result.Add(id)
+			}
+		}
+		return result
 	case OpIn, OpNotIn:
 		matched := newSet(uint64(len(i.universe.words) * 64))
 		for _, value := range expr.Value.([]any) {

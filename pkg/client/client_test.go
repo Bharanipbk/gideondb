@@ -141,3 +141,35 @@ func TestClientDistributedEndpointsAndValidation(t *testing.T) {
 		t.Fatalf("sparse search=%#v err=%v", search, err)
 	}
 }
+
+func TestClientOffsetAndGroups(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sdk, err := client.New("http://gideondb.test", client.Options{HTTPClient: inMemoryHTTPClient(rest.New(db, nil).Handler())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := sdk.CreateCollection(ctx, client.CollectionConfig{Name: "g", Dimension: 2, Metric: "l2", ShardCount: 1}); err != nil {
+		t.Fatal(err)
+	}
+	records := []client.Record{
+		{ID: "a", Vector: []float32{0, 0}, Metadata: map[string]any{"team": "x"}},
+		{ID: "b", Vector: []float32{1, 0}, Metadata: map[string]any{"team": "y"}},
+		{ID: "c", Vector: []float32{2, 0}, Metadata: map[string]any{"team": "x"}},
+	}
+	if _, err := sdk.BatchUpsert(ctx, "g", records); err != nil {
+		t.Fatal(err)
+	}
+	page, err := sdk.Search(ctx, "g", client.SearchOptions{Vector: []float32{0, 0}, TopK: 1, Offset: 1})
+	if err != nil || len(page) != 1 || page[0].ID != "b" {
+		t.Fatalf("offset page = %v, %v", page, err)
+	}
+	groups, err := sdk.SearchGroups(ctx, "g", client.SearchOptions{Vector: []float32{0, 0}, TopK: 2}, client.GroupOptions{Field: "team", Size: 2})
+	if err != nil || len(groups) != 2 || groups[0].Value != "x" || len(groups[0].Hits) != 2 {
+		t.Fatalf("groups = %+v, %v", groups, err)
+	}
+}

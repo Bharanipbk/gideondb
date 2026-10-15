@@ -104,6 +104,21 @@ type SearchOptions struct {
 	Namespace    string
 	Filter       map[string]any
 	AllowPartial bool
+	// Offset skips that many results (or groups) for score pagination.
+	Offset int
+}
+
+// GroupOptions groups search hits by a metadata field.
+type GroupOptions struct {
+	Field string
+	// Size is the maximum hits per group (default 1).
+	Size int
+}
+
+// SearchGroup is one metadata value and its best hits.
+type SearchGroup struct {
+	Value any            `json:"value"`
+	Hits  []SearchResult `json:"hits"`
 }
 
 type SearchResult struct {
@@ -265,6 +280,21 @@ func (c *Client) Search(ctx context.Context, collection string, options SearchOp
 	return response.Results, err
 }
 
+// SearchGroups returns up to options.TopK groups of hits sharing a value of
+// group.Field, ordered by each group's best hit.
+func (c *Client) SearchGroups(ctx context.Context, collection string, options SearchOptions, group GroupOptions) ([]SearchGroup, error) {
+	var response struct {
+		Groups []SearchGroup `json:"groups"`
+	}
+	body := searchBody(options, false)
+	body["group_by"] = group.Field
+	if group.Size != 0 {
+		body["group_size"] = group.Size
+	}
+	err := c.do(ctx, http.MethodPost, collectionPath(collection)+"/search", body, &response)
+	return response.Groups, err
+}
+
 func (c *Client) DistributedSearch(ctx context.Context, collection string, options SearchOptions) (DistributedSearchResponse, error) {
 	var response DistributedSearchResponse
 	err := c.do(ctx, http.MethodPost, clusterCollectionPath(collection)+"/search", searchBody(options, true), &response)
@@ -309,6 +339,9 @@ func searchBody(options SearchOptions, distributed bool) map[string]any {
 	}
 	if options.Filter != nil {
 		body["filter"] = options.Filter
+	}
+	if options.Offset != 0 {
+		body["offset"] = options.Offset
 	}
 	if distributed && options.AllowPartial {
 		body["allow_partial"] = true

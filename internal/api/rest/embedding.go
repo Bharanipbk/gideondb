@@ -118,7 +118,8 @@ func (s *Server) resolveQuery(ctx context.Context, w http.ResponseWriter, collec
 		writeEmbeddingError(w, err)
 		return false
 	}
-	request.Vector = vectors[0]
+	// Shards receive the vector only.
+	request.Vector, request.Text = vectors[0], ""
 	return true
 }
 

@@ -56,6 +56,11 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 	// The shard fan-out deadline starts after embedding.
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
+	shape, err := request.takeShape()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	filter, err := metadata.Parse(request.Filter)
 	if err != nil {
 		writeError(w, err)
@@ -152,7 +157,8 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "distributed_search_failed", "message": "one or more shard searches failed", "failures": failures, "metadata_epoch": epoch})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": mergeDistributedTopK(allResults, request.TopK), "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
+	key, shaped := shape.apply(mergeDistributedTopK(allResults, request.TopK))
+	writeJSON(w, http.StatusOK, map[string]any{key: shaped, "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
 }
 
 func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, request searchRequest, traceparent string) ([]core.SearchResult, error) {

@@ -17,7 +17,8 @@ ANDed:
 ```
 
 Supported field operators are `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`,
-`$in`, `$nin`, and `$exists`. Logical operators are `$and`, `$or`, and `$not`:
+`$in`, `$nin`, `$exists`, and `$text`. `$geo_radius` filters by location.
+Logical operators are `$and`, `$or`, and `$not`:
 
 ```json
 {
@@ -32,6 +33,38 @@ Supported field operators are `$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`,
 missing fields should also match. Range comparison supports finite numeric
 values and strings of the same type. Equality normalizes JSON numeric types so
 `2024` and `2024.0` address the same posting.
+
+## Word matching
+
+`$text` matches string fields that contain every word of the query, ignoring
+case and punctuation. It matches whole words: `"data"` does not match
+`"database"`.
+
+```json
+{"title": {"$text": "vector databases"}}
+```
+
+`$text` scans the values of one field rather than using a posting list, so it
+costs time proportional to the records that have that field. Combine it with
+selective filters on large collections. For ranked keyword search, use
+[sparse and hybrid retrieval](sparse-hybrid.md).
+
+## Geo radius
+
+`$geo_radius` matches records within a great-circle distance of a point.
+Store latitude and longitude in degrees as two numeric metadata fields,
+`lat` and `lon` by default:
+
+```json
+{
+  "$geo_radius": {"lat": 48.8566, "lon": 2.3522, "meters": 25000}
+}
+```
+
+Use `lat_field` and `lon_field` to name other fields. The numeric index
+narrows candidates to a bounding box, which handles the antimeridian and the
+poles, and each candidate is then checked exactly. Records missing either
+field never match.
 
 ## Execution
 
@@ -82,3 +115,26 @@ lock. Background merge scheduling remains planned with multi-segment storage.
 
 See the [metadata benchmark](../benchmarks/metadata-filtering.md) for the first
 before/after allocation evidence.
+
+## Pagination and grouping
+
+Search also accepts:
+
+| Field | Meaning |
+|---|---|
+| `offset` | Skip this many results (or groups); `offset + top_k` is at most 10,000 |
+| `group_by` | Group hits by this metadata field; the response has `groups` instead of `results` |
+| `group_size` | Hits per group, 1–100 (default 1) |
+
+```json
+{"vector": [0.1, 0.2, 0.3], "top_k": 5, "group_by": "author", "group_size": 2}
+```
+
+```json
+{"groups": [{"value": "ana", "hits": [{"id": "p7", "score": 0.93}, {"id": "p2", "score": 0.88}]}]}
+```
+
+Groups are ordered by their best hit and formed from the best
+`(offset + top_k) × group_size × 4` candidates, so rare groups far down the
+ranking may be missing. Records without the field are left out. Both options
+work on single-node and `/v1/cluster/collections/{name}/search` requests.

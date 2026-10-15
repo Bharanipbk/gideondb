@@ -771,6 +771,9 @@ type searchRequest struct {
 	Text string `json:"text,omitempty"`
 	// Fusion is "weighted" (default) or "rrf".
 	Fusion core.FusionMode `json:"fusion,omitempty"`
+	Offset       int                `json:"offset,omitempty"`
+	GroupBy      string             `json:"group_by,omitempty"`
+	GroupSize    int                `json:"group_size,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {
@@ -851,6 +854,11 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if !s.resolveQuery(r.Context(), w, r.PathValue("name"), &request) {
 		return
 	}
+	shape, err := request.takeShape()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	filter, err := metadata.Parse(request.Filter)
 	if err != nil {
 		writeError(w, err)
@@ -866,7 +874,8 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results})
+	key, shaped := shape.apply(results)
+	writeJSON(w, http.StatusOK, map[string]any{key: shaped})
 }
 
 func (s *Server) rejectStandaloneDataPath(w http.ResponseWriter) bool {

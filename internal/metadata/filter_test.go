@@ -2,7 +2,9 @@ package metadata
 
 import (
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
@@ -201,6 +203,105 @@ func BenchmarkNumericIndexBuild100K(b *testing.B) {
 		index := NewIndex()
 		for id := uint64(1); id <= 100_000; id++ {
 			index.Upsert(id, map[string]any{"score": int(id)})
+		}
+	}
+}
+
+func evaluateIDs(t *testing.T, index *Index, raw map[string]any) []uint64 {
+	t.Helper()
+	expr, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("parse %v: %v", raw, err)
+	}
+	set := index.Evaluate(expr)
+	var ids []uint64
+	for id := uint64(0); id < uint64(len(set.words)*64); id++ {
+		if set.Contains(id) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+func TestTextOperator(t *testing.T) {
+	index := NewIndex()
+	index.Upsert(1, map[string]any{"title": "Vector Databases, explained!"})
+	index.Upsert(2, map[string]any{"title": "Relational databases"})
+	index.Upsert(3, map[string]any{"title": 42})
+	index.Upsert(4, map[string]any{"body": "vector"})
+	cases := map[string][]uint64{
+		"databases":        {1, 2},
+		"VECTOR databases": {1},
+		"vector graph":     nil,
+		"explained":        {1},
+		"data":             nil, // whole words only
+	}
+	for query, want := range cases {
+		got := evaluateIDs(t, index, map[string]any{"title": map[string]any{"$text": query}})
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Fatalf("$text %q = %v, want %v", query, got, want)
+		}
+	}
+	if got := evaluateIDs(t, index, map[string]any{"$not": map[string]any{"title": map[string]any{"$text": "vector"}}}); fmt.Sprint(got) != "[2 3 4]" {
+		t.Fatalf("$not $text = %v", got)
+	}
+	for _, bad := range []any{"", "  ,, ", 7, strings.Repeat("a", maxTextQueryBytes+1)} {
+		if _, err := Parse(map[string]any{"title": map[string]any{"$text": bad}}); err == nil {
+			t.Fatalf("$text %v should be rejected", bad)
+		}
+	}
+}
+
+func TestGeoRadiusOperator(t *testing.T) {
+	index := NewIndex()
+	points := map[uint64][2]float64{
+		1: {48.8566, 2.3522},  // Paris
+		2: {48.8049, 2.1204},  // Versailles, ~19 km from Paris
+		3: {51.5074, -0.1278}, // London, ~344 km
+		4: {-16.5, 179.9},     // Fiji side of the antimeridian
+		5: {-16.5, -179.9},    // ~21 km away across it
+		6: {89.99, 10},        // near the north pole
+		7: {89.99, -170},      // other side of the pole, ~2.2 km away
+	}
+	for id, point := range points {
+		index.Upsert(id, map[string]any{"lat": point[0], "lon": point[1]})
+	}
+	index.Upsert(8, map[string]any{"lat": 48.8566}) // missing lon
+	index.Upsert(9, map[string]any{"y": 48.8566, "x": 2.3522})
+	geo := func(lat, lon, meters float64, extra ...string) map[string]any {
+		spec := map[string]any{"lat": lat, "lon": lon, "meters": meters}
+		if len(extra) == 2 {
+			spec["lat_field"], spec["lon_field"] = extra[0], extra[1]
+		}
+		return map[string]any{"$geo_radius": spec}
+	}
+	cases := []struct {
+		filter map[string]any
+		want   string
+	}{
+		{geo(48.8566, 2.3522, 1000), "[1]"},
+		{geo(48.8566, 2.3522, 25_000), "[1 2]"},
+		{geo(48.8566, 2.3522, 400_000), "[1 2 3]"},
+		{geo(-16.5, 179.95, 30_000), "[4 5]"},
+		{geo(89.99, 10, 5_000), "[6 7]"},
+		{geo(48.8566, 2.3522, 1000, "y", "x"), "[9]"},
+		{map[string]any{"$and": []any{geo(48.8566, 2.3522, 25_000), map[string]any{"lat": map[string]any{"$gt": 48.83}}}}, "[1]"},
+	}
+	for _, c := range cases {
+		if got := fmt.Sprint(evaluateIDs(t, index, c.filter)); got != c.want {
+			t.Fatalf("%v = %s, want %s", c.filter, got, c.want)
+		}
+	}
+	for _, bad := range []any{
+		"x",
+		map[string]any{"lat": 1, "lon": 2},
+		map[string]any{"lat": 91, "lon": 0, "meters": 1},
+		map[string]any{"lat": 0, "lon": 0, "meters": -1},
+		map[string]any{"lat": 0, "lon": 0, "meters": 1, "radius": 2},
+		map[string]any{"lat": 0, "lon": 0, "meters": 1, "lat_field": ""},
+	} {
+		if _, err := Parse(map[string]any{"$geo_radius": bad}); err == nil {
+			t.Fatalf("$geo_radius %v should be rejected", bad)
 		}
 	}
 }
