@@ -4,6 +4,7 @@ package hnsw
 
 import (
 	"fmt"
+	"math"
 	"math/bits"
 	"sort"
 	"sync"
@@ -77,7 +78,7 @@ func (h *Index) Upsert(id uint64, vector []float32) error {
 
 func (h *Index) insertLocked(id uint64, vector []float32) error {
 	querySquaredNorm := h.querySquaredNorm(vector)
-	level := deterministicLevel(id)
+	level := deterministicLevel(id, h.m)
 	ordinal := len(h.nodes)
 	h.vectors = append(h.vectors, vector...)
 	h.nodes = append(h.nodes, node{id: id, level: level, neighbors: make([][]int, level+1)})
@@ -96,7 +97,7 @@ func (h *Index) insertLocked(id uint64, vector []float32) error {
 	for layer := min(level, h.maxLevel); layer >= 0; layer-- {
 		generation := h.nextConstructionGenerationLocked()
 		candidates := h.searchLayerLocked(vector, querySquaredNorm, []int{entry}, h.efConstruction, layer, -1, nil, h.constructionVisited, generation, nil)
-		selected := h.selectBestLocked(vector, candidates, h.m)
+		selected := h.selectNeighborsLocked(candidates, h.m)
 		h.nodes[ordinal].neighbors[layer] = append(h.nodes[ordinal].neighbors[layer], selected...)
 		for _, neighbor := range selected {
 			h.nodes[neighbor].neighbors[layer] = append(h.nodes[neighbor].neighbors[layer], ordinal)
@@ -327,31 +328,74 @@ func (h *Index) searchLayerLocked(query []float32, querySquaredNorm float32, ent
 	return result
 }
 
-func (h *Index) selectBestLocked(query []float32, candidates []scoredOrdinal, limit int) []int {
-	if len(candidates) > limit {
-		candidates = candidates[:limit]
+// maxNeighbors follows the HNSW paper: the base layer holds 2*M links so the
+// densest layer keeps enough edges to bridge between clusters.
+func (h *Index) maxNeighbors(layer int) int {
+	if layer == 0 {
+		return 2 * h.m
 	}
-	result := make([]int, 0, len(candidates))
+	return h.m
+}
+
+// selectNeighborsLocked implements the HNSW neighbour-selection heuristic
+// (Malkov & Yashunin, Algorithm 4) with keepPrunedConnections. candidates must
+// be sorted best first by similarity to the base vector. A candidate is kept
+// only when it is closer to the base than to every neighbour already kept, so
+// links fan out in different directions instead of all pointing into the same
+// dense cluster. That diversity is what keeps clustered data navigable. Pruned
+// candidates then fill any remaining slots, closest first.
+func (h *Index) selectNeighborsLocked(candidates []scoredOrdinal, limit int) []int {
+	result := make([]int, 0, limit)
+	var pruned []int
 	for _, candidate := range candidates {
-		if !h.nodes[candidate.ordinal].deleted {
-			result = append(result, candidate.ordinal)
+		if len(result) == limit {
+			break
 		}
+		if h.nodes[candidate.ordinal].deleted {
+			continue
+		}
+		vector := h.vectorAt(candidate.ordinal)
+		norm := h.querySquaredNorm(vector)
+		diverse := true
+		for _, kept := range result {
+			if h.scoreLocked(vector, norm, kept) > candidate.score {
+				diverse = false
+				break
+			}
+		}
+		if diverse {
+			result = append(result, candidate.ordinal)
+		} else {
+			pruned = append(pruned, candidate.ordinal)
+		}
+	}
+	for _, ordinal := range pruned {
+		if len(result) == limit {
+			break
+		}
+		result = append(result, ordinal)
 	}
 	return result
 }
 
+// pruneLocked shrinks an overflowing neighbour list with the same heuristic
+// used at insertion, so reverse links do not erase a node's long-range edges.
 func (h *Index) pruneLocked(ordinal, layer int) {
 	neighbors := h.nodes[ordinal].neighbors[layer]
-	if len(neighbors) <= h.m {
+	limit := h.maxNeighbors(layer)
+	if len(neighbors) <= limit {
 		return
 	}
 	query := h.vectorAt(ordinal)
 	querySquaredNorm := h.querySquaredNorm(query)
-	sort.Slice(neighbors, func(i, j int) bool {
-		a, b := h.scoreLocked(query, querySquaredNorm, neighbors[i]), h.scoreLocked(query, querySquaredNorm, neighbors[j])
-		return a > b || (a == b && h.nodes[neighbors[i]].id < h.nodes[neighbors[j]].id)
+	scored := make([]scoredOrdinal, len(neighbors))
+	for i, neighbor := range neighbors {
+		scored[i] = scoredOrdinal{ordinal: neighbor, score: h.scoreLocked(query, querySquaredNorm, neighbor)}
+	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score || (scored[i].score == scored[j].score && h.nodes[scored[i].ordinal].id < h.nodes[scored[j].ordinal].id)
 	})
-	h.nodes[ordinal].neighbors[layer] = neighbors[:h.m]
+	h.nodes[ordinal].neighbors[layer] = append(neighbors[:0], h.selectNeighborsLocked(scored, limit)...)
 }
 
 func (h *Index) rebuildLocked() {
@@ -411,14 +455,17 @@ func (h *Index) neighborsAt(ordinal, layer int) []int {
 	return h.nodes[ordinal].neighbors[layer]
 }
 
-// deterministicLevel approximates a geometric distribution with p=1/2 and
-// makes graph construction reproducible for tests and persisted rebuilds.
-func deterministicLevel(id uint64) int {
+// deterministicLevel draws from the HNSW level distribution with
+// mL = 1/ln(M) and makes graph construction reproducible for tests and
+// persisted rebuilds. Levels are stored in the persisted graph, so changing
+// this function does not affect graphs that were already written.
+func deterministicLevel(id uint64, m int) int {
 	x := id + 0x9e3779b97f4a7c15
 	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
 	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
 	x ^= x >> 31
-	return min(bits.TrailingZeros64(x), 32)
+	uniform := (float64(x>>11) + 0.5) / (1 << 53)
+	return min(int(-math.Log(uniform)/math.Log(float64(m))), 32)
 }
 
 type scoredOrdinal struct {

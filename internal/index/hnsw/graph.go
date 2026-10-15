@@ -12,6 +12,10 @@ import (
 
 const graphHeaderSize = 64
 
+// graphVersion 2 allows 2*M neighbours on the base layer (HNSW paper Mmax0).
+// Version 1 graphs, written before neighbour-selection heuristics, still load.
+const graphVersion = 2
+
 var graphMagic = [4]byte{'G', 'H', 'S', 'W'}
 var graphCRCTable = crc32.MakeTable(crc32.Castagnoli)
 
@@ -33,7 +37,7 @@ func (h *Index) MarshalGraph() ([]byte, error) {
 	}
 	data := make([]byte, graphHeaderSize+int(payloadSize))
 	copy(data[:4], graphMagic[:])
-	binary.LittleEndian.PutUint16(data[4:6], 1)
+	binary.LittleEndian.PutUint16(data[4:6], graphVersion)
 	binary.LittleEndian.PutUint32(data[8:12], uint32(h.dimension))
 	binary.LittleEndian.PutUint32(data[12:16], uint32(h.m))
 	binary.LittleEndian.PutUint32(data[16:20], uint32(h.efConstruction))
@@ -70,7 +74,8 @@ func LoadGraph(cfg index.Config, ids []uint64, vectors [][]float32, data []byte)
 	if len(data) < graphHeaderSize || string(data[:4]) != string(graphMagic[:]) {
 		return nil, fmt.Errorf("invalid hnsw graph magic")
 	}
-	if binary.LittleEndian.Uint16(data[4:6]) != 1 || binary.LittleEndian.Uint16(data[6:8]) != 0 ||
+	version := binary.LittleEndian.Uint16(data[4:6])
+	if (version != 1 && version != graphVersion) || binary.LittleEndian.Uint16(data[6:8]) != 0 ||
 		binary.LittleEndian.Uint32(data[60:64]) != 0 {
 		return nil, fmt.Errorf("unsupported hnsw graph version or reserved fields")
 	}
@@ -119,7 +124,7 @@ func LoadGraph(cfg index.Config, ids []uint64, vectors [][]float32, data []byte)
 			}
 			neighborCount := int(binary.LittleEndian.Uint32(data[offset : offset+4]))
 			offset += 4
-			if neighborCount > cfg.M || neighborCount > (len(data)-offset)/4 {
+			if neighborCount > maxLoadedNeighbors(version, layer, cfg.M) || neighborCount > (len(data)-offset)/4 {
 				return nil, fmt.Errorf("invalid hnsw neighbor count")
 			}
 			offsets[layer] = len(h.packedNeighbors)
@@ -169,4 +174,11 @@ func metricCode(metric core.Metric) byte {
 	default:
 		return math.MaxUint8
 	}
+}
+
+func maxLoadedNeighbors(version uint16, layer, m int) int {
+	if version >= 2 && layer == 0 {
+		return 2 * m
+	}
+	return m
 }

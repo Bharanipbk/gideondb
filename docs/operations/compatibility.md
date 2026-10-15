@@ -27,7 +27,7 @@ data directory.
 | WAL | version 1 | version 1 | Unknown versions fail closed |
 | Checkpoint manifest | format 3 | formats 1–3 | Formats 1 and 2 migrate through normal checkpoint publication |
 | Record/vector/tombstone columns | version 1 | version 1 | Checksummed little-endian envelope |
-| HNSW graph | version 1 | version 1 or absent | A missing legacy graph is rebuilt |
+| HNSW graph | version 2 | versions 1–2 or absent | A missing legacy graph is rebuilt; version 2 allows 2×M base-layer links, so older binaries reject it |
 | Metadata filter index | version 1 | version 1 or absent | A missing legacy index is rebuilt |
 | Catalog | format 1 | format 1 | Unknown format fails startup |
 | Idempotency ledger | format 1 | format 1 | Unknown or corrupt entries fail startup |
