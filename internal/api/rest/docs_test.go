@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -69,7 +70,7 @@ func TestDocumentationWebsite(t *testing.T) {
 
 	content := httptest.NewRecorder()
 	handler.ServeHTTP(content, httptest.NewRequest(http.MethodGet, "/docs/_content/getting-started/quickstart.md", nil))
-	if content.Code != http.StatusOK || !strings.Contains(content.Body.String(), "# Phase 1 quickstart") {
+	if content.Code != http.StatusOK || !strings.Contains(content.Body.String(), "# Five-minute quickstart") {
 		t.Fatalf("content status=%d body=%q", content.Code, content.Body.String())
 	}
 
@@ -84,4 +85,47 @@ func TestDocumentationWebsite(t *testing.T) {
 	if internal.Code != http.StatusNotFound {
 		t.Fatalf("internal document status=%d", internal.Code)
 	}
+}
+
+func TestDocumentationFullTextSearch(t *testing.T) {
+	search := func(query string) []docsIndexEntry {
+		t.Helper()
+		response := httptest.NewRecorder()
+		docsTestHandler(t).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/docs/_index?q="+url.QueryEscape(query), nil))
+		var index struct {
+			Documents []docsIndexEntry `json:"documents"`
+		}
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &index) != nil {
+			t.Fatalf("search %q status=%d body=%s", query, response.Code, response.Body.String())
+		}
+		return index.Documents
+	}
+	results := search("ef_search recall")
+	if len(results) == 0 || len(results) > maxDocsSearchResults {
+		t.Fatalf("results = %d", len(results))
+	}
+	for _, result := range results {
+		if !publicDocument(result.Path) || result.Snippet == "" {
+			t.Fatalf("bad result %+v", result)
+		}
+	}
+	if got := search("zzqqxx-no-such-word"); len(got) != 0 {
+		t.Fatalf("nonsense query matched %v", got)
+	}
+	if got := search("rebalance"); len(got) == 0 || !strings.Contains(strings.ToLower(got[0].Title+got[0].Snippet), "rebalanc") {
+		t.Fatalf("rebalance results = %v", got)
+	}
+	if got := search(strings.Repeat("a", 5000)); len(got) != 0 {
+		t.Fatalf("oversized query matched %d documents", len(got))
+	}
+}
+
+func docsTestHandler(t *testing.T) http.Handler {
+	t.Helper()
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return New(db, nil).Handler()
 }

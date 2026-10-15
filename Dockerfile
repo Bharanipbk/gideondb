@@ -1,20 +1,27 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd ./cmd
 COPY docs ./docs
+COPY gen ./gen
 COPY internal ./internal
+COPY pkg ./pkg
 ARG VERSION=dev
 ARG COMMIT=unknown
 ARG BUILD_DATE=unknown
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${BUILD_DATE}" \
     -o /out/gideondb ./cmd/gideondb
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags="-s -w -X main.version=${VERSION}" \
+    -o /out/gideondb-mcp ./cmd/gideondb-mcp
 RUN mkdir -p /out/data && chown 65532:65532 /out/data
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --chown=65532:65532 --from=build /out/gideondb /usr/local/bin/gideondb
+COPY --chown=65532:65532 --from=build /out/gideondb-mcp /usr/local/bin/gideondb-mcp
 COPY --chown=65532:65532 --from=build /out/data /var/lib/gideondb
 VOLUME ["/var/lib/gideondb"]
 EXPOSE 6333

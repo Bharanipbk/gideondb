@@ -31,6 +31,13 @@ roadmap](docs/roadmap.md).
 
 For evaluation or rollout, follow the staged [adoption guide](docs/getting-started/adoption.md).
 
+## Quickstart
+
+Try GideonDB in five minutes with the [quickstart](docs/getting-started/quickstart.md):
+start a local server, create a collection, insert vectors and run a filtered
+search with `curl`. To give an AI agent search and long-term memory, run the
+[MCP server](docs/integrations/mcp.md).
+
 ## Project status
 
 Pre-alpha. The core supports float32 vectors; cosine, dot-product and L2

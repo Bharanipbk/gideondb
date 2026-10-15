@@ -12,6 +12,7 @@
 - [ ] `go test ./...`
 - [ ] `go vet ./...`
 - [ ] Documentation and pending checklist updated
+- [ ] `CHANGELOG.md` updated under `## Unreleased` (or not user-visible)
 - [ ] Commits include `Signed-off-by` lines (DCO 1.1)
 
 ## Operational notes

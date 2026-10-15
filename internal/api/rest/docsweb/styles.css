@@ -17,3 +17,4 @@
 .markdown code{color:var(--inline-code)}.markdown pre code{color:var(--code-text)}
 @media(max-width:720px){.sidebar{box-shadow:24px 0 70px var(--shadow)}.theme-toggle{padding:7px 9px}.theme-toggle [data-theme-label]{display:none}}
 .radix-icon{display:block;width:15px;height:15px;fill:currentColor}
+.search-hit{display:flex;flex-direction:column;gap:3px}.search-hit-title{color:var(--text);font-weight:600}.search-hit-snippet{color:var(--muted);font-size:.8rem;line-height:1.4;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}

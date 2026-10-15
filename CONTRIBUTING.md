@@ -31,11 +31,28 @@ Changes affecting concurrency, persistence, replication, or unsafe memory use
 should also run `make race`. Kubernetes changes must pass
 `make validate-kubernetes` in an environment with Docker, kubectl, and kind.
 
+## Finding something to work on
+
+- Issues labelled
+  [`good first issue`](https://github.com/Bharanipbk/gideondb/labels/good%20first%20issue)
+  are small, well-scoped and have pointers to the code involved.
+- [`help wanted`](https://github.com/Bharanipbk/gideondb/labels/help%20wanted)
+  issues are larger but have an agreed design.
+- Ask questions and propose ideas in
+  [GitHub Discussions](https://github.com/Bharanipbk/gideondb/discussions)
+  before starting anything that changes an API or a persisted format.
+
+Triage labels: `good first issue`, `help wanted`, `bug`, `enhancement`,
+`documentation`, `performance`, `area/index`, `area/storage`, `area/cluster`,
+`area/api`, `area/sdk`, `needs-design` and `breaking-change`.
+
 ## Pull requests
 
 Explain the problem, the chosen behavior, compatibility and security impact,
 and validation performed. Avoid unrelated formatting or generated-file churn.
-Generated protobuf bindings must match their source schema.
+Generated protobuf bindings must match their source schema. Add a user-facing
+line under `## Unreleased` in `CHANGELOG.md` for any behaviour change; see
+[releasing](docs/development/releasing.md).
 
 Maintainers may request changes or close work that conflicts with the published
 architecture, security model, compatibility policy, or project scope. Reviews

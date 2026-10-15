@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	documents "github.com/Bharanipbk/gideondb/docs"
 )
@@ -19,7 +20,16 @@ type docsIndexEntry struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Section string `json:"section"`
+	// Snippet and score are set only for full-text search results.
+	Snippet string `json:"snippet,omitempty"`
+	score   int
 }
+
+const (
+	maxDocsSearchResults = 20
+	maxDocsQueryBytes    = 200
+	docsSnippetRadius    = 90
+)
 
 func (s *Server) docsWeb(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/docs" {
@@ -45,7 +55,16 @@ func (s *Server) docsWeb(w http.ResponseWriter, r *http.Request) {
 	http.FileServer(http.FS(assets)).ServeHTTP(w, clone)
 }
 
-func (s *Server) docsIndex(w http.ResponseWriter, _ *http.Request) {
+// docsIndex lists public documents, or with ?q= returns full-text matches:
+// every query word must appear, title hits weigh more, and each result carries
+// a short snippet around the first match.
+func (s *Server) docsIndex(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query().Get("q")
+	if len(query) > maxDocsQueryBytes {
+		query = query[:maxDocsQueryBytes]
+	}
+	terms := docsSearchTerms(query)
+	searching := strings.TrimSpace(query) != ""
 	entries := make([]docsIndexEntry, 0, 64)
 	_ = fs.WalkDir(documents.Files, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() || !publicDocument(name) {
@@ -59,9 +78,30 @@ func (s *Server) docsIndex(w http.ResponseWriter, _ *http.Request) {
 		if directory := path.Dir(name); directory != "." {
 			section = documentationSection(strings.Split(directory, "/")[0])
 		}
-		entries = append(entries, docsIndexEntry{Path: name, Title: markdownTitle(string(data), name), Section: section})
+		item := docsIndexEntry{Path: name, Title: markdownTitle(string(data), name), Section: section}
+		if searching {
+			var ok bool
+			if item.score, item.Snippet, ok = docsMatch(item.Title, string(data), terms); !ok {
+				return nil
+			}
+		}
+		entries = append(entries, item)
 		return nil
 	})
+	if searching {
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].score != entries[j].score {
+				return entries[i].score > entries[j].score
+			}
+			return entries[i].Path < entries[j].Path
+		})
+		if len(entries) > maxDocsSearchResults {
+			entries = entries[:maxDocsSearchResults]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"documents": entries})
+		return
+	}
 	sort.Slice(entries, func(i, j int) bool {
 		leftSection, rightSection := documentationSectionOrder(entries[i].Section), documentationSectionOrder(entries[j].Section)
 		if leftSection == rightSection {
@@ -202,4 +242,53 @@ func titleCase(value string) string {
 		}
 	}
 	return strings.Join(words, " ")
+}
+
+func docsSearchTerms(query string) []string {
+	var terms []string
+	for _, field := range strings.Fields(strings.ToLower(query)) {
+		field = strings.Trim(field, `"'.,;:!?()[]{}`)
+		if len(field) >= 2 {
+			terms = append(terms, field)
+		}
+		if len(terms) == 8 {
+			break
+		}
+	}
+	return terms
+}
+
+// docsMatch scores content against terms. Every term must appear; title
+// occurrences count five times. It returns a snippet around the first hit
+// of the first term in the body.
+func docsMatch(title, content string, terms []string) (int, string, bool) {
+	if len(terms) == 0 {
+		return 0, "", false
+	}
+	lowerTitle, lowerContent := strings.ToLower(title), strings.ToLower(content)
+	score := 0
+	for _, term := range terms {
+		inTitle, inBody := strings.Count(lowerTitle, term), strings.Count(lowerContent, term)
+		if inTitle+inBody == 0 {
+			return 0, "", false
+		}
+		score += inTitle*5 + min(inBody, 20)
+	}
+	position := strings.Index(lowerContent, terms[0])
+	start, end := max(0, position-docsSnippetRadius), min(len(content), position+len(terms[0])+docsSnippetRadius)
+	// Avoid cutting a multi-byte character in half at either end.
+	for start > 0 && !utf8.RuneStart(content[start]) {
+		start--
+	}
+	for end < len(content) && !utf8.RuneStart(content[end]) {
+		end++
+	}
+	snippet := strings.Join(strings.Fields(strings.NewReplacer("#", "", "`", "", "*", "", "|", " ").Replace(content[start:end])), " ")
+	if start > 0 {
+		snippet = "…" + snippet
+	}
+	if end < len(content) {
+		snippet += "…"
+	}
+	return score, snippet, true
 }
