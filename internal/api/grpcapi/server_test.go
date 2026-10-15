@@ -313,7 +313,7 @@ func TestServerLifecycleAndGuards(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	restoredResponse, err := restore.CloseAndRecv()
+	_, err = restore.CloseAndRecv()
 	if err == nil {
 		t.Fatal("restore without eof unexpectedly succeeded")
 	}
@@ -332,7 +332,7 @@ func TestServerLifecycleAndGuards(t *testing.T) {
 	if err := restore.Send(&v1.RestoreRequest{OperationId: operationID, Offset: uint64(len(archiveBytes)), ArchiveSha256: restoreHash[:], Eof: true}); err != nil {
 		t.Fatal(err)
 	}
-	restoredResponse, err = restore.CloseAndRecv()
+	restoredResponse, err := restore.CloseAndRecv()
 	if err != nil {
 		t.Fatalf("restore streamed snapshot: %v", err)
 	}
