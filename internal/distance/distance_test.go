@@ -117,3 +117,15 @@ func BenchmarkCosinePrepared768(b *testing.B) {
 		_, _ = ScoreWithQuerySquaredNorm(core.MetricCosine, a, norm, c)
 	}
 }
+
+func TestCosineWithSquaredNormsMatchesScore(t *testing.T) {
+	query := []float32{0.3, -1.2, 2.5, 0.01, 7, -3.3, 0.9}
+	vector := []float32{1.1, 0.4, -2.2, 5, 0.5, 0.25, -0.75}
+	want, _ := ScoreWithQuerySquaredNorm(core.MetricCosine, query, SquaredNorm(query), vector)
+	if got := CosineWithSquaredNorms(query, SquaredNorm(query), vector, SquaredNorm(vector)); got != want {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := CosineWithSquaredNorms(query, SquaredNorm(query), make([]float32, len(query)), 0); got != 0 {
+		t.Fatalf("zero vector score = %v", got)
+	}
+}

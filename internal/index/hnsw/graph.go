@@ -103,7 +103,7 @@ func LoadGraph(cfg index.Config, ids []uint64, vectors [][]float32, data []byte)
 	h.immutableGraph = true
 	h.ordinals = make(map[uint64]int, int(count))
 	h.vectors = make([]float32, 0, int(count)*cfg.Dimension)
-	h.constructionVisited = make([]uint32, int(count))
+	h.construction.visited = make([]uint32, int(count))
 	offset := graphHeaderSize
 	for ordinal := range h.nodes {
 		if offset+16 > len(data) {
@@ -145,6 +145,7 @@ func LoadGraph(cfg index.Config, ids []uint64, vectors [][]float32, data []byte)
 			h.live++
 		}
 		h.vectors = append(h.vectors, vectors[ordinal]...)
+		h.squaredNorms = append(h.squaredNorms, h.querySquaredNorm(vectors[ordinal]))
 	}
 	if offset != len(data) {
 		return nil, fmt.Errorf("hnsw graph has trailing payload")

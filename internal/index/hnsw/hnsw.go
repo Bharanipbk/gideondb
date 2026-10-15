@@ -22,24 +22,27 @@ type node struct {
 }
 
 type Index struct {
-	mu                     sync.RWMutex
-	dimension              int
-	metric                 core.Metric
-	m                      int
-	efConstruction         int
-	efSearch               int
-	vectors                []float32
-	nodes                  []node
-	packedOffsets          [][]int
-	packedNeighbors        []int
-	immutableGraph         bool
-	ordinals               map[uint64]int
-	entry                  int
-	maxLevel               int
-	live                   int
-	constructionVisited    []uint32
-	constructionGeneration uint32
-	visitedPool            sync.Pool
+	mu              sync.RWMutex
+	dimension       int
+	metric          core.Metric
+	m               int
+	efConstruction  int
+	efSearch        int
+	vectors         []float32
+	squaredNorms    []float32
+	nodes           []node
+	packedOffsets   [][]int
+	packedNeighbors []int
+	immutableGraph  bool
+	ordinals        map[uint64]int
+	entry           int
+	maxLevel        int
+	live            int
+	construction    constructionScratch
+	// nodeLocks is set only while Build inserts in parallel; each guards one
+	// node's neighbour lists. Every other path relies on mu.
+	nodeLocks   []sync.Mutex
+	visitedPool sync.Pool
 }
 
 const maxPooledVisitedEntries = 4096
@@ -68,8 +71,9 @@ func (h *Index) Upsert(id uint64, vector []float32) error {
 	}
 	if ordinal, ok := h.ordinals[id]; ok {
 		copy(h.vectorAt(ordinal), vector)
-		// Updating a vector invalidates its graph geometry. Rebuild deterministically
-		// to preserve search quality; immutable segments avoid this cost later.
+		// Updating a vector invalidates its graph geometry. Rebuild to preserve
+		// search quality (in parallel for large graphs); immutable segments
+		// avoid this cost later.
 		h.rebuildLocked()
 		return nil
 	}
@@ -77,40 +81,79 @@ func (h *Index) Upsert(id uint64, vector []float32) error {
 }
 
 func (h *Index) insertLocked(id uint64, vector []float32) error {
-	querySquaredNorm := h.querySquaredNorm(vector)
 	level := deterministicLevel(id, h.m)
 	ordinal := len(h.nodes)
 	h.vectors = append(h.vectors, vector...)
+	h.squaredNorms = append(h.squaredNorms, h.querySquaredNorm(vector))
 	h.nodes = append(h.nodes, node{id: id, level: level, neighbors: make([][]int, level+1)})
-	h.constructionVisited = append(h.constructionVisited, 0)
+	h.construction.visited = append(h.construction.visited, 0)
 	h.ordinals[id] = ordinal
 	h.live++
 	if h.entry < 0 {
 		h.entry, h.maxLevel = ordinal, level
 		return nil
 	}
+	h.connectLocked(ordinal, h.entry, h.maxLevel, &h.construction)
+	if level > h.maxLevel {
+		h.entry, h.maxLevel = ordinal, level
+	}
+	return nil
+}
 
-	entry := h.entry
-	for layer := h.maxLevel; layer > level; layer-- {
+// connectLocked links an already stored node into every layer up to its
+// level, starting the descent at entry. It is safe to run concurrently for
+// different nodes when nodeLocks is set.
+func (h *Index) connectLocked(ordinal, entry, maxLevel int, scratch *constructionScratch) {
+	vector := h.vectorAt(ordinal)
+	querySquaredNorm := h.squaredNorms[ordinal]
+	level := h.nodes[ordinal].level
+	for layer := maxLevel; layer > level; layer-- {
 		entry = h.greedyLocked(vector, querySquaredNorm, entry, layer)
 	}
-	for layer := min(level, h.maxLevel); layer >= 0; layer-- {
-		generation := h.nextConstructionGenerationLocked()
-		candidates := h.searchLayerLocked(vector, querySquaredNorm, []int{entry}, h.efConstruction, layer, -1, nil, h.constructionVisited, generation, nil)
+	for layer := min(level, maxLevel); layer >= 0; layer-- {
+		candidates := h.searchLayerLocked(vector, querySquaredNorm, []int{entry}, h.efConstruction, layer, ordinal, nil, scratch.visited, scratch.next(), nil)
 		selected := h.selectNeighborsLocked(candidates, h.m)
+		h.lockNode(ordinal)
 		h.nodes[ordinal].neighbors[layer] = append(h.nodes[ordinal].neighbors[layer], selected...)
+		h.unlockNode(ordinal)
 		for _, neighbor := range selected {
+			h.lockNode(neighbor)
 			h.nodes[neighbor].neighbors[layer] = append(h.nodes[neighbor].neighbors[layer], ordinal)
 			h.pruneLocked(neighbor, layer)
+			h.unlockNode(neighbor)
 		}
 		if len(candidates) > 0 {
 			entry = candidates[0].ordinal
 		}
 	}
-	if level > h.maxLevel {
-		h.entry, h.maxLevel = ordinal, level
+}
+
+func (h *Index) lockNode(ordinal int) {
+	if h.nodeLocks != nil {
+		h.nodeLocks[ordinal].Lock()
 	}
-	return nil
+}
+
+func (h *Index) unlockNode(ordinal int) {
+	if h.nodeLocks != nil {
+		h.nodeLocks[ordinal].Unlock()
+	}
+}
+
+// linksAt returns a node's neighbours. During a parallel build it copies them
+// into buffer under the node's lock, because other workers may be rewriting
+// the list.
+func (h *Index) linksAt(ordinal, layer int, buffer *[]int) []int {
+	if h.nodeLocks == nil {
+		return h.neighborsAt(ordinal, layer)
+	}
+	if layer > h.nodes[ordinal].level {
+		return nil
+	}
+	h.nodeLocks[ordinal].Lock()
+	*buffer = append((*buffer)[:0], h.nodes[ordinal].neighbors[layer]...)
+	h.nodeLocks[ordinal].Unlock()
+	return *buffer
 }
 
 func (h *Index) Delete(id uint64) error {
@@ -254,9 +297,10 @@ func (h *Index) Stats() index.Stats {
 func (h *Index) greedyLocked(query []float32, querySquaredNorm float32, entry, layer int) int {
 	current := entry
 	currentScore := h.scoreLocked(query, querySquaredNorm, current)
+	var buffer []int
 	for {
 		changed := false
-		for _, neighbor := range h.neighborsAt(current, layer) {
+		for _, neighbor := range h.linksAt(current, layer, &buffer) {
 			score := h.scoreLocked(query, querySquaredNorm, neighbor)
 			if score > currentScore || (score == currentScore && h.nodes[neighbor].id < h.nodes[current].id) {
 				current, currentScore, changed = neighbor, score, true
@@ -289,12 +333,13 @@ func (h *Index) searchLayerLocked(query []float32, querySquaredNorm float32, ent
 			visited[entry] = struct{}{}
 		}
 	}
+	var buffer []int
 	for len(frontier) > 0 {
 		candidate := maxPop(&frontier)
 		if len(best) >= ef && candidate.score < best[0].score {
 			break
 		}
-		for _, neighbor := range h.neighborsAt(candidate.ordinal, layer) {
+		for _, neighbor := range h.linksAt(candidate.ordinal, layer, &buffer) {
 			if neighbor == excluded {
 				continue
 			}
@@ -355,7 +400,7 @@ func (h *Index) selectNeighborsLocked(candidates []scoredOrdinal, limit int) []i
 			continue
 		}
 		vector := h.vectorAt(candidate.ordinal)
-		norm := h.querySquaredNorm(vector)
+		norm := h.squaredNorms[candidate.ordinal]
 		diverse := true
 		for _, kept := range result {
 			if h.scoreLocked(vector, norm, kept) > candidate.score {
@@ -387,7 +432,7 @@ func (h *Index) pruneLocked(ordinal, layer int) {
 		return
 	}
 	query := h.vectorAt(ordinal)
-	querySquaredNorm := h.querySquaredNorm(query)
+	querySquaredNorm := h.squaredNorms[ordinal]
 	scored := make([]scoredOrdinal, len(neighbors))
 	for i, neighbor := range neighbors {
 		scored[i] = scoredOrdinal{ordinal: neighbor, score: h.scoreLocked(query, querySquaredNorm, neighbor)}
@@ -399,32 +444,31 @@ func (h *Index) pruneLocked(ordinal, layer int) {
 }
 
 func (h *Index) rebuildLocked() {
-	type item struct {
-		id     uint64
-		vector []float32
-	}
-	items := make([]item, 0, h.live)
+	ids := make([]uint64, 0, h.live)
+	vectors := make([][]float32, 0, h.live)
 	for ordinal, n := range h.nodes {
 		if !n.deleted {
-			items = append(items, item{id: n.id, vector: append([]float32(nil), h.vectorAt(ordinal)...)})
+			ids = append(ids, n.id)
+			vectors = append(vectors, append([]float32(nil), h.vectorAt(ordinal)...))
 		}
 	}
-	h.vectors, h.nodes = nil, nil
-	h.constructionVisited = h.constructionVisited[:0]
-	h.ordinals = make(map[uint64]int, len(items))
-	h.entry, h.maxLevel, h.live = -1, -1, 0
-	for _, item := range items {
-		_ = h.insertLocked(item.id, item.vector)
-	}
+	h.buildLocked(ids, vectors, 0)
 }
 
-func (h *Index) nextConstructionGenerationLocked() uint32 {
-	h.constructionGeneration++
-	if h.constructionGeneration == 0 {
-		clear(h.constructionVisited)
-		h.constructionGeneration = 1
+// constructionScratch holds the visited marks one inserter reuses across
+// searches; a generation counter avoids clearing them between searches.
+type constructionScratch struct {
+	visited    []uint32
+	generation uint32
+}
+
+func (s *constructionScratch) next() uint32 {
+	s.generation++
+	if s.generation == 0 {
+		clear(s.visited)
+		s.generation = 1
 	}
-	return h.constructionGeneration
+	return s.generation
 }
 
 func (h *Index) querySquaredNorm(query []float32) float32 {
@@ -434,7 +478,12 @@ func (h *Index) querySquaredNorm(query []float32) float32 {
 	return 0
 }
 
+// scoreLocked uses the cached squared norm of the stored vector, so cosine
+// costs one dot product per comparison instead of a dot product plus a norm.
 func (h *Index) scoreLocked(query []float32, querySquaredNorm float32, ordinal int) float32 {
+	if h.metric == core.MetricCosine {
+		return distance.CosineWithSquaredNorms(query, querySquaredNorm, h.vectorAt(ordinal), h.squaredNorms[ordinal])
+	}
 	score, _ := distance.ScoreWithQuerySquaredNorm(h.metric, query, querySquaredNorm, h.vectorAt(ordinal))
 	return score
 }

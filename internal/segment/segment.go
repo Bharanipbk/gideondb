@@ -140,14 +140,14 @@ func NewImmutable(config core.CollectionConfig, records []core.Record, metadataI
 }
 
 func BuildHNSWGraph(config core.CollectionConfig, records []core.Record) ([]byte, error) {
-	idx, err := hnsw.New(indexConfig(config))
+	ids := make([]uint64, len(records))
+	vectors := make([][]float32, len(records))
+	for position, record := range records {
+		ids[position], vectors[position] = uint64(position+1), record.Vector
+	}
+	idx, err := hnsw.Build(indexConfig(config), ids, vectors, 0)
 	if err != nil {
 		return nil, err
-	}
-	for position, record := range records {
-		if err := idx.Upsert(uint64(position+1), record.Vector); err != nil {
-			return nil, err
-		}
 	}
 	return idx.MarshalGraph()
 }

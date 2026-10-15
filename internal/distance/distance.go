@@ -45,6 +45,16 @@ func ScoreWithQuerySquaredNorm(metric core.Metric, query []float32, querySquared
 	return product / float32(math.Sqrt(float64(querySquaredNorm*vectorSquaredNorm))), nil
 }
 
+// CosineWithSquaredNorms scores cosine similarity when both squared norms are
+// already known, as in an index that caches them per vector. It matches
+// ScoreWithQuerySquaredNorm exactly because both use the same reductions.
+func CosineWithSquaredNorms(query []float32, querySquaredNorm float32, vector []float32, vectorSquaredNorm float32) float32 {
+	if querySquaredNorm == 0 || vectorSquaredNorm == 0 {
+		return 0
+	}
+	return dot(query, vector) / float32(math.Sqrt(float64(querySquaredNorm*vectorSquaredNorm)))
+}
+
 func cosineProductAndVectorNorm(query, vector []float32) (float32, float32) {
 	var p0, p1, p2, p3, n0, n1, n2, n3 float32
 	i := 0
