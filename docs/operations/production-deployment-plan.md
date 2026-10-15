@@ -9,6 +9,9 @@ Use the detailed [AWS ECS storage plan](aws-ecs-storage-plan.md) for storage and
 topology decisions and the [staged adoption guide](../getting-started/adoption.md)
 for application rollout.
 
+The [ECS implementation plan](ecs-implementation-plan.md) breaks this process
+into repository changes, dependencies, and testable acceptance criteria.
+
 ## Target topology
 
 Start with a non-production, three-node cluster that matches the intended
@@ -150,4 +153,3 @@ Copy this table into the release issue and link immutable evidence.
 | Backup and disaster recovery | Unassigned | Not started | — | — |
 | Observability and operations | Unassigned | Not started | — | — |
 | Controlled release | Unassigned | Not started | — | — |
-

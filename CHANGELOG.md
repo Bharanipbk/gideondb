@@ -7,6 +7,22 @@ describe unreleased experimental work.
 
 ### Added
 
+- BM25 keyword search: records accept an optional `text` field (up to 1 MiB)
+  that is tokenized and indexed per segment, and search accepts `text`.
+  `text` is persisted through the WAL, checkpoints, backups and replication.
+- Indexed sparse retrieval: `sparse_vector` queries use a per-segment inverted
+  index instead of scanning every record.
+- Reciprocal Rank Fusion: search accepts `"fusion": "rrf"` alongside the
+  default `"weighted"` fusion. Hybrid queries may combine dense, sparse and
+  text signals.
+- Binary quantization for flat collections
+  (`"index": {"type": "flat", "quantization": "binary", "oversampling": N}`):
+  1-bit codes for candidate generation with full-precision rescoring. Codes are
+  32× smaller than float32.
+- `cmd/gideondb-bench` and `make bench-ann`: recall@k, QPS, latency, build-time
+  and memory comparison of index configurations on synthetic or `.fvecs`
+  datasets. Results are in `docs/benchmarks/ann-recall.md`.
+
 - A versioned, fully documented `gideondb.v1` public protobuf contract covering
   18 collection, record, search, cluster, health, statistics, snapshot, and
   restore RPCs; Buf v2 lint/generation policy and a dependency-free structural
@@ -350,6 +366,12 @@ describe unreleased experimental work.
 - Versioned experimental REST API and OpenAPI description.
 - Correctness, persistence, REST, recall, concurrency, race and benchmark
   coverage.
+
+### Changed
+
+- Sparse-only searches now return only records sharing at least one query
+  term. Previously every record in the namespace was returned, with score 0
+  for non-matching records. Weighted dense + sparse scores are unchanged.
 
 ### Known limitations
 

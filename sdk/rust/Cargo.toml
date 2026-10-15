@@ -2,6 +2,8 @@
 name = "gideondb-client"
 version = "0.1.0"
 edition = "2024"
+readme = "README.md"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE"]
 license = "Apache-2.0"
 description = "Experimental Rust client for GideonDB"
 repository = "https://github.com/Bharanipbk/gideondb"

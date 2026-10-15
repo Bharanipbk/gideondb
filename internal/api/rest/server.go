@@ -83,6 +83,8 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 		s.dashboardAuth, authErr = loadDashboardAuthenticator(options.DashboardCredentialsFile)
 		if authErr != nil {
 			logger.Error("load dashboard credentials", "error", authErr)
+			// Keep authentication enabled and fail closed if the store is invalid.
+			s.dashboardAuth = &dashboardAuthenticator{users: map[string]dashboardUser{}, sessions: map[string]dashboardSessionRecord{}, attempts: map[string]dashboardLoginAttempt{}}
 		}
 	} else if options.DashboardUsername != "" && options.DashboardPassword != "" {
 		s.dashboardAuth = newDashboardAuthenticator(options.DashboardUsername, options.DashboardPassword, "", options.DashboardBootstrap)
@@ -160,6 +162,13 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/dashboard/session", s.dashboardLogout)
 	s.mux.HandleFunc("POST /v1/dashboard/session/refresh", s.dashboardRefreshSession)
 	s.mux.HandleFunc("POST /v1/dashboard/password", s.dashboardChangePassword)
+	s.mux.HandleFunc("GET /v1/dashboard/preferences", s.dashboardPreferences)
+	s.mux.HandleFunc("GET /v1/dashboard/users", s.dashboardAdmin(s.dashboardUsers))
+	s.mux.HandleFunc("POST /v1/dashboard/users", s.dashboardAdmin(s.dashboardUsers))
+	s.mux.HandleFunc("PUT /v1/dashboard/users/{username}", s.dashboardAdmin(s.dashboardUsers))
+	s.mux.HandleFunc("DELETE /v1/dashboard/users/{username}", s.dashboardAdmin(s.dashboardUsers))
+	s.mux.HandleFunc("GET /v1/dashboard/settings", s.dashboardAdmin(s.dashboardSettingsHandler))
+	s.mux.HandleFunc("PUT /v1/dashboard/settings", s.dashboardAdmin(s.dashboardSettingsHandler))
 	s.mux.HandleFunc("GET /v1/health", s.health)
 	s.mux.HandleFunc("GET /v1/ready", s.ready)
 	s.mux.HandleFunc("GET /metrics", s.protected(s.serveMetrics))
@@ -741,6 +750,10 @@ type searchRequest struct {
 	EFSearch     int                `json:"ef_search,omitempty"`
 	Namespace    string             `json:"namespace,omitempty"`
 	Filter       map[string]any     `json:"filter,omitempty"`
+	// Text runs BM25 keyword retrieval over record text.
+	Text string `json:"text,omitempty"`
+	// Fusion is "weighted" (default) or "rrf".
+	Fusion core.FusionMode `json:"fusion,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {
@@ -748,6 +761,13 @@ func (r searchRequest) denseWeight() float32 {
 		return *r.Alpha
 	}
 	return 0.5
+}
+
+// hybrid reports whether the request needs lexical retrieval.
+func (r searchRequest) hybrid() bool { return r.SparseVector != nil || r.Text != "" }
+
+func (r searchRequest) hybridQuery() core.HybridQuery {
+	return core.HybridQuery{Dense: r.Vector, Sparse: r.SparseVector, Text: r.Text, Alpha: r.denseWeight(), Fusion: r.Fusion, TopK: r.TopK}
 }
 
 func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
@@ -772,8 +792,8 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var results []core.SearchResult
-	if request.SparseVector != nil {
-		results, err = s.engine.SearchShardSparseHybrid(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.SparseVector, request.denseWeight(), request.TopK, filter)
+	if request.hybrid() {
+		results, err = s.engine.SearchShardHybrid(r.PathValue("collection"), uint32(shardID), request.Namespace, request.hybridQuery(), filter)
 	} else {
 		results, err = s.engine.SearchShardFilteredWithEF(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	}
@@ -817,8 +837,8 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var results []core.SearchResult
-	if request.SparseVector != nil {
-		results, err = s.engine.SearchSparseHybrid(r.PathValue("name"), request.Namespace, request.Vector, request.SparseVector, request.denseWeight(), request.TopK, filter)
+	if request.hybrid() {
+		results, err = s.engine.SearchHybrid(r.PathValue("name"), request.Namespace, request.hybridQuery(), filter)
 	} else {
 		results, err = s.engine.SearchFilteredWithEF(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	}

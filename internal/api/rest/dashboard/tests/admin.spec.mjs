@@ -1,0 +1,47 @@
+import { expect, test } from "@playwright/test";
+
+test("administrator manages users and saves console settings", async ({ page }, testInfo) => {
+  await page.goto("/dashboard/");
+  await page.getByLabel("Username").fill("admin");
+  await page.getByLabel("Password", {exact:true}).fill("browser-test-password");
+  await page.getByRole("button", {name:"Sign in"}).click();
+  await expect(page.getByText("Connected", {exact:true})).toBeVisible();
+  const navigate = async name => {
+    if (testInfo.project.name.startsWith("mobile")) await page.getByRole("button", {name:"Open navigation"}).click();
+    await page.getByRole("button", {name, exact:true}).click();
+  };
+  await navigate("Users");
+  await page.getByRole("button", {name:"Add user",exact:true}).click();
+  const username = `browser-${testInfo.project.name}`;
+  await page.getByLabel("Username", {exact:true}).fill(username);
+  await page.getByLabel("Password", {exact:true}).fill("browser-created-password");
+  await page.getByRole("button", {name:"Save user"}).click();
+  const row = page.locator("#users-body tr").filter({hasText:username});
+  await expect(row).toContainText("reader");
+  await page.getByRole("button", {name:`Edit ${username}`,exact:true}).click();
+  await page.getByRole("combobox", {name:"Role",exact:true}).selectOption("writer");
+  await page.getByLabel("Disable account").check();
+  await page.getByRole("button", {name:"Save user"}).click();
+  await expect(row).toContainText("writer");
+  await expect(row).toContainText("Disabled");
+  await page.reload();
+  await expect(row).toContainText("Disabled");
+  await page.evaluate(() => window.scrollTo(0,0));
+  await page.screenshot({path:testInfo.outputPath("users.png"),fullPage:true});
+  page.once("dialog", dialog => dialog.accept());
+  await page.getByRole("button", {name:`Delete ${username}`,exact:true}).click();
+  await expect(row).toHaveCount(0);
+  await navigate("Configuration");
+  await page.getByLabel("Console name").fill("Test Console");
+  await page.getByLabel("Telemetry refresh (seconds)").fill("10");
+  await page.getByRole("button", {name:"Save settings"}).click();
+  await expect(page.getByText("Settings saved.", {exact:true})).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Console name")).toHaveValue("Test Console");
+  await page.evaluate(() => window.scrollTo(0,0));
+  await page.screenshot({path:testInfo.outputPath("settings.png"),fullPage:true});
+  await page.getByLabel("Console name").fill("GideonDB");
+  await page.getByLabel("Telemetry refresh (seconds)").fill("5");
+  await page.getByRole("button", {name:"Save settings"}).click();
+  await expect(page.getByText("Settings saved.", {exact:true})).toBeVisible();
+});

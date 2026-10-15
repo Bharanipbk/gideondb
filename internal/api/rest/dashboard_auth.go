@@ -6,14 +6,11 @@ import (
 	"crypto/pbkdf2"
 	"crypto/rand"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -22,8 +19,11 @@ const dashboardSessionCookie = "gideondb_dashboard_session"
 const dashboardPasswordIterations = 600000
 
 type dashboardSessionRecord struct {
-	csrf    string
-	expires time.Time
+	username   string
+	role       string
+	mustChange bool
+	csrf       string
+	expires    time.Time
 }
 type dashboardLoginAttempt struct {
 	count int
@@ -38,42 +38,25 @@ type dashboardCredentials struct {
 	MustChangePassword bool   `json:"must_change_password"`
 }
 type dashboardAuthenticator struct {
-	username   string
-	salt, hash []byte
-	path       string
-	mustChange bool
-	mu         sync.Mutex
-	sessions   map[string]dashboardSessionRecord
-	attempts   map[string]dashboardLoginAttempt
+	path     string
+	users    map[string]dashboardUser
+	settings dashboardSettings
+	mu       sync.Mutex
+	sessions map[string]dashboardSessionRecord
+	attempts map[string]dashboardLoginAttempt
 }
 
 func newDashboardAuthenticator(username, password, path string, bootstrap bool) *dashboardAuthenticator {
-	a := &dashboardAuthenticator{username: username, path: path, mustChange: bootstrap, salt: make([]byte, 32), sessions: map[string]dashboardSessionRecord{}, attempts: map[string]dashboardLoginAttempt{}}
-	_, _ = rand.Read(a.salt)
-	a.hash = dashboardPasswordHash(password, a.salt)
+	a := &dashboardAuthenticator{path: path, users: map[string]dashboardUser{}, settings: defaultDashboardSettings(), sessions: map[string]dashboardSessionRecord{}, attempts: map[string]dashboardLoginAttempt{}}
+	u := dashboardUser{Username: username, Role: "admin", MustChangePassword: bootstrap}
+	u.setPassword(password)
+	a.users[username] = u
 	return a
 }
+
 func dashboardPasswordHash(password string, salt []byte) []byte {
 	value, _ := pbkdf2.Key(sha256.New, password, salt, dashboardPasswordIterations, 32)
 	return value
-}
-
-// PrepareDashboardCredentials creates a restrictive persistent verifier once,
-// or validates the existing verifier without rewriting it.
-func PrepareDashboardCredentials(path, username, password string, bootstrap bool) error {
-	if info, err := os.Stat(path); err == nil {
-		if info.Mode().Perm()&0o077 != 0 {
-			return fmt.Errorf("dashboard credentials file permissions must be 0600 or stricter")
-		}
-		_, err = loadDashboardAuthenticator(path)
-		return err
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	if username == "" || password == "" {
-		return fmt.Errorf("dashboard credentials are required")
-	}
-	return newDashboardAuthenticator(username, password, path, bootstrap).persist()
 }
 
 // LoadDashboardPasswordFile reads an operator-mounted secret without accepting
@@ -96,63 +79,6 @@ func LoadDashboardPasswordFile(path string) (string, error) {
 	}
 	return password, nil
 }
-func loadDashboardAuthenticator(path string) (*dashboardAuthenticator, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return nil, fmt.Errorf("dashboard credentials file permissions must be 0600 or stricter")
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var saved dashboardCredentials
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&saved); err != nil {
-		return nil, fmt.Errorf("decode dashboard credentials: %w", err)
-	}
-	if saved.Username == "" || saved.Algorithm != "pbkdf2-sha256" || saved.Iterations != dashboardPasswordIterations {
-		return nil, fmt.Errorf("unsupported dashboard credential format")
-	}
-	salt, err := hex.DecodeString(saved.Salt)
-	if err != nil || len(salt) < 16 {
-		return nil, fmt.Errorf("invalid dashboard credential salt")
-	}
-	hash, err := hex.DecodeString(saved.PasswordHash)
-	if err != nil || len(hash) != 32 {
-		return nil, fmt.Errorf("invalid dashboard password hash")
-	}
-	return &dashboardAuthenticator{username: saved.Username, salt: salt, hash: hash, path: path, mustChange: saved.MustChangePassword, sessions: map[string]dashboardSessionRecord{}, attempts: map[string]dashboardLoginAttempt{}}, nil
-}
-func (a *dashboardAuthenticator) persist() error {
-	saved := dashboardCredentials{Username: a.username, Algorithm: "pbkdf2-sha256", Iterations: dashboardPasswordIterations, Salt: hex.EncodeToString(a.salt), PasswordHash: hex.EncodeToString(a.hash), MustChangePassword: a.mustChange}
-	data, err := json.MarshalIndent(saved, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(a.path), 0o700); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(filepath.Dir(a.path), ".dashboard-credentials-*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	defer os.Remove(name)
-	if err = temp.Chmod(0o600); err == nil {
-		_, err = temp.Write(append(data, '\n'))
-	}
-	if closeErr := temp.Close(); err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		return err
-	}
-	return os.Rename(name, a.path)
-}
 func randomToken() string {
 	value := make([]byte, 32)
 	_, _ = rand.Read(value)
@@ -160,19 +86,15 @@ func randomToken() string {
 }
 func (a *dashboardAuthenticator) authenticate(username, password string) bool {
 	a.mu.Lock()
-	expectedUsername := a.username
-	salt := append([]byte(nil), a.salt...)
-	expectedHash := append([]byte(nil), a.hash...)
+	u, ok := a.users[username]
 	a.mu.Unlock()
-	provided := dashboardPasswordHash(password, salt)
-	return subtle.ConstantTimeCompare([]byte(username), []byte(expectedUsername)) == 1 && hmac.Equal(provided, expectedHash)
+	// Always perform a password derivation, including unknown users.
+	provided := dashboardPasswordHash(password, u.Salt)
+	return ok && !u.Disabled && hmac.Equal(provided, u.Hash)
 }
 func (a *dashboardAuthenticator) validRequest(r *http.Request) bool {
-	_, ok := a.session(r)
-	a.mu.Lock()
-	mustChange := a.mustChange
-	a.mu.Unlock()
-	return ok && !mustChange
+	record, ok := a.session(r)
+	return ok && !record.mustChange
 }
 func (a *dashboardAuthenticator) session(r *http.Request) (dashboardSessionRecord, bool) {
 	cookie, err := r.Cookie(dashboardSessionCookie)
@@ -186,6 +108,12 @@ func (a *dashboardAuthenticator) session(r *http.Request) (dashboardSessionRecor
 		delete(a.sessions, cookie.Value)
 		return dashboardSessionRecord{}, false
 	}
+	u, exists := a.users[record.username]
+	if !exists || u.Disabled {
+		delete(a.sessions, cookie.Value)
+		return dashboardSessionRecord{}, false
+	}
+	record.role, record.mustChange = u.Role, u.MustChangePassword
 	return record, true
 }
 func dashboardClientAddress(remote string) string {
@@ -210,10 +138,10 @@ func (a *dashboardAuthenticator) allowAttempt(remote string) bool {
 func setDashboardCookie(w http.ResponseWriter, r *http.Request, token string, maxAge int) {
 	http.SetCookie(w, &http.Cookie{Name: dashboardSessionCookie, Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: maxAge})
 }
-func (s *Server) issueDashboardSession(w http.ResponseWriter, r *http.Request) string {
+func (s *Server) issueDashboardSession(w http.ResponseWriter, r *http.Request, username string) string {
 	token, csrf := randomToken(), randomToken()
-	s.dashboardAuth.sessions[token] = dashboardSessionRecord{csrf: csrf, expires: time.Now().Add(8 * time.Hour)}
-	setDashboardCookie(w, r, token, 8*60*60)
+	s.dashboardAuth.sessions[token] = dashboardSessionRecord{username: username, csrf: csrf, expires: time.Now().Add(time.Duration(s.dashboardAuth.settings.SessionHours) * time.Hour)}
+	setDashboardCookie(w, r, token, s.dashboardAuth.settings.SessionHours*60*60)
 	return csrf
 }
 
@@ -238,9 +166,15 @@ func (s *Server) dashboardLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.dashboardAuth.mu.Lock()
-	csrf := s.issueDashboardSession(w, r)
+	u, exists := s.dashboardAuth.users[input.Username]
+	if !exists || u.Disabled || !hmac.Equal(dashboardPasswordHash(input.Password, u.Salt), u.Hash) {
+		s.dashboardAuth.mu.Unlock()
+		writeJSON(w, 401, apiError{Code: "invalid_credentials", Message: "invalid username or password"})
+		return
+	}
+	csrf := s.issueDashboardSession(w, r, input.Username)
 	delete(s.dashboardAuth.attempts, dashboardClientAddress(r.RemoteAddr))
-	mustChange := s.dashboardAuth.mustChange
+	mustChange := s.dashboardAuth.users[input.Username].MustChangePassword
 	s.dashboardAuth.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrf, "must_change_password": mustChange})
 }
@@ -254,10 +188,8 @@ func (s *Server) dashboardSession(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, apiError{Code: "unauthorized", Message: "dashboard login required"})
 		return
 	}
-	s.dashboardAuth.mu.Lock()
-	mustChange := s.dashboardAuth.mustChange
-	s.dashboardAuth.mu.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": record.csrf, "must_change_password": mustChange})
+	mustChange := record.mustChange
+	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": record.csrf, "must_change_password": mustChange, "username": record.username, "role": record.role})
 }
 func (s *Server) dashboardLogout(w http.ResponseWriter, r *http.Request) {
 	if s.dashboardAuth == nil {
@@ -292,8 +224,13 @@ func (s *Server) dashboardRefreshSession(w http.ResponseWriter, r *http.Request)
 	}
 	cookie, _ := r.Cookie(dashboardSessionCookie)
 	s.dashboardAuth.mu.Lock()
+	if _, active := s.dashboardAuth.sessions[cookie.Value]; !active {
+		s.dashboardAuth.mu.Unlock()
+		writeJSON(w, 401, apiError{Code: "unauthorized", Message: "session expired"})
+		return
+	}
 	delete(s.dashboardAuth.sessions, cookie.Value)
-	csrf := s.issueDashboardSession(w, r)
+	csrf := s.issueDashboardSession(w, r, record.username)
 	s.dashboardAuth.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrf})
 }
@@ -322,26 +259,32 @@ func (s *Server) dashboardChangePassword(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, apiError{Code: "weak_password", Message: "new password must contain at least 12 characters"})
 		return
 	}
-	if !s.dashboardAuth.authenticate(s.dashboardAuth.username, input.CurrentPassword) {
+	if !s.dashboardAuth.authenticate(record.username, input.CurrentPassword) {
 		writeJSON(w, http.StatusUnauthorized, apiError{Code: "invalid_credentials", Message: "current password is incorrect"})
 		return
 	}
 	s.dashboardAuth.mu.Lock()
-	oldSalt, oldHash, oldMust := s.dashboardAuth.salt, s.dashboardAuth.hash, s.dashboardAuth.mustChange
-	s.dashboardAuth.salt = make([]byte, 32)
-	_, _ = rand.Read(s.dashboardAuth.salt)
-	s.dashboardAuth.hash = dashboardPasswordHash(input.NewPassword, s.dashboardAuth.salt)
-	s.dashboardAuth.mustChange = false
-	if s.dashboardAuth.path != "" {
-		if err := s.dashboardAuth.persist(); err != nil {
-			s.dashboardAuth.salt, s.dashboardAuth.hash, s.dashboardAuth.mustChange = oldSalt, oldHash, oldMust
-			s.dashboardAuth.mu.Unlock()
-			writeJSON(w, http.StatusInternalServerError, apiError{Code: "credential_persist_failed", Message: "password change could not be persisted"})
-			return
-		}
+	old := s.dashboardAuth.users[record.username]
+	cookie, _ := r.Cookie(dashboardSessionCookie)
+	_, active := s.dashboardAuth.sessions[cookie.Value]
+	// Recheck under the mutation lock so concurrent resets cannot be overwritten.
+	if !active || !hmac.Equal(dashboardPasswordHash(input.CurrentPassword, old.Salt), old.Hash) || old.Disabled {
+		s.dashboardAuth.mu.Unlock()
+		writeJSON(w, http.StatusUnauthorized, apiError{Code: "invalid_credentials", Message: "current password is incorrect"})
+		return
 	}
-	s.dashboardAuth.sessions = map[string]dashboardSessionRecord{}
-	csrf := s.issueDashboardSession(w, r)
+	u := old
+	u.setPassword(input.NewPassword)
+	u.MustChangePassword = false
+	s.dashboardAuth.users[record.username] = u
+	if err := s.dashboardAuth.persist(); err != nil {
+		s.dashboardAuth.users[record.username] = old
+		s.dashboardAuth.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, apiError{Code: "credential_persist_failed", Message: "password change could not be persisted"})
+		return
+	}
+	s.dashboardAuth.revokeUserSessions(record.username)
+	csrf := s.issueDashboardSession(w, r, record.username)
 	s.dashboardAuth.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"authenticated": true, "csrf_token": csrf, "must_change_password": false})
 }

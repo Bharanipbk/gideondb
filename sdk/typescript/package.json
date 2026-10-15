@@ -1,11 +1,12 @@
 {
   "name": "@gideondb/client",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Experimental TypeScript client for GideonDB",
   "homepage": "https://github.com/Bharanipbk/gideondb",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Bharanipbk/gideondb.git"
+    "url": "git+https://github.com/Bharanipbk/gideondb.git",
+    "directory": "sdk/typescript"
   },
   "type": "module",
   "exports": {
@@ -15,12 +16,19 @@
     }
   },
   "types": "./src/index.d.ts",
-  "files": ["src/index.js", "src/index.d.ts"],
+  "files": [
+    "src/index.js",
+    "src/index.d.ts"
+  ],
   "scripts": {
     "test": "node --test"
   },
   "engines": {
     "node": ">=20"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
 }

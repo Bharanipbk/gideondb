@@ -10,6 +10,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/distance"
 	"github.com/Bharanipbk/gideondb/internal/index"
+	"github.com/Bharanipbk/gideondb/internal/index/binary"
 	"github.com/Bharanipbk/gideondb/internal/index/flat"
 	"github.com/Bharanipbk/gideondb/internal/index/hnsw"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
@@ -28,6 +29,7 @@ type Segment struct {
 	vectorAt func(ordinal int) ([]float32, error)
 	closer   interface{ Close() error }
 	metric   core.Metric
+	lexical  *lexicalIndex
 }
 
 func NewMapped(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }) (*Segment, error) {
@@ -42,8 +44,28 @@ func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, 
 	for position := range ids {
 		ids[position] = uint64(position + 1)
 	}
-	idx, err := flat.NewMapped(source, config.Metric, ids)
-	if err != nil {
+	var idx index.VectorIndex
+	var err error
+	if config.Index.Quantization == core.QuantizationBinary {
+		// Codes live on the heap; full-precision vectors stay memory-mapped and
+		// are touched only for rescoring.
+		quantized, buildErr := binary.New(config.Dimension, config.Index.Oversampling, func(query []float32, id uint64) (float32, error) {
+			return source.Score(config.Metric, query, int(id-1))
+		})
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		for position, id := range ids {
+			vector, copyErr := source.VectorCopy(position)
+			if copyErr != nil {
+				return nil, copyErr
+			}
+			if err := quantized.Upsert(id, vector); err != nil {
+				return nil, err
+			}
+		}
+		idx = quantized
+	} else if idx, err = flat.NewMapped(source, config.Metric, ids); err != nil {
 		return nil, err
 	}
 	loadedMetadata := metadataIndex != nil
@@ -53,12 +75,13 @@ func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, 
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
 		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
-		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric,
+		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric, lexical: newLexicalIndex(),
 	}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
 		record.Vector = nil
 		s.records[ordinal] = cloneRecord(record)
+		s.lexical.add(ordinal, record)
 		s.ordinals[key(record.Namespace, record.ID)] = ordinal
 		if !loadedMetadata {
 			s.metadata.Upsert(ordinal, record.Metadata)
@@ -74,10 +97,20 @@ func New(config core.CollectionConfig) (*Segment, error) {
 	}
 	var idx index.VectorIndex
 	var err error
-	switch config.Index.Type {
-	case core.IndexFlat:
+	s := &Segment{
+		nextID: 1, records: make(map[uint64]core.Record),
+		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric, lexical: newLexicalIndex(),
+	}
+	switch {
+	case config.Index.Type == core.IndexFlat && config.Index.Quantization == core.QuantizationBinary:
+		// Records already hold full-precision vectors, so the index keeps only
+		// codes and rescores from the record map under the segment lock.
+		idx, err = binary.New(config.Dimension, config.Index.Oversampling, func(query []float32, id uint64) (float32, error) {
+			return distance.Score(config.Metric, query, s.records[id].Vector)
+		})
+	case config.Index.Type == core.IndexFlat:
 		idx, err = flat.New(indexConfig)
-	case core.IndexHNSW:
+	case config.Index.Type == core.IndexHNSW:
 		idx, err = hnsw.New(indexConfig)
 	default:
 		err = fmt.Errorf("%w: unsupported index type %q", core.ErrInvalidArgument, config.Index.Type)
@@ -85,10 +118,8 @@ func New(config core.CollectionConfig) (*Segment, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Segment{
-		index: idx, nextID: 1, records: make(map[uint64]core.Record),
-		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric,
-	}, nil
+	s.index = idx
+	return s, nil
 }
 
 func NewImmutable(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index) (*Segment, error) {
@@ -140,10 +171,11 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 	if metadataIndex == nil {
 		metadataIndex = metadata.NewIndex()
 	}
-	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric}
+	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex()}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
 		s.records[ordinal] = cloneRecord(record)
+		s.lexical.add(ordinal, record)
 		s.ordinals[key(record.Namespace, record.ID)] = ordinal
 		if !loadedMetadata {
 			s.metadata.Upsert(ordinal, record.Metadata)
@@ -176,8 +208,12 @@ func (s *Segment) Upsert(record core.Record) error {
 	if err := s.index.Upsert(ordinal, record.Vector); err != nil {
 		return err
 	}
+	if previous, exists := s.records[ordinal]; exists {
+		s.lexical.remove(ordinal, previous)
+	}
 	s.ordinals[k] = ordinal
 	s.records[ordinal] = cloneRecord(record)
+	s.lexical.add(ordinal, record)
 	s.metadata.Upsert(ordinal, record.Metadata)
 	return nil
 }
@@ -214,6 +250,7 @@ func (s *Segment) Delete(namespace, id string) error {
 	if err := s.index.Delete(ordinal); err != nil {
 		return err
 	}
+	s.lexical.remove(ordinal, s.records[ordinal])
 	delete(s.ordinals, k)
 	delete(s.records, ordinal)
 	s.metadata.Delete(ordinal)
@@ -278,50 +315,152 @@ func (s *Segment) SearchFilteredWithOptions(namespace string, query []float32, k
 	return results, nil
 }
 
-// SearchSparseHybrid performs exact sparse-only or dense+sparse scoring. Alpha
-// is the dense weight and must be in [0,1].
+// SearchSparseHybrid is the sparse-vector form of SearchHybrid with weighted
+// fusion. Alpha is the dense weight and must be in [0,1].
 func (s *Segment) SearchSparseHybrid(namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr, excluded map[string]struct{}) ([]core.SearchResult, error) {
+	return s.SearchHybrid(namespace, core.HybridQuery{Dense: dense, Sparse: sparse, Alpha: alpha, TopK: k}, filter, excluded)
+}
+
+// hybridCandidateFloor bounds how many candidates each signal contributes
+// before fusion. Small segments are therefore scored exhaustively.
+const (
+	hybridCandidateFloor      = 100
+	hybridCandidateMultiplier = 4
+)
+
+// SearchHybrid retrieves candidates from each requested signal (dense ANN,
+// sparse inverted index, BM25 text index), then fuses them. Weighted fusion
+// rescores every candidate exactly on every signal; RRF sums 1/(60+rank).
+func (s *Segment) SearchHybrid(namespace string, query core.HybridQuery, filter *metadata.Expr, excluded map[string]struct{}) ([]core.SearchResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var allowed *metadata.Set
 	if filter != nil {
 		allowed = s.metadata.Evaluate(filter)
 	}
-	queryNorm := sparseNorm(sparse)
-	results := make([]core.SearchResult, 0, len(s.records))
-	for ordinal, record := range s.records {
-		if record.Namespace != namespace || (allowed != nil && !allowed.Contains(ordinal)) {
-			continue
+	allow := func(ordinal uint64) bool {
+		if allowed != nil && !allowed.Contains(ordinal) {
+			return false
 		}
-		if _, blocked := excluded[key(record.Namespace, record.ID)]; blocked {
-			continue
+		record, ok := s.records[ordinal]
+		if !ok || record.Namespace != namespace {
+			return false
 		}
-		sparseScore := sparseCosine(sparse, queryNorm, record.SparseVector)
-		score := sparseScore
-		if dense != nil {
-			vector := record.Vector
-			if vector == nil && s.vectorAt != nil {
-				var err error
-				vector, err = s.vectorAt(int(ordinal - 1))
-				if err != nil {
-					return nil, err
+		_, blocked := excluded[key(record.Namespace, record.ID)]
+		return !blocked
+	}
+	limit := max(query.TopK*hybridCandidateMultiplier, hybridCandidateFloor)
+	var denseList []index.Candidate
+	if query.Dense != nil {
+		var err error
+		if denseList, err = s.index.SearchFiltered(query.Dense, limit, allow); err != nil {
+			return nil, err
+		}
+	}
+	var sparseList, textList []scoredOrdinal
+	if query.Sparse != nil {
+		sparseList = s.lexical.searchSparse(query.Sparse, allow, limit)
+	}
+	if query.Text != "" {
+		textList = s.lexical.searchText(query.Text, allow, limit)
+	}
+
+	scores := map[uint64]float32{}
+	if query.Fusion == core.FusionRRF {
+		for rank, candidate := range denseList {
+			scores[candidate.ID] += rrf(rank)
+		}
+		for rank, candidate := range sparseList {
+			scores[candidate.ordinal] += rrf(rank)
+		}
+		for rank, candidate := range textList {
+			scores[candidate.ordinal] += rrf(rank)
+		}
+	} else {
+		denseScores := make(map[uint64]float32, len(denseList))
+		for _, candidate := range denseList {
+			denseScores[candidate.ID] = candidate.Score
+			scores[candidate.ID] = 0
+		}
+		for _, candidate := range sparseList {
+			scores[candidate.ordinal] = 0
+		}
+		for _, candidate := range textList {
+			scores[candidate.ordinal] = 0
+		}
+		queryNorm := sparseNorm(query.Sparse)
+		textScore := func(uint64) float32 { return 0 }
+		if query.Text != "" {
+			textScore = s.lexical.bm25Scorer(query.Text)
+		}
+		lexicalSignals := 0
+		if query.Sparse != nil {
+			lexicalSignals++
+		}
+		if query.Text != "" {
+			lexicalSignals++
+		}
+		raw := query.Dense == nil && lexicalSignals == 1
+		for ordinal := range scores {
+			record := s.records[ordinal]
+			var lexical float32
+			if query.Sparse != nil {
+				cosine := sparseCosine(query.Sparse, queryNorm, record.SparseVector)
+				if raw {
+					lexical = cosine
+				} else {
+					lexical += (cosine + 1) / 2
 				}
 			}
-			denseScore, err := distance.Score(s.metric, dense, vector)
-			if err != nil {
-				return nil, err
+			if query.Text != "" {
+				bm25 := textScore(ordinal)
+				if raw {
+					lexical = bm25
+				} else {
+					lexical += normalizeBM25(bm25)
+				}
 			}
-			score = alpha*normalizeDense(s.metric, denseScore) + (1-alpha)*((sparseScore+1)/2)
+			if !raw {
+				lexical /= float32(lexicalSignals)
+			}
+			score := lexical
+			if query.Dense != nil {
+				denseScore, found := denseScores[ordinal]
+				if !found {
+					vector, err := s.vectorFor(ordinal, record)
+					if err != nil {
+						return nil, err
+					}
+					if denseScore, err = distance.Score(s.metric, query.Dense, vector); err != nil {
+						return nil, err
+					}
+				}
+				score = query.Alpha*normalizeDense(s.metric, denseScore) + (1-query.Alpha)*lexical
+			}
+			scores[ordinal] = score
 		}
+	}
+	results := make([]core.SearchResult, 0, len(scores))
+	for ordinal, score := range scores {
+		record := s.records[ordinal]
 		results = append(results, core.SearchResult{ID: record.ID, Score: score, Metadata: cloneMap(record.Metadata), Payload: cloneMap(record.Payload), Namespace: record.Namespace})
 	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score || (results[i].Score == results[j].Score && results[i].ID < results[j].ID)
 	})
-	if len(results) > k {
-		results = results[:k]
+	if len(results) > query.TopK {
+		results = results[:query.TopK]
 	}
 	return results, nil
+}
+
+func rrf(rank int) float32 { return 1 / float32(core.RRFConstant+rank+1) }
+
+func (s *Segment) vectorFor(ordinal uint64, record core.Record) ([]float32, error) {
+	if record.Vector != nil || s.vectorAt == nil {
+		return record.Vector, nil
+	}
+	return s.vectorAt(int(ordinal - 1))
 }
 
 func sparseNorm(vector map[string]float32) float64 {

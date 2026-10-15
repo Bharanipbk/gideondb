@@ -162,7 +162,10 @@ func main() {
 			logger.Error("dashboard username and password must both be configured")
 			os.Exit(2)
 		}
-		_, dashboardCredentialErr := os.Stat(filepath.Join(*dataPath, "dashboard-credentials.json"))
+		_, dashboardCredentialErr := os.Stat(filepath.Join(*dataPath, "admin.sqlite"))
+		if os.IsNotExist(dashboardCredentialErr) {
+			_, dashboardCredentialErr = os.Stat(filepath.Join(*dataPath, "dashboard-credentials.json"))
+		}
 		if dashboardUsername == "" && os.IsNotExist(dashboardCredentialErr) {
 			logger.Error("new data directory requires GIDEONDB_DASHBOARD_USERNAME and a dashboard password source")
 			os.Exit(2)
@@ -256,7 +259,7 @@ func main() {
 			logger.Error("close engine", "error", err)
 		}
 	}()
-	dashboardCredentialsPath := filepath.Join(*dataPath, "dashboard-credentials.json")
+	dashboardCredentialsPath := filepath.Join(*dataPath, "admin.sqlite")
 	if !offline {
 		if err := rest.PrepareDashboardCredentials(dashboardCredentialsPath, dashboardUsername, dashboardPassword, dashboardBootstrap); err != nil {
 			logger.Error("prepare dashboard credentials", "error", err)

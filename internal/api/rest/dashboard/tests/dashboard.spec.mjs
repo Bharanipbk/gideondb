@@ -25,9 +25,9 @@ test("theme switch persists across dashboard reloads", async ({ page }) => {
   await expect(page.locator("html")).toHaveAttribute("data-theme", expected);
 });
 
-test("dashboard uses curved cards without decorative header rules", async ({ page }) => {
-  await expect(page.locator(".panel").first()).toHaveCSS("border-radius", "14px");
-  await expect(page.locator(".stats article").first()).toHaveCSS("border-radius", "12px");
+test("dashboard uses rounded cards without decorative panel rules", async ({ page }) => {
+  await expect(page.locator(".panel").first()).toHaveCSS("border-radius", "10px");
+  await expect(page.locator(".stats article").first()).toHaveCSS("border-radius", "10px");
   await expect(page.locator(".panel-head").first()).toHaveCSS("border-bottom-width", "0px");
   await expect(page.locator(".brand-link")).toHaveCSS("border-bottom-width", "0px");
 });
@@ -38,34 +38,31 @@ test("dashboard surfaces use a flat design without drop shadows", async ({ page 
   }
 });
 
-test("dashboard cards do not use grey borders", async ({ page }) => {
-  for (const selector of [".hero", ".panel", ".stats article", ".details > div"]) {
+test("dashboard cards use a single hairline border", async ({ page }) => {
+  for (const selector of [".hero", ".panel", ".stats article"]) {
     const card = page.locator(selector).first();
-    await expect(card).toHaveCSS("border-top-width", "0px");
-    await expect(card).toHaveCSS("border-right-width", "0px");
-    await expect(card).toHaveCSS("border-bottom-width", "0px");
-    await expect(card).toHaveCSS("border-left-width", "0px");
+    for (const side of ["top", "right", "bottom", "left"]) await expect(card).toHaveCSS(`border-${side}-width`, "1px");
   }
 });
 
 test("sidebar uses icon-led navigation with bottom utilities", async ({ page }, testInfo) => {
   if (testInfo.project.name.startsWith("mobile")) await page.getByRole("button", { name: "Open navigation" }).click();
-  await expect(page.locator(".sidebar-menu .nav-icon")).toHaveCount(10);
+  await expect(page.locator(".sidebar-menu .nav-icon")).toHaveCount(11);
   await expect(page.getByRole("link", { name: "Documentation" })).toBeVisible();
   await expect(page.getByRole("button", { name: /Configuration/ })).toBeVisible();
   await expect(page.locator(".connection")).toBeVisible();
-  await expect(page.locator(".sidebar-menu .nav-icon svg.radix-icon")).toHaveCount(10);
+  await expect(page.locator(".sidebar-menu .nav-icon svg.radix-icon")).toHaveCount(11);
 });
 
 test("header toggle collapses and expands the desktop sidebar", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name.startsWith("mobile"), "desktop sidebar behavior");
-  await expect(page.locator(".title-row > div")).not.toBeVisible();
+  await expect(page.locator("#page-title")).toBeVisible();
   await page.getByRole("button", { name: "Collapse navigation" }).click();
   await expect(page.locator("body")).toHaveClass(/sidebar-collapsed/);
-  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "72px");
+  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "64px");
   await page.getByRole("button", { name: "Expand navigation" }).click();
   await expect(page.locator("body")).not.toHaveClass(/sidebar-collapsed/);
-  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "250px");
+  await expect(page.locator(".app-sidebar")).toHaveCSS("width", "248px");
 });
 
 test("logs paginate retained events", async ({ page }, testInfo) => {

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
@@ -87,7 +88,9 @@ func TestSparseAndHybridSearchSurviveCheckpoint(t *testing.T) {
 		}
 	}
 	sparse, err := db.SearchSparseHybrid(config.Name, "", nil, map[string]float32{"database": 1}, 0.5, 2, nil)
-	if err != nil || len(sparse) != 2 || sparse[0].ID != "sparse" {
+	// Sparse-only retrieval uses the inverted index and returns only records
+	// sharing a query term.
+	if err != nil || len(sparse) != 1 || sparse[0].ID != "sparse" {
 		t.Fatalf("sparse=%#v err=%v", sparse, err)
 	}
 	denseWeighted, err := db.SearchSparseHybrid(config.Name, "", []float32{1, 0}, map[string]float32{"database": 1}, 0.8, 2, nil)
@@ -850,5 +853,98 @@ func TestShardBatchIdempotencySurvivesCheckpointAndRestart(t *testing.T) {
 	_, _, err = reopened.BatchUpsertShardIdempotent(config.Name, 0, []core.Record{{ID: "one", Vector: []float32{2, 1}}}, "import:batch-001")
 	if !errors.Is(err, core.ErrIdempotencyConflict) {
 		t.Fatalf("reused key error = %v, want idempotency conflict", err)
+	}
+}
+
+func TestTextSearchSurvivesCheckpointAndWALReplay(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "docs", Dimension: 2, Metric: core.MetricCosine, ShardCount: 2}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "checkpointed", Vector: []float32{1, 0}, Text: "binary quantization guide"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Checkpoint(config.Name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Upsert(config.Name, core.Record{ID: "replayed", Vector: []float32{0, 1}, Text: "quantization in the write ahead log"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	results, err := reopened.SearchHybrid(config.Name, "", core.HybridQuery{Text: "quantization", TopK: 5}, nil)
+	if err != nil || len(results) != 2 {
+		t.Fatalf("results=%#v err=%v", results, err)
+	}
+	got, err := reopened.Get(config.Name, "", "checkpointed")
+	if err != nil || got.Text != "binary quantization guide" {
+		t.Fatalf("record=%#v err=%v", got, err)
+	}
+	if _, err := reopened.Upsert(config.Name, core.Record{ID: "big", Vector: []float32{1, 0}, Text: strings.Repeat("x", core.MaxTextBytes+1)}); err == nil {
+		t.Fatal("oversized text should be rejected")
+	}
+}
+
+func TestBinaryQuantizedCollectionSearchesAcrossCheckpoint(t *testing.T) {
+	path := t.TempDir()
+	db, err := OpenWithOptions(path, Options{WALSyncMode: wal.SyncAlways, CheckpointEvery: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := core.CollectionConfig{Name: "bq", Dimension: 4, Metric: core.MetricCosine, ShardCount: 1, Index: core.IndexConfig{Type: core.IndexFlat, Quantization: core.QuantizationBinary}}
+	if err := db.CreateCollection(config); err != nil {
+		t.Fatal(err)
+	}
+	described, _, err := db.DescribeCollection("bq")
+	if err != nil || described.Index.Oversampling != 4 {
+		t.Fatalf("default oversampling not applied: %+v %v", described.Index, err)
+	}
+	vectors := map[string][]float32{"a": {1, 1, -1, -1}, "b": {-1, -1, 1, 1}, "c": {1, -1, 1, -1}, "d": {0.9, 1.1, -1, -0.8}}
+	for id, vector := range vectors {
+		if _, err := db.Upsert("bq", core.Record{ID: id, Vector: vector}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check := func(db *Engine, label string) {
+		t.Helper()
+		results, err := db.Search("bq", "", []float32{1, 1, -1, -1}, 2)
+		if err != nil || len(results) != 2 || results[0].ID != "a" || results[1].ID != "d" {
+			t.Fatalf("%s: results=%#v err=%v", label, results, err)
+		}
+	}
+	check(db, "mutable")
+	if err := db.Checkpoint("bq"); err != nil {
+		t.Fatal(err)
+	}
+	check(db, "checkpointed")
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	check(reopened, "reopened")
+	for _, invalid := range []core.IndexConfig{
+		{Type: core.IndexHNSW, Quantization: core.QuantizationBinary},
+		{Type: core.IndexFlat, Quantization: "pq"},
+		{Type: core.IndexFlat, Oversampling: 3},
+		{Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 101},
+	} {
+		if err := reopened.CreateCollection(core.CollectionConfig{Name: "bad", Dimension: 4, Metric: core.MetricCosine, ShardCount: 1, Index: invalid}); err == nil {
+			t.Fatalf("expected %+v to be rejected", invalid)
+		}
 	}
 }

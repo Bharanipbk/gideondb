@@ -30,14 +30,16 @@ type TunableVectorIndex interface {
 }
 
 type Stats struct {
-	Type         core.IndexType
-	Vectors      int
-	VectorBytes  uint64
-	MappedBytes  uint64
-	GraphBytes   uint64
-	GraphEdges   uint64
-	Deleted      int
-	MaximumLevel int
+	Type        core.IndexType
+	Vectors     int
+	VectorBytes uint64
+	MappedBytes uint64
+	// QuantizedBytes is heap memory used by quantized codes, when enabled.
+	QuantizedBytes uint64
+	GraphBytes     uint64
+	GraphEdges     uint64
+	Deleted        int
+	MaximumLevel   int
 }
 
 type Config struct {

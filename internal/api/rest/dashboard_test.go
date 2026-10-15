@@ -27,15 +27,10 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 		t.Fatalf("redirect=%d %q", redirect.Code, redirect.Header().Get("Location"))
 	}
 	for asset, expected := range map[string][2]string{
-		"/dashboard/":                  {"text/html", "request-rate-chart"},
-		"/dashboard/app.js":            {"text/javascript", "recordPerformance"},
-		"/dashboard/theme.js":          {"text/javascript", "gideondb-theme"},
-		"/dashboard/styles.css":        {"text/css", "--accent"},
-		"/dashboard/dashboard-v2.css":  {"text/css", "--sidebar-width"},
-		"/dashboard/performance.css":   {"text/css", ".chart-grid"},
-		"/dashboard/explorer.css":      {"text/css", ".explorer-tools"},
-		"/dashboard/configuration.css": {"text/css", ".configuration-details"},
-		"/dashboard/logs.css":          {"text/css", ".log-row"},
+		"/dashboard/":            {"text/html", "request-rate-chart"},
+		"/dashboard/app.js":      {"text/javascript", "recordPerformance"},
+		"/dashboard/theme.js":    {"text/javascript", "gideondb-theme"},
+		"/dashboard/console.css": {"text/css", "--sidebar-width"},
 	} {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, asset, nil))
@@ -55,7 +50,7 @@ func TestDashboardAssetsAndSecurityPolicy(t *testing.T) {
 	}
 	root := httptest.NewRecorder()
 	handler.ServeHTTP(root, httptest.NewRequest(http.MethodGet, "/dashboard/", nil))
-	for _, marker := range []string{"Skip to content", `aria-controls="sidebar"`, `aria-live="polite"`, "dashboard-v2.css", `id="view-resilience"`, "Open recovery runbook"} {
+	for _, marker := range []string{"Skip to content", `aria-controls="sidebar"`, `aria-live="polite"`, "console.css", `id="view-resilience"`, "Open recovery runbook"} {
 		if !strings.Contains(root.Body.String(), marker) {
 			t.Errorf("dashboard HTML is missing accessibility marker %q", marker)
 		}

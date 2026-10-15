@@ -102,7 +102,7 @@ func TestDashboardLoginThrottle(t *testing.T) {
 }
 
 func TestDashboardBootstrapPasswordChangePersistsAndRotatesSession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dashboard-credentials.json")
+	path := filepath.Join(t.TempDir(), "admin.sqlite")
 	if err := PrepareDashboardCredentials(path, "admin", "admin123", true); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestDashboardBootstrapPasswordChangePersistsAndRotatesSession(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.mustChange || !reloaded.authenticate("admin", "unique-password-456") || reloaded.authenticate("admin", "admin123") {
+	if reloaded.users["admin"].MustChangePassword || !reloaded.authenticate("admin", "unique-password-456") || reloaded.authenticate("admin", "admin123") {
 		t.Fatal("persisted password state is invalid")
 	}
 }

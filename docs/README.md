@@ -14,7 +14,8 @@ with the quickstart, then choose the SDK or integration for your application.
 - [REST API](api/rest.md)
 - [Experimental HNSW index](indexing/hnsw.md)
 - [Metadata filtering](indexing/filtering.md)
-- [Sparse and hybrid retrieval](indexing/sparse-hybrid.md)
+- [Sparse, keyword (BM25) and hybrid retrieval](indexing/sparse-hybrid.md)
+- [Binary quantization](indexing/binary-quantization.md)
 
 ## Client SDKs
 
@@ -49,8 +50,16 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Compatibility and data migration](operations/compatibility.md)
 - [Network partitions](operations/network-partitions.md)
 
+## Benchmarks and product planning
+
+- [ANN recall and latency benchmark](benchmarks/ann-recall.md)
+- [Gap analysis: open-source and cloud](product/gap-analysis.md)
+
 ## Develop and release
 
 - [Continuous integration](development/continuous-integration.md)
 - [Contributing](../CONTRIBUTING.md)
 - [Project governance](../GOVERNANCE.md)
+
+SDK maintainers: see the [package publishing guide](development/sdk-publishing.md)
+for registry setup, validation, and releases.

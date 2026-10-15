@@ -28,6 +28,7 @@ type storedRecord struct {
 	Timestamp    int64              `json:"timestamp"`
 	Version      uint64             `json:"version"`
 	Namespace    string             `json:"namespace,omitempty"`
+	Text         string             `json:"text,omitempty"`
 }
 
 // WriteBundle writes record and vector columns. Publishing the returned
@@ -52,7 +53,7 @@ func WriteBundle(directory, baseName string, records []core.Record, dimension in
 		}
 		stored[position] = storedRecord{
 			ID: record.ID, SparseVector: record.SparseVector, Metadata: record.Metadata, Payload: record.Payload,
-			Timestamp: record.Timestamp, Version: record.Version, Namespace: record.Namespace,
+			Timestamp: record.Timestamp, Version: record.Version, Namespace: record.Namespace, Text: record.Text,
 		}
 		start := position * dimension * 4
 		for offset, value := range record.Vector {
@@ -116,7 +117,7 @@ func ReadBundle(directory string, manifest Manifest) ([]core.Record, error) {
 		}
 		records[position] = core.Record{
 			ID: item.ID, Vector: vector, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload,
-			Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace,
+			Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace, Text: item.Text,
 		}
 	}
 	return records, nil
@@ -144,7 +145,7 @@ func ReadRecordColumn(directory string, manifest Manifest) ([]core.Record, error
 	}
 	records := make([]core.Record, len(stored))
 	for position, item := range stored {
-		records[position] = core.Record{ID: item.ID, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace}
+		records[position] = core.Record{ID: item.ID, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace, Text: item.Text}
 	}
 	return records, nil
 }

@@ -91,7 +91,18 @@ type IndexConfig struct {
 	M              int       `json:"m,omitempty"`
 	EFConstruction int       `json:"ef_construction,omitempty"`
 	EFSearch       int       `json:"ef_search,omitempty"`
+	// Quantization "binary" keeps 1-bit sign codes for candidate generation
+	// and rescores Oversampling*k candidates at full precision. Flat only.
+	Quantization Quantization `json:"quantization,omitempty"`
+	Oversampling int          `json:"oversampling,omitempty"`
 }
+
+type Quantization string
+
+const (
+	QuantizationNone   Quantization = ""
+	QuantizationBinary Quantization = "binary"
+)
 
 func (c CollectionConfig) Normalized() CollectionConfig {
 	if c.Index.Type == "" {
@@ -107,6 +118,9 @@ func (c CollectionConfig) Normalized() CollectionConfig {
 		if c.Index.EFSearch == 0 {
 			c.Index.EFSearch = 64
 		}
+	}
+	if c.Index.Quantization == QuantizationBinary && c.Index.Oversampling == 0 {
+		c.Index.Oversampling = 4
 	}
 	return c
 }
@@ -140,6 +154,21 @@ func (c CollectionConfig) Validate() error {
 	default:
 		return fmt.Errorf("%w: unsupported index type %q", ErrInvalidArgument, c.Index.Type)
 	}
+	switch c.Index.Quantization {
+	case QuantizationNone:
+		if c.Index.Oversampling != 0 {
+			return fmt.Errorf("%w: oversampling requires quantization", ErrInvalidArgument)
+		}
+	case QuantizationBinary:
+		if c.Index.Type != IndexFlat {
+			return fmt.Errorf("%w: binary quantization requires the flat index", ErrInvalidArgument)
+		}
+		if c.Index.Oversampling < 1 || c.Index.Oversampling > 100 {
+			return fmt.Errorf("%w: oversampling must be between 1 and 100", ErrInvalidArgument)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported quantization %q", ErrInvalidArgument, c.Index.Quantization)
+	}
 	return nil
 }
 
@@ -154,6 +183,74 @@ type Record struct {
 	Timestamp    int64              `json:"timestamp"`
 	Version      uint64             `json:"version"`
 	Namespace    string             `json:"namespace,omitempty"`
+	// Text is optional document text indexed for BM25 keyword retrieval.
+	Text string `json:"text,omitempty"`
+}
+
+// MaxTextBytes bounds per-record text so a single record cannot dominate a
+// segment's lexical index.
+const MaxTextBytes = 1 << 20
+
+func ValidateText(text string) error {
+	if len(text) > MaxTextBytes {
+		return fmt.Errorf("%w: text cannot exceed %d bytes", ErrInvalidArgument, MaxTextBytes)
+	}
+	return nil
+}
+
+// FusionMode selects how dense, sparse and text rankings are combined.
+type FusionMode string
+
+const (
+	// FusionWeighted blends normalized scores with Alpha as the dense weight.
+	FusionWeighted FusionMode = "weighted"
+	// FusionRRF sums reciprocal ranks, 1/(RRFConstant+rank), per signal.
+	FusionRRF FusionMode = "rrf"
+)
+
+const RRFConstant = 60
+
+// HybridQuery combines any of dense, sparse and text retrieval. At least one
+// of Sparse or Text is required; Dense alone uses the vector search path.
+type HybridQuery struct {
+	Dense  []float32
+	Sparse map[string]float32
+	Text   string
+	Alpha  float32
+	Fusion FusionMode
+	TopK   int
+}
+
+// Validate checks query shape against the collection dimension.
+func (q HybridQuery) Validate(dimension int) error {
+	if q.Dense != nil {
+		if err := ValidateVector(q.Dense, dimension); err != nil {
+			return err
+		}
+	}
+	if q.Sparse == nil && q.Text == "" {
+		return fmt.Errorf("%w: hybrid search requires sparse_vector or text", ErrInvalidArgument)
+	}
+	if q.Sparse != nil {
+		if err := ValidateSparseVector(q.Sparse); err != nil {
+			return err
+		}
+	}
+	if err := ValidateText(q.Text); err != nil {
+		return err
+	}
+	if q.Alpha < 0 || q.Alpha > 1 {
+		return fmt.Errorf("%w: alpha must be between 0 and 1", ErrInvalidArgument)
+	}
+	if q.TopK <= 0 {
+		return fmt.Errorf("%w: top_k must be positive", ErrInvalidArgument)
+	}
+	switch q.Fusion {
+	case "", FusionWeighted, FusionRRF:
+	default:
+		return fmt.Errorf("%w: unsupported fusion %q", ErrInvalidArgument, q.Fusion)
+	}
+	return nil
 }
 
 // SearchResult is ordered by descending Score. Score is normalized so larger

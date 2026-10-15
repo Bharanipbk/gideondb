@@ -214,15 +214,17 @@ func (s *Server) protected(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.dashboardAuth != nil {
 			if session, ok := s.dashboardAuth.session(r); ok {
-				s.dashboardAuth.mu.Lock()
-				mustChange := s.dashboardAuth.mustChange
-				s.dashboardAuth.mu.Unlock()
+				mustChange := session.mustChange
 				if mustChange {
 					writeJSON(w, http.StatusForbidden, apiError{Code: "password_change_required", Message: "change the bootstrap password before using administrative APIs"})
 					return
 				}
 				if r.Method != http.MethodGet && r.Method != http.MethodHead && subtle.ConstantTimeCompare([]byte(session.csrf), []byte(r.Header.Get("X-GideonDB-CSRF"))) != 1 {
 					writeJSON(w, http.StatusForbidden, apiError{Code: "csrf_rejected", Message: "valid CSRF token required"})
+					return
+				}
+				if !allowedRole(&Principal{Role: session.role}, r) {
+					writeJSON(w, http.StatusForbidden, apiError{Code: "forbidden", Message: "your role cannot perform this operation"})
 					return
 				}
 				next(w, r)

@@ -44,3 +44,8 @@ internal/api/rest/dashboard/node_modules/
 internal/api/rest/dashboard/test-results/
 internal/api/rest/dashboard/playwright-report/
 .dashboard-test-results/
+
+# SDK packaging output
+/sdk/python/build/
+/sdk/java/target/
+*.tgz

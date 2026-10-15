@@ -76,6 +76,33 @@ func TestRESTSparseAndHybridSearch(t *testing.T) {
 	requestJSON(t, handler, http.MethodPost, "/v1/collections/hybrid/vectors", map[string]any{"id": "bad", "vector": []float32{1, 0}, "sparse_vector": map[string]float32{"": 1}}, http.StatusBadRequest)
 }
 
+func TestRESTTextSearchAndRRFFusion(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(db, nil).Handler()
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "docs", "dimension": 2, "metric": "cosine", "shard_count": 2}, http.StatusCreated)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/vectors/batch", map[string]any{"records": []map[string]any{
+		{"id": "bm25", "vector": []float32{0, 1}, "text": "BM25 keyword retrieval for vector databases"},
+		{"id": "dense", "vector": []float32{1, 0}, "text": "cooking recipes"},
+	}}, http.StatusOK)
+	response := requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/search", map[string]any{"text": "keyword retrieval", "top_k": 5}, http.StatusOK)
+	if !strings.Contains(string(response), `"id":"bm25"`) || strings.Contains(string(response), `"id":"dense"`) {
+		t.Fatalf("unexpected text response: %s", response)
+	}
+	response = requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/search", map[string]any{"vector": []float32{1, 0}, "text": "keyword", "fusion": "rrf", "top_k": 5}, http.StatusOK)
+	if !strings.Contains(string(response), `"id":"bm25"`) || !strings.Contains(string(response), `"id":"dense"`) {
+		t.Fatalf("rrf should return candidates from both signals: %s", response)
+	}
+	record := requestJSON(t, handler, http.MethodGet, "/v1/collections/docs/vectors/bm25", nil, http.StatusOK)
+	if !strings.Contains(string(record), `"text":"BM25 keyword retrieval for vector databases"`) {
+		t.Fatalf("text not returned on get: %s", record)
+	}
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/search", map[string]any{"text": "x", "fusion": "max", "top_k": 1}, http.StatusBadRequest)
+}
+
 func TestOperationalPaginationAndRateLimit(t *testing.T) {
 	db, err := engine.Open(t.TempDir())
 	if err != nil {

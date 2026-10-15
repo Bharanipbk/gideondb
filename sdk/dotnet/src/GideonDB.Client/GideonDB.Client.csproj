@@ -6,10 +6,15 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <PackageId>GideonDB.Client</PackageId>
     <Version>0.1.0</Version>
+    <Authors>GideonDB contributors</Authors>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Description>Experimental .NET client for GideonDB.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/Bharanipbk/gideondb</PackageProjectUrl>
     <RepositoryUrl>https://github.com/Bharanipbk/gideondb.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
 </Project>

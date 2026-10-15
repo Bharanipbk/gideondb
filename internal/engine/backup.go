@@ -118,7 +118,7 @@ func (e *Engine) backup(destination string, recoveryPoint *NodeRecoveryPoint) er
 		if err != nil {
 			return err
 		}
-		if clean := filepath.Clean(relative); clean == cluster.IdentityFile || clean == cluster.MetadataFile || clean == cluster.RaftStateFile || clean == OwnershipFile || clean == dashboardCredentialsFile {
+		if clean := filepath.Clean(relative); clean == cluster.IdentityFile || clean == cluster.MetadataFile || clean == cluster.RaftStateFile || clean == OwnershipFile || (clean == dashboardCredentialsFile || strings.HasPrefix(clean, "admin.sqlite") || strings.HasPrefix(clean, "dashboard-credentials.backup-") || strings.HasPrefix(clean, ".admin-migrate-")) {
 			return nil
 		}
 		return writeTarFile(tarWriter, filepath.ToSlash(relative), path, info)

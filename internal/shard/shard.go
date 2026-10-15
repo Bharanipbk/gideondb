@@ -164,9 +164,13 @@ func (s *Shard) SearchFilteredWithEF(namespace string, vector []float32, k int, 
 }
 
 func (s *Shard) SearchSparseHybrid(namespace string, dense []float32, sparse map[string]float32, alpha float32, k int, filter *metadata.Expr) ([]core.SearchResult, error) {
+	return s.SearchHybrid(namespace, core.HybridQuery{Dense: dense, Sparse: sparse, Alpha: alpha, TopK: k}, filter)
+}
+
+func (s *Shard) SearchHybrid(namespace string, query core.HybridQuery, filter *metadata.Expr) ([]core.SearchResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	results, err := s.active.SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter, nil)
+	results, err := s.active.SearchHybrid(namespace, query, filter, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -175,7 +179,7 @@ func (s *Shard) SearchSparseHybrid(namespace string, dense []float32, sparse map
 		for key := range s.tombstones {
 			excluded[key] = struct{}{}
 		}
-		base, err := s.immutable.segment.SearchSparseHybrid(namespace, dense, sparse, alpha, k, filter, excluded)
+		base, err := s.immutable.segment.SearchHybrid(namespace, query, filter, excluded)
 		if err != nil {
 			return nil, err
 		}
@@ -184,8 +188,8 @@ func (s *Shard) SearchSparseHybrid(namespace string, dense []float32, sparse map
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score || (results[i].Score == results[j].Score && results[i].ID < results[j].ID)
 	})
-	if len(results) > k {
-		results = results[:k]
+	if len(results) > query.TopK {
+		results = results[:query.TopK]
 	}
 	return results, nil
 }

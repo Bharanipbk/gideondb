@@ -1,4 +1,4 @@
-.PHONY: build test test-e2e test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-e2e test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark bench-ann vet fmt run docker validate-single-node validate-kubernetes
 
 DOTNET ?= dotnet
 
@@ -67,7 +67,10 @@ race:
 	go test -race ./...
 
 benchmark:
-	go test -run '^$$' -bench . -benchmem ./internal/distance ./internal/index/flat ./internal/index/hnsw ./internal/metadata ./internal/wal
+	go test -run '^$$' -bench . -benchmem ./internal/distance ./internal/index/flat ./internal/index/hnsw ./internal/index/binary ./internal/metadata ./internal/segment ./internal/wal
+
+bench-ann:
+	go run ./cmd/gideondb-bench -n "$${VECTORS:-50000}" -dimension "$${DIMENSION:-384}" -query-count "$${QUERIES:-200}" -configs "$${CONFIGS:-flat,hnsw,binary,binary-x10}"
 
 vet:
 	go vet ./...

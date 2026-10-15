@@ -493,6 +493,8 @@ paths:
                   items: {type: number, format: float}
                 sparse_vector: {type: object, minProperties: 1, maxProperties: 10000, additionalProperties: {type: number, format: float}}
                 alpha: {type: number, format: float, minimum: 0, maximum: 1, default: 0.5, description: Dense contribution when both vectors are supplied.}
+                text: {type: string, maxLength: 1048576, description: BM25 keyword query over record text.}
+                fusion: {type: string, enum: [weighted, rrf], default: weighted, description: How dense, sparse and text rankings are combined.}
                 top_k: {type: integer, minimum: 1}
                 ef_search: {type: integer, minimum: 1, maximum: 10000, description: Optional HNSW query breadth override; ignored by flat indexes.}
                 namespace: {type: string}
@@ -526,6 +528,8 @@ paths:
                 vector: {type: array, items: {type: number, format: float}}
                 sparse_vector: {type: object, minProperties: 1, maxProperties: 10000, additionalProperties: {type: number, format: float}}
                 alpha: {type: number, format: float, minimum: 0, maximum: 1, default: 0.5}
+                text: {type: string, maxLength: 1048576, description: BM25 keyword query over record text.}
+                fusion: {type: string, enum: [weighted, rrf], default: weighted, description: How dense, sparse and text rankings are combined.}
                 top_k: {type: integer, minimum: 1}
                 ef_search: {type: integer, minimum: 1, maximum: 10000}
                 namespace: {type: string}
@@ -794,6 +798,8 @@ paths:
                 vector: {type: array, items: {type: number, format: float}}
                 sparse_vector: {type: object, minProperties: 1, maxProperties: 10000, additionalProperties: {type: number, format: float}}
                 alpha: {type: number, format: float, minimum: 0, maximum: 1, default: 0.5}
+                text: {type: string, maxLength: 1048576, description: BM25 keyword query over record text.}
+                fusion: {type: string, enum: [weighted, rrf], default: weighted, description: How dense, sparse and text rankings are combined.}
                 top_k: {type: integer, minimum: 1}
                 ef_search: {type: integer, minimum: 1, maximum: 10000, description: Optional HNSW query breadth override forwarded to every shard.}
                 namespace: {type: string}
@@ -1084,6 +1090,8 @@ components:
         m: {type: integer, minimum: 2, maximum: 128}
         ef_construction: {type: integer, minimum: 2, maximum: 10000}
         ef_search: {type: integer, minimum: 1, maximum: 10000}
+        quantization: {type: string, enum: [binary], description: Binary (1-bit sign) codes with full-precision rescoring. Flat index only.}
+        oversampling: {type: integer, minimum: 1, maximum: 100, default: 4, description: Candidates rescored per requested result. Requires quantization.}
     Record:
       type: object
       additionalProperties: false
@@ -1093,6 +1101,7 @@ components:
           type: array
           items: {type: number, format: float}
         sparse_vector: {type: object, minProperties: 1, maxProperties: 10000, additionalProperties: {type: number, format: float}}
+        text: {type: string, maxLength: 1048576, description: Optional document text indexed for BM25 keyword search.}
         metadata: {type: object, additionalProperties: true}
         payload: {type: object, additionalProperties: true}
         namespace: {type: string}
@@ -1108,6 +1117,7 @@ components:
           items: {type: number, format: float}
           description: Present only when include_vector=true.
         sparse_vector: {type: object, additionalProperties: {type: number, format: float}}
+        text: {type: string, maxLength: 1048576, description: Optional document text indexed for BM25 keyword search.}
         metadata: {type: object, additionalProperties: true}
         payload: {type: object, additionalProperties: true}
         namespace: {type: string}

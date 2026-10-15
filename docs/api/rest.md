@@ -100,11 +100,20 @@ deterministic bounded traversal, not snapshot isolation from concurrent writes.
 
 Vectors and search queries must contain exactly the collection dimension and
 only finite float32 values; NaN and positive/negative infinity are rejected.
-Records may additionally contain a `sparse_vector` with 1–10,000 non-empty
-term keys and finite weights. A search with only `sparse_vector` uses sparse
-cosine similarity; supplying both vectors enables hybrid scoring, with `alpha`
-from 0 through 1 selecting the dense weight (default `0.5`). See [Sparse and
-hybrid retrieval](../indexing/sparse-hybrid.md).
+Records may also contain:
+
+- a `sparse_vector` with 1–10,000 non-empty term keys and finite weights;
+- a `text` string of up to 1 MiB, indexed for BM25 keyword search.
+
+A search that includes `sparse_vector` or `text` runs hybrid retrieval. With
+`vector` as well, results are fused: `fusion` is `weighted` (default, with
+`alpha` from 0 to 1 as the dense weight, default `0.5`) or `rrf` (Reciprocal
+Rank Fusion). See [Sparse, keyword and hybrid
+retrieval](../indexing/sparse-hybrid.md).
+
+A flat collection may set `"index": {"type": "flat", "quantization": "binary",
+"oversampling": 10}` to search 1-bit codes and rescore candidates at full
+precision. See [Binary quantization](../indexing/binary-quantization.md).
 
 Batch requests validate every record before writing. Records are grouped by
 logical shard and encoded as one WAL record per shard. Each shard group is

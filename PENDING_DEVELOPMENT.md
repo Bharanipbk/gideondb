@@ -107,6 +107,14 @@ automated tests, and user-facing documentation are all finished.
   for mutable HNSW 5,000 x 64 (508.63 structural); these remain workload-local
   measurements rather than publishable universal capacity claims.
 
+## SDK distribution
+
+- [ ] Publish and verify the first release in all six language ecosystems.
+  Package metadata, Maven packaging, a build-only/default opt-in publishing
+  workflow, and the [registry runbook](docs/development/sdk-publishing.md)
+  are prepared. Registry ownership, credentials, CI execution, publication,
+  and clean public-registry install checks remain pending.
+
 ## API and distributed behavior
 
 - [x] Add durable `Idempotency-Key` handling for placement-aware writes. Each
@@ -136,6 +144,12 @@ automated tests, and user-facing documentation are all finished.
   index remains a future optimization rather than a correctness dependency.
 
 ## Security and operations
+
+- [ ] Implement the [ECS engineering backlog](docs/operations/ecs-implementation-plan.md):
+  release evidence tooling, exclusive-writer qualification, evaluation
+  infrastructure, cluster acceptance, S3 recovery drills, and external
+  observability/workload gates. The implementation plan is documented; these
+  deliverables and cloud qualification remain pending.
 
 - [x] Improve the administration dashboard UI for production operations,
   including responsive navigation, clearer cluster and shard health, accessible
