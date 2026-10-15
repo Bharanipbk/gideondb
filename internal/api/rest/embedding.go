@@ -11,15 +11,10 @@ import (
 )
 
 // textRecord is a record as clients send it. When it has text but no vector
-// and the collection has a vectorizer, the server embeds the text. A record
-// with both keeps its vector. Text is stored in payload.text unless the
-// payload already sets that key.
-//
-// Lexical search (BM25) also uses a record "text" field; once both land,
-// Text moves onto core.Record and this wrapper goes away.
+// and the collection has a vectorizer, the server embeds the text; the text
+// stays on the record for BM25.
 type textRecord struct {
 	core.Record
-	Text string `json:"text,omitempty"`
 }
 
 // maxEmbedTextBytes bounds one text so a single record cannot make the
@@ -53,19 +48,6 @@ func (s *Server) resolveRecords(ctx context.Context, w http.ResponseWriter, coll
 		if input.Text != "" && len(input.Vector) == 0 {
 			texts = append(texts, input.Text)
 			positions = append(positions, i)
-		}
-	}
-	for i, input := range inputs {
-		if input.Text == "" {
-			continue
-		}
-		if _, exists := records[i].Payload["text"]; !exists {
-			payload := make(map[string]any, len(records[i].Payload)+1)
-			for key, value := range records[i].Payload {
-				payload[key] = value
-			}
-			payload["text"] = input.Text
-			records[i].Payload = payload
 		}
 	}
 	if len(texts) == 0 {

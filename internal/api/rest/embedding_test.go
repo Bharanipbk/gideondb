@@ -63,7 +63,7 @@ func TestTextUpsertAndSearch(t *testing.T) {
 	if code, body := send(t, h, http.MethodPost, "/v1/collections", `{"name":"docs","dimension":4,"metric":"cosine","shard_count":2,"vectorizer":"keywords"}`); code != http.StatusCreated || body["vectorizer"] != "keywords" {
 		t.Fatalf("create = %d %v", code, body)
 	}
-	if code, body := send(t, h, http.MethodPost, "/v1/collections/docs/vectors", `{"id":"g","text":"Go is fast","metadata":{"kind":"lang"}}`); code != http.StatusOK || body["payload"].(map[string]any)["text"] != "Go is fast" {
+	if code, body := send(t, h, http.MethodPost, "/v1/collections/docs/vectors", `{"id":"g","text":"Go is fast","metadata":{"kind":"lang"}}`); code != http.StatusOK || body["text"] != "Go is fast" {
 		t.Fatalf("upsert = %d %v", code, body)
 	}
 	code, body := send(t, h, http.MethodPost, "/v1/collections/docs/vectors/batch", `{"records":[
@@ -73,8 +73,8 @@ func TestTextUpsertAndSearch(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("batch = %d %v", code, body)
 	}
-	if code, body := send(t, h, http.MethodGet, "/v1/collections/docs/vectors/r", ""); code != http.StatusOK || body["payload"].(map[string]any)["text"] != "custom" {
-		t.Fatalf("existing payload.text must be kept: %d %v", code, body)
+	if code, body := send(t, h, http.MethodGet, "/v1/collections/docs/vectors/r", ""); code != http.StatusOK || body["text"] != "rust borrow checker" || body["payload"].(map[string]any)["text"] != "custom" {
+		t.Fatalf("record text and payload must both be kept: %d %v", code, body)
 	}
 	code, body = send(t, h, http.MethodPost, "/v1/collections/docs/search", `{"text":"learning rust","top_k":1}`)
 	results, _ := body["results"].([]any)
@@ -111,7 +111,7 @@ func TestTextErrors(t *testing.T) {
 		status     int
 	}{
 		{"/v1/collections/plain/vectors", `{"id":"a","text":"go"}`, http.StatusBadRequest},
-		{"/v1/collections/plain/search", `{"text":"go","top_k":1}`, http.StatusBadRequest},
+		{"/v1/collections/plain/search", `{"text":"go","top_k":1}`, http.StatusOK}, // BM25 keyword search
 		{"/v1/collections/docs/vectors", `{"id":"a","text":"go","vector":[1,0,0,0]}`, http.StatusOK},
 		{"/v1/collections/docs/search", `{"text":"go","vector":[1,0,0,0],"top_k":1}`, http.StatusOK},
 		{"/v1/collections/plain/vectors", `{"id":"b","text":"go","vector":[1,0,0,0]}`, http.StatusOK},

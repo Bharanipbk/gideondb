@@ -258,7 +258,7 @@ func TestTextFallsBackToServerVectorizer(t *testing.T) {
 	}}, false)
 	found := h.call("search", map[string]any{"collection": "docs", "text": "vector database", "top_k": 1}, false)
 	result := found["results"].([]any)[0].(map[string]any)
-	if result["id"] != "a" || result["payload"].(map[string]any)["text"] != "go vector database" {
+	if result["id"] != "a" {
 		t.Fatalf("search = %v", found)
 	}
 }

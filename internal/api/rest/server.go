@@ -760,20 +760,20 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 
 type searchRequest struct {
 	Vector       []float32          `json:"vector"`
-	Text         string             `json:"text,omitempty"`
 	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
 	Alpha        *float32           `json:"alpha,omitempty"`
 	TopK         int                `json:"top_k"`
 	EFSearch     int                `json:"ef_search,omitempty"`
 	Namespace    string             `json:"namespace,omitempty"`
 	Filter       map[string]any     `json:"filter,omitempty"`
-	// Text runs BM25 keyword retrieval over record text.
+	// Text runs BM25 keyword retrieval over record text. Without a vector,
+	// a collection's vectorizer also embeds it for the dense side.
 	Text string `json:"text,omitempty"`
 	// Fusion is "weighted" (default) or "rrf".
-	Fusion core.FusionMode `json:"fusion,omitempty"`
-	Offset       int                `json:"offset,omitempty"`
-	GroupBy      string             `json:"group_by,omitempty"`
-	GroupSize    int                `json:"group_size,omitempty"`
+	Fusion    core.FusionMode `json:"fusion,omitempty"`
+	Offset    int             `json:"offset,omitempty"`
+	GroupBy   string          `json:"group_by,omitempty"`
+	GroupSize int             `json:"group_size,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {

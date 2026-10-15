@@ -78,8 +78,7 @@ curl -fsS -X POST http://127.0.0.1:6333/v1/collections/articles/search \
 - `text` is also the field that [lexical search](sparse-hybrid.md) indexes
   and queries with BM25 where that is available, so the same text drives
   dense and keyword retrieval.
-- The text is stored in `payload.text` unless the record's payload already
-  sets `text`.
+- The text stays on the record (`text`), where BM25 indexes it.
 - Text that is embedded is limited to 64 KiB per record or query.
 - `text` also works on `POST /v1/cluster/collections/{name}/search` and
   `/vectors/batch`; the coordinator embeds once before fanning out.
