@@ -71,20 +71,26 @@ curl -fsS -X POST http://127.0.0.1:6333/v1/collections/articles/search \
   -d '{"text":"how does graph search work","top_k":3}'
 ```
 
-- A record sends either `vector` or `text`, never both. Records in one batch
-  may mix the two.
+- A record with `text` and no `vector` is embedded. A record with both keeps
+  its vector; nothing is embedded. Records in one batch may mix the forms.
+- A search with `text` and no `vector` embeds the query. With both, the
+  given vector is used.
+- `text` is also the field that [lexical search](sparse-hybrid.md) indexes
+  and queries with BM25 where that is available, so the same text drives
+  dense and keyword retrieval.
 - The text is stored in `payload.text` unless the record's payload already
   sets `text`.
-- Text is limited to 64 KiB per record or query.
+- Text that is embedded is limited to 64 KiB per record or query.
 - `text` also works on `POST /v1/cluster/collections/{name}/search` and
   `/vectors/batch`; the coordinator embeds once before fanning out.
-- Collections without a vectorizer reject `text` with `400 invalid_argument`.
+- On a collection without a vectorizer, `text` is passed through untouched;
+  a record or dense search without a vector then fails validation as before.
 
 ## Errors
 
 | Status | Code | Cause |
 |---|---|---|
-| 400 | `invalid_argument` | `text` and `vector` both set, text too long, or no vectorizer |
+| 400 | `invalid_argument` | Text to embed exceeds 64 KiB, or no vector and no vectorizer |
 | 502 | `embedding_failed` | The model server returned an error or a wrong dimension |
 | 503 | `vectorizer_unavailable` | The collection names a model this node does not have |
 | 504 | `embedding_timeout` | The model server did not answer in time |

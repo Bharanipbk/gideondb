@@ -10,9 +10,13 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/embedding"
 )
 
-// textRecord is a record as clients send it: either a vector, or text that
-// the collection's vectorizer embeds on the server. Text is stored in
-// payload.text unless the payload already sets that key.
+// textRecord is a record as clients send it. When it has text but no vector
+// and the collection has a vectorizer, the server embeds the text. A record
+// with both keeps its vector. Text is stored in payload.text unless the
+// payload already sets that key.
+//
+// Lexical search (BM25) also uses a record "text" field; once both land,
+// Text moves onto core.Record and this wrapper goes away.
 type textRecord struct {
 	core.Record
 	Text string `json:"text,omitempty"`
@@ -22,12 +26,13 @@ type textRecord struct {
 // server send megabytes to an embedding provider.
 const maxEmbedTextBytes = 64 << 10
 
-// vectorizerFor returns the collection's embedding model, writing an error
-// response and returning false when text cannot be embedded.
+// vectorizerFor returns the collection's embedding model. It returns nil and
+// true when the collection has none, so text passes through unchanged (for
+// lexical search), and false after writing an error response when the
+// model is not configured on this node.
 func (s *Server) vectorizerFor(w http.ResponseWriter, config core.CollectionConfig) (*embedding.Model, bool) {
 	if config.Vectorizer == "" {
-		writeError(w, fmt.Errorf("%w: collection %q has no vectorizer; send vectors or create it with \"vectorizer\"", core.ErrInvalidArgument, config.Name))
-		return nil, false
+		return nil, true
 	}
 	model, ok := s.embedders.Get(config.Vectorizer)
 	if !ok {
@@ -45,19 +50,23 @@ func (s *Server) resolveRecords(ctx context.Context, w http.ResponseWriter, coll
 	var positions []int
 	for i, input := range inputs {
 		records[i] = input.Record
+		if input.Text != "" && len(input.Vector) == 0 {
+			texts = append(texts, input.Text)
+			positions = append(positions, i)
+		}
+	}
+	for i, input := range inputs {
 		if input.Text == "" {
 			continue
 		}
-		if len(input.Vector) > 0 {
-			writeError(w, fmt.Errorf("%w: record %d sets both vector and text", core.ErrInvalidArgument, i))
-			return nil, false
+		if _, exists := records[i].Payload["text"]; !exists {
+			payload := make(map[string]any, len(records[i].Payload)+1)
+			for key, value := range records[i].Payload {
+				payload[key] = value
+			}
+			payload["text"] = input.Text
+			records[i].Payload = payload
 		}
-		if len(input.Text) > maxEmbedTextBytes {
-			writeError(w, fmt.Errorf("%w: record %d text exceeds %d bytes", core.ErrInvalidArgument, i, maxEmbedTextBytes))
-			return nil, false
-		}
-		texts = append(texts, input.Text)
-		positions = append(positions, i)
 	}
 	if len(texts) == 0 {
 		return records, true
@@ -71,38 +80,31 @@ func (s *Server) resolveRecords(ctx context.Context, w http.ResponseWriter, coll
 	if !ok {
 		return nil, false
 	}
+	if model == nil {
+		return records, true
+	}
+	for i, position := range positions {
+		if len(texts[i]) > maxEmbedTextBytes {
+			writeError(w, fmt.Errorf("%w: record %d text exceeds the %d bytes that can be embedded", core.ErrInvalidArgument, position, maxEmbedTextBytes))
+			return nil, false
+		}
+	}
 	vectors, err := model.Embed(ctx, texts, config.Dimension)
 	if err != nil {
 		writeEmbeddingError(w, err)
 		return nil, false
 	}
 	for i, position := range positions {
-		record := &records[position]
-		record.Vector = vectors[i]
-		if _, exists := record.Payload["text"]; !exists {
-			payload := make(map[string]any, len(record.Payload)+1)
-			for key, value := range record.Payload {
-				payload[key] = value
-			}
-			payload["text"] = inputs[position].Text
-			record.Payload = payload
-		}
+		records[position].Vector = vectors[i]
 	}
 	return records, true
 }
 
-// resolveQuery embeds request.Text into request.Vector when text is given.
+// resolveQuery embeds request.Text into request.Vector when the search has
+// text but no vector. Text is kept so lexical retrieval can use it too.
 func (s *Server) resolveQuery(ctx context.Context, w http.ResponseWriter, collectionName string, request *searchRequest) bool {
-	if request.Text == "" {
+	if request.Text == "" || len(request.Vector) > 0 {
 		return true
-	}
-	if len(request.Vector) > 0 {
-		writeError(w, fmt.Errorf("%w: search sets both vector and text", core.ErrInvalidArgument))
-		return false
-	}
-	if len(request.Text) > maxEmbedTextBytes {
-		writeError(w, fmt.Errorf("%w: text exceeds %d bytes", core.ErrInvalidArgument, maxEmbedTextBytes))
-		return false
 	}
 	config, _, err := s.engine.DescribeCollection(collectionName)
 	if err != nil {
@@ -110,7 +112,11 @@ func (s *Server) resolveQuery(ctx context.Context, w http.ResponseWriter, collec
 		return false
 	}
 	model, ok := s.vectorizerFor(w, config)
-	if !ok {
+	if !ok || model == nil {
+		return ok
+	}
+	if len(request.Text) > maxEmbedTextBytes {
+		writeError(w, fmt.Errorf("%w: text exceeds the %d bytes that can be embedded", core.ErrInvalidArgument, maxEmbedTextBytes))
 		return false
 	}
 	vectors, err := model.Embed(ctx, []string{request.Text}, config.Dimension)
@@ -118,8 +124,7 @@ func (s *Server) resolveQuery(ctx context.Context, w http.ResponseWriter, collec
 		writeEmbeddingError(w, err)
 		return false
 	}
-	// Shards receive the vector only.
-	request.Vector, request.Text = vectors[0], ""
+	request.Vector = vectors[0]
 	return true
 }
 

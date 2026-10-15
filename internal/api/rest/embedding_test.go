@@ -112,8 +112,9 @@ func TestTextErrors(t *testing.T) {
 	}{
 		{"/v1/collections/plain/vectors", `{"id":"a","text":"go"}`, http.StatusBadRequest},
 		{"/v1/collections/plain/search", `{"text":"go","top_k":1}`, http.StatusBadRequest},
-		{"/v1/collections/docs/vectors", `{"id":"a","text":"go","vector":[1,0,0,0]}`, http.StatusBadRequest},
-		{"/v1/collections/docs/search", `{"text":"go","vector":[1,0,0,0],"top_k":1}`, http.StatusBadRequest},
+		{"/v1/collections/docs/vectors", `{"id":"a","text":"go","vector":[1,0,0,0]}`, http.StatusOK},
+		{"/v1/collections/docs/search", `{"text":"go","vector":[1,0,0,0],"top_k":1}`, http.StatusOK},
+		{"/v1/collections/plain/vectors", `{"id":"b","text":"go","vector":[1,0,0,0]}`, http.StatusOK},
 		{"/v1/collections/docs/vectors", `{"id":"a","text":"` + strings.Repeat("x", maxEmbedTextBytes+1) + `"}`, http.StatusBadRequest},
 		{"/v1/collections/down/vectors", `{"id":"a","text":"go"}`, http.StatusBadGateway},
 		{"/v1/collections/missing/search", `{"text":"go","top_k":1}`, http.StatusNotFound},
