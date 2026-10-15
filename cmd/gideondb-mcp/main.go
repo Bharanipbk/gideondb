@@ -17,6 +17,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"github.com/Bharanipbk/gideondb/internal/mcp"
 	"github.com/Bharanipbk/gideondb/pkg/client"
 )
@@ -41,7 +42,7 @@ func main() {
 		if *embedURL == "" || *embedModel == "" {
 			fail(fmt.Errorf("-embed-url and -embed-model must be set together"))
 		}
-		cfg.Embedder = &mcp.OpenAIEmbedder{BaseURL: *embedURL, Model: *embedModel, APIKey: os.Getenv("EMBEDDING_API_KEY")}
+		cfg.Embedder = &embedding.OpenAIEmbedder{BaseURL: *embedURL, Model: *embedModel, APIKey: os.Getenv("EMBEDDING_API_KEY")}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

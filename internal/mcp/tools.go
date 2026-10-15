@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"github.com/Bharanipbk/gideondb/pkg/client"
 )
 
@@ -14,7 +15,7 @@ import (
 type Config struct {
 	Client *client.Client
 	// Embedder enables text arguments and the memory tools. Optional.
-	Embedder Embedder
+	Embedder embedding.Embedder
 	// AllowWrites exposes upsert, delete and the memory write tools.
 	AllowWrites bool
 	// AllowAdmin exposes create_collection and delete_collection.
@@ -47,7 +48,7 @@ func Tools(cfg Config) []Tool {
 		{
 			Name: "search",
 			Description: "Nearest-neighbour search in a collection. Pass either `vector` or `text` " +
-				"(text needs an embedding model configured on the MCP server).",
+				"(text is embedded by the MCP server's model if configured, otherwise by the collection's server-side vectorizer).",
 			InputSchema: object(map[string]any{
 				"collection": str("Collection name."),
 				"vector":     floats("Query vector."),
@@ -193,8 +194,12 @@ func (t *toolset) search(ctx context.Context, arguments json.RawMessage) (any, e
 	if err != nil {
 		return nil, err
 	}
+	query := ""
+	if vector == nil {
+		query = input.Text // embedded by the collection's vectorizer
+	}
 	results, err := t.cfg.Client.Search(ctx, input.Collection, client.SearchOptions{
-		Vector: vector, TopK: topK, Namespace: input.Namespace, Filter: input.Filter, EFSearch: input.EFSearch,
+		Vector: vector, Text: query, TopK: topK, Namespace: input.Namespace, Filter: input.Filter, EFSearch: input.EFSearch,
 	})
 	if err != nil {
 		return nil, err
@@ -255,10 +260,9 @@ func (t *toolset) upsertRecords(ctx context.Context, arguments json.RawMessage) 
 			textPositions = append(textPositions, i)
 		}
 	}
-	if len(texts) > 0 {
-		if t.cfg.Embedder == nil {
-			return nil, errors.New("text records need an embedding model; start gideondb-mcp with -embed-url and -embed-model")
-		}
+	// Without a local model, text goes to the server, which embeds it with
+	// the collection's vectorizer and stores it in payload.text.
+	if len(texts) > 0 && t.cfg.Embedder != nil {
 		vectors, err := t.cfg.Embedder.Embed(ctx, texts)
 		if err != nil {
 			return nil, err
@@ -269,12 +273,14 @@ func (t *toolset) upsertRecords(ctx context.Context, arguments json.RawMessage) 
 	}
 	records := make([]client.Record, len(input.Records))
 	for i, record := range input.Records {
-		payload := record.Payload
-		if record.Text != "" {
+		payload, text := record.Payload, ""
+		if record.Text != "" && t.cfg.Embedder != nil {
 			payload = cloneMap(payload)
 			payload["text"] = record.Text
+		} else if record.Text != "" {
+			text = record.Text
 		}
-		records[i] = client.Record{ID: record.ID, Vector: record.Vector, Metadata: record.Metadata, Payload: payload, Namespace: record.Namespace}
+		records[i] = client.Record{ID: record.ID, Vector: record.Vector, Text: text, Metadata: record.Metadata, Payload: payload, Namespace: record.Namespace}
 	}
 	if _, err := t.cfg.Client.BatchUpsert(ctx, input.Collection, records); err != nil {
 		return nil, err
@@ -342,6 +348,8 @@ func (t *toolset) deleteCollection(ctx context.Context, arguments json.RawMessag
 	return map[string]any{"deleted": input.Name}, nil
 }
 
+// vectorFor returns the query vector, or nil when text should be embedded
+// server-side.
 func (t *toolset) vectorFor(ctx context.Context, vector []float32, text string) ([]float32, error) {
 	if (len(vector) == 0) == (text == "") {
 		return nil, errors.New("pass exactly one of vector or text")
@@ -350,7 +358,7 @@ func (t *toolset) vectorFor(ctx context.Context, vector []float32, text string) 
 		return vector, nil
 	}
 	if t.cfg.Embedder == nil {
-		return nil, errors.New("text queries need an embedding model; start gideondb-mcp with -embed-url and -embed-model")
+		return nil, nil // the server embeds the text with the collection's vectorizer
 	}
 	vectors, err := t.cfg.Embedder.Embed(ctx, []string{text})
 	if err != nil {

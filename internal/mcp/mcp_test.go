@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Bharanipbk/gideondb/internal/api/rest"
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"github.com/Bharanipbk/gideondb/internal/engine"
 	"github.com/Bharanipbk/gideondb/pkg/client"
 )
@@ -42,6 +43,7 @@ func (f roundTrip) RoundTrip(request *http.Request) (*http.Response, error) { re
 
 type harness struct {
 	t      *testing.T
+	client *client.Client
 	server *Server
 	now    time.Time
 	nextID int
@@ -49,12 +51,17 @@ type harness struct {
 
 func newHarness(t *testing.T, cfg Config) *harness {
 	t.Helper()
+	return newHarnessWithServerEmbedders(t, cfg, nil)
+}
+
+func newHarnessWithServerEmbedders(t *testing.T, cfg Config, embedders *embedding.Registry) *harness {
+	t.Helper()
 	db, err := engine.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	handler := rest.New(db, slog.New(slog.NewTextHandler(io.Discard, nil))).Handler()
+	handler := rest.NewWithOptions(db, slog.New(slog.NewTextHandler(io.Discard, nil)), rest.Options{Embedders: embedders}).Handler()
 	httpClient := &http.Client{Transport: roundTrip(func(request *http.Request) (*http.Response, error) {
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)
@@ -64,7 +71,7 @@ func newHarness(t *testing.T, cfg Config) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, now: time.Unix(1_700_000_000, 0)}
+	h := &harness{t: t, client: cfg.Client, now: time.Unix(1_700_000_000, 0)}
 	cfg.Now = func() time.Time { return h.now }
 	h.server = NewServer("gideondb", "test", Tools(cfg))
 	return h
@@ -229,5 +236,29 @@ func TestMemoryLifecycle(t *testing.T) {
 	h.call("forget", map[string]any{"user": "alice", "id": old}, false)
 	if got := recall(0); len(got) != 1 {
 		t.Fatalf("after forget = %v", got)
+	}
+}
+
+func TestTextFallsBackToServerVectorizer(t *testing.T) {
+	registry := embedding.NewRegistryWithModels(embedding.NewModel(embedding.Config{Name: "words", Model: "words", Dimension: 16}, wordEmbedder{}))
+	h := newHarnessWithServerEmbedders(t, Config{AllowWrites: true}, registry)
+	if _, err := h.server.byName["search"].handler(context.Background(), json.RawMessage(`{"collection":"x","text":"q"}`)); err == nil {
+		t.Fatal("search on a missing collection should fail")
+	}
+	h.call("upsert_records", map[string]any{"collection": "missing", "records": []any{map[string]any{"id": "a", "text": "go"}}}, true)
+	// Create a collection that uses the server-side vectorizer, then use text
+	// without any embedding model in the MCP server.
+	ctx := context.Background()
+	if _, err := h.client.CreateCollection(ctx, client.CollectionConfig{Name: "docs", Dimension: 16, Metric: "cosine", ShardCount: 1, Vectorizer: "words"}); err != nil {
+		t.Fatal(err)
+	}
+	h.call("upsert_records", map[string]any{"collection": "docs", "records": []any{
+		map[string]any{"id": "a", "text": "go vector database"},
+		map[string]any{"id": "b", "text": "chocolate cake"},
+	}}, false)
+	found := h.call("search", map[string]any{"collection": "docs", "text": "vector database", "top_k": 1}, false)
+	result := found["results"].([]any)[0].(map[string]any)
+	if result["id"] != "a" || result["payload"].(map[string]any)["text"] != "go vector database" {
+		t.Fatalf("search = %v", found)
 	}
 }

@@ -46,12 +46,16 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 	if !s.requireAuthoritativePlacement(w) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
 	var request distributedSearchRequest
 	if !decode(w, r, &request) {
 		return
 	}
+	if !s.resolveQuery(r.Context(), w, r.PathValue("name"), &request.searchRequest) {
+		return
+	}
+	// The shard fan-out deadline starts after embedding.
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	filter, err := metadata.Parse(request.Filter)
 	if err != nil {
 		writeError(w, err)

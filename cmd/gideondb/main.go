@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"log/slog"
 	"net"
 	"net/http"
@@ -46,6 +47,7 @@ func main() {
 	auditRetention := flag.Int("audit-retention", defaults.AuditRetention, "durable sanitized HTTP audit events retained (256-1000000)")
 	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
 	principalsFile := flag.String("principals-file", "", "reloadable JSON file containing API principals, roles, and collection prefixes")
+	embeddersFile := flag.String("embedders-file", os.Getenv("GIDEONDB_EMBEDDERS_FILE"), "JSON file of embedding models that collections can use as their vectorizer")
 	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
 	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow bearer authentication over cleartext HTTP on a non-loopback listener")
 	enableStaticRouting := flag.Bool("enable-static-routing", false, "activate immutable static placement only while all peer views converge")
@@ -329,7 +331,15 @@ func main() {
 		logger.Error("configure metadata Raft runtime", "error", err)
 		os.Exit(2)
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath})
+	var embedders *embedding.Registry
+	if *embeddersFile != "" {
+		var embeddersErr error
+		if embedders, embeddersErr = embedding.LoadFile(*embeddersFile); embeddersErr != nil {
+			logger.Error("load embedders", "error", embeddersErr)
+			os.Exit(2)
+		}
+	}
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath, Embedders: embedders})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,

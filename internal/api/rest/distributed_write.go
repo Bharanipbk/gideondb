@@ -19,8 +19,8 @@ import (
 )
 
 type distributedBatchRequest struct {
-	Records         []core.Record `json:"records"`
-	Acknowledgement string        `json:"acknowledgement,omitempty"`
+	Records         []textRecord `json:"records"`
+	Acknowledgement string       `json:"acknowledgement,omitempty"`
 }
 
 type internalShardBatchRequest struct {
@@ -82,8 +82,6 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 	if !s.requireAuthoritativePlacement(w) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
 	var request distributedBatchRequest
 	if !decode(w, r, &request) {
 		return
@@ -92,6 +90,13 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 		writeError(w, fmt.Errorf("%w: batch size must be between 1 and 10000", core.ErrInvalidArgument))
 		return
 	}
+	records, ok := s.resolveRecords(r.Context(), w, r.PathValue("name"), request.Records)
+	if !ok {
+		return
+	}
+	// The shard fan-out deadline starts after embedding.
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
 	acknowledgement, err := parseAcknowledgement(request.Acknowledgement)
 	if err != nil {
 		writeError(w, err)
@@ -104,7 +109,7 @@ func (s *Server) distributedBatchUpsert(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	groups := make(map[uint32][]core.Record)
-	for position, record := range request.Records {
+	for position, record := range records {
 		if record.ID == "" {
 			writeError(w, fmt.Errorf("%w: record %d id is required", core.ErrInvalidArgument, position))
 			return

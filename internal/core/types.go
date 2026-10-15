@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 )
 
 var (
@@ -75,7 +76,12 @@ type CollectionConfig struct {
 	Metric     Metric      `json:"metric"`
 	ShardCount int         `json:"shard_count"`
 	Index      IndexConfig `json:"index"`
+	// Vectorizer names a server-configured embedding model. When set, records
+	// and searches may send text instead of a vector. Optional.
+	Vectorizer string `json:"vectorizer,omitempty"`
 }
+
+var vectorizerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 type IndexType string
 
@@ -138,6 +144,9 @@ func (c CollectionConfig) Validate() error {
 	}
 	if c.ShardCount <= 0 {
 		return fmt.Errorf("%w: shard_count must be positive", ErrInvalidArgument)
+	}
+	if c.Vectorizer != "" && !vectorizerName.MatchString(c.Vectorizer) {
+		return fmt.Errorf("%w: vectorizer must match %s", ErrInvalidArgument, vectorizerName)
 	}
 	switch c.Index.Type {
 	case IndexFlat:

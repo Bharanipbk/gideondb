@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"net"
 	"net/http"
 	"os"
@@ -45,6 +46,8 @@ type Options struct {
 	DashboardPassword                           string
 	DashboardCredentialsFile                    string
 	DashboardBootstrap                          bool
+	// Embedders are the models collections may name as their vectorizer.
+	Embedders *embedding.Registry
 }
 
 type Principal struct {

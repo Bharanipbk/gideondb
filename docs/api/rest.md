@@ -38,7 +38,8 @@ replication.
 | POST | `/collections/{name}/vectors/batch` | Insert or replace 1–10,000 records |
 | GET | `/collections/{name}/vectors/{id}` | Read a record |
 | DELETE | `/collections/{name}/vectors/{id}` | Delete a record |
-| POST | `/collections/{name}/search` | Dense, sparse, or hybrid search |
+| POST | `/collections/{name}/search` | Dense, sparse, or hybrid search; `text` instead of `vector` with a vectorizer |
+| GET | `/embedders` | Configured embedding models and cache counters ([server-side embedding](../indexing/server-side-embedding.md)) |
 | POST | `/internal/shards/{collection}/{shard}/search` | Fenced single-shard internal search |
 | POST | `/cluster/collections/{name}/search` | Experimental placement-aware distributed search |
 | DELETE | `/cluster/collections/{name}/vectors/{id}` | Placement-aware, quorum-replicated record deletion |

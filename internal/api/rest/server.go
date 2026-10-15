@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"io"
 	"log/slog"
 	"net/http"
@@ -59,6 +60,7 @@ type Server struct {
 	draining            atomic.Bool
 	rateLimiter         *requestRateLimiter
 	dashboardAuth       *dashboardAuthenticator
+	embedders           *embedding.Registry
 }
 
 func New(e *engine.Engine, logger *slog.Logger) *Server {
@@ -78,6 +80,7 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 		events = newPersistentEventLog(options.EventLogPath, retention)
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
+	s.embedders = options.Embedders
 	if options.DashboardCredentialsFile != "" {
 		var authErr error
 		s.dashboardAuth, authErr = loadDashboardAuthenticator(options.DashboardCredentialsFile)
@@ -219,6 +222,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /v1/collections/{name}/vectors/{id}", s.protected(s.get))
 	s.mux.HandleFunc("DELETE /v1/collections/{name}/vectors/{id}", s.protected(s.delete))
 	s.mux.HandleFunc("POST /v1/collections/{name}/search", s.protected(s.search))
+	s.mux.HandleFunc("GET /v1/embedders", s.protected(s.embedderStats))
 }
 
 func (s *Server) currentMetadataEpoch() uint64 {
@@ -655,6 +659,10 @@ func (s *Server) createCollection(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &config) {
 		return
 	}
+	if err := s.validateVectorizer(config); err != nil {
+		writeError(w, err)
+		return
+	}
 	if err := s.engine.CreateCollection(config); err != nil {
 		writeError(w, err)
 		return
@@ -687,11 +695,15 @@ func (s *Server) upsert(w http.ResponseWriter, r *http.Request) {
 	if s.rejectStandaloneDataPath(w) {
 		return
 	}
-	var record core.Record
-	if !decode(w, r, &record) {
+	var input textRecord
+	if !decode(w, r, &input) {
 		return
 	}
-	stored, err := s.engine.Upsert(r.PathValue("name"), record)
+	records, ok := s.resolveRecords(r.Context(), w, r.PathValue("name"), []textRecord{input})
+	if !ok {
+		return
+	}
+	stored, err := s.engine.Upsert(r.PathValue("name"), records[0])
 	if err != nil {
 		writeError(w, err)
 		return
@@ -700,7 +712,7 @@ func (s *Server) upsert(w http.ResponseWriter, r *http.Request) {
 }
 
 type batchUpsertRequest struct {
-	Records []core.Record `json:"records"`
+	Records []textRecord `json:"records"`
 }
 
 func (s *Server) batchUpsert(w http.ResponseWriter, r *http.Request) {
@@ -711,7 +723,11 @@ func (s *Server) batchUpsert(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &request) {
 		return
 	}
-	records, err := s.engine.BatchUpsert(r.PathValue("name"), request.Records)
+	inputs, ok := s.resolveRecords(r.Context(), w, r.PathValue("name"), request.Records)
+	if !ok {
+		return
+	}
+	records, err := s.engine.BatchUpsert(r.PathValue("name"), inputs)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -744,6 +760,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 
 type searchRequest struct {
 	Vector       []float32          `json:"vector"`
+	Text         string             `json:"text,omitempty"`
 	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
 	Alpha        *float32           `json:"alpha,omitempty"`
 	TopK         int                `json:"top_k"`
@@ -829,6 +846,9 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	}
 	var request searchRequest
 	if !decode(w, r, &request) {
+		return
+	}
+	if !s.resolveQuery(r.Context(), w, r.PathValue("name"), &request) {
 		return
 	}
 	filter, err := metadata.Parse(request.Filter)

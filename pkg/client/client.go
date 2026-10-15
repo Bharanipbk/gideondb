@@ -49,6 +49,7 @@ type CollectionConfig struct {
 	Metric     string      `json:"metric"`
 	ShardCount int         `json:"shard_count"`
 	Index      IndexConfig `json:"index"`
+	Vectorizer string      `json:"vectorizer,omitempty"`
 }
 
 type IndexConfig struct {
@@ -64,8 +65,11 @@ type CollectionDescription struct {
 }
 
 type Record struct {
-	ID           string             `json:"id"`
-	Vector       []float32          `json:"vector"`
+	ID     string    `json:"id"`
+	Vector []float32 `json:"vector,omitempty"`
+	// Text is embedded by the collection's server-side vectorizer instead of
+	// sending Vector. It is request-only; the server stores it in payload.text.
+	Text         string             `json:"text,omitempty"`
 	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
 	Metadata     map[string]any     `json:"metadata,omitempty"`
 	Payload      map[string]any     `json:"payload,omitempty"`
@@ -90,7 +94,9 @@ type RecordPage struct {
 }
 
 type SearchOptions struct {
-	Vector       []float32
+	Vector []float32
+	// Text is embedded by the collection's vectorizer instead of Vector.
+	Text         string
 	SparseVector map[string]float32
 	Alpha        *float32
 	TopK         int
@@ -282,7 +288,13 @@ func (c *Client) DistributedBatchUpsertWithIdempotencyKey(ctx context.Context, c
 }
 
 func searchBody(options SearchOptions, distributed bool) map[string]any {
-	body := map[string]any{"vector": options.Vector, "top_k": options.TopK}
+	body := map[string]any{"top_k": options.TopK}
+	if options.Vector != nil || options.Text == "" {
+		body["vector"] = options.Vector
+	}
+	if options.Text != "" {
+		body["text"] = options.Text
+	}
 	if options.SparseVector != nil {
 		body["sparse_vector"] = options.SparseVector
 	}

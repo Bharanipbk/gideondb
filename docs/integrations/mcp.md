@@ -55,8 +55,11 @@ Expired memories are hidden immediately; `prune_memories` deletes them.
 
 ## Embedding models
 
-GideonDB does not embed text server-side yet, so `gideondb-mcp` calls any
-OpenAI-compatible `/embeddings` endpoint on the agent's behalf:
+`search` and `upsert_records` accept `text` in two ways. If the collection
+has a [server-side vectorizer](../indexing/server-side-embedding.md), the MCP
+server passes the text through and GideonDB embeds it. Otherwise, configure a
+model on `gideondb-mcp` itself; it calls any OpenAI-compatible `/embeddings`
+endpoint on the agent's behalf. The memory tools always need this local model:
 
 | Provider | `-embed-url` | Example `-embed-model` |
 |---|---|---|
@@ -64,8 +67,8 @@ OpenAI-compatible `/embeddings` endpoint on the agent's behalf:
 | Ollama | `http://localhost:11434/v1` | `nomic-embed-text` |
 | vLLM, LM Studio, TEI | the server's `/v1` URL | the served model |
 
-Without an embedding model, `search` and `upsert_records` accept vectors only
-and the memory tools are hidden.
+Without a local model, text works only on collections with a vectorizer, and
+the memory tools are hidden.
 
 ## Configuration
 

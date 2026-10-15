@@ -1,4 +1,6 @@
-package mcp
+// Package embedding turns text into vectors through external model servers,
+// with a content-hash cache so repeated text is embedded once.
+package embedding
 
 import (
 	"bytes"
@@ -12,12 +14,14 @@ import (
 	"time"
 )
 
-// Embedder turns text into vectors so agents can search and remember by
-// text. GideonDB does not embed server-side yet (gap 5), so the MCP server
-// does it on the agent's behalf.
+// Embedder turns a batch of texts into one vector each, in order.
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 }
+
+// maxResponseBytes bounds an embedding response: 2,048 inputs of 4,096
+// float32 values in JSON fit comfortably.
+const maxResponseBytes = 256 << 20
 
 // OpenAIEmbedder calls an OpenAI-compatible /embeddings endpoint, which
 // covers OpenAI, Azure OpenAI, Ollama (/v1), vLLM, LM Studio and others.
@@ -50,7 +54,7 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 		return nil, fmt.Errorf("embedding request: %w", err)
 	}
 	defer reply.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(reply.Body, maxMessageBytes))
+	payload, err := io.ReadAll(io.LimitReader(reply.Body, maxResponseBytes))
 	if err != nil {
 		return nil, fmt.Errorf("embedding response: %w", err)
 	}
