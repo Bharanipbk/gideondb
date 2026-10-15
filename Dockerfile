@@ -26,6 +26,8 @@ COPY --chown=65532:65532 --from=build /out/data /var/lib/gideondb
 VOLUME ["/var/lib/gideondb"]
 EXPOSE 6333
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/usr/local/bin/gideondb", "-healthcheck-url", "http://127.0.0.1:6333/v1/health"]
+  CMD ["/usr/local/bin/gideondb", "-healthcheck-url", "https://127.0.0.1:6333/v1/health"]
 ENTRYPOINT ["/usr/local/bin/gideondb"]
-CMD ["-data-path", "/var/lib/gideondb"]
+# HTTPS with a self-signed certificate generated into the data volume on first
+# start. Production passes -tls-cert-file and -tls-key-file instead.
+CMD ["-data-path", "/var/lib/gideondb", "-http-address", "0.0.0.0:6333", "-tls-self-signed"]

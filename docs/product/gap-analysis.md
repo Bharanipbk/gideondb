@@ -35,7 +35,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 14 | Serverless / scale-to-zero tier | Cloud | P2 | ⬜ |
 | 15 | Enterprise security and compliance | Cloud | P1 | ⬜ |
 | 16 | Query analytics and observability for customers | Cloud | P2 | ⬜ |
-| 17 | Community and launch readiness | Open source | P0 | 🟡 quickstart, docs search, release pipeline; ⬜ Docker one-liner, Helm |
+| 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, docs search, release pipeline; ⬜ Helm |
 | 18 | HNSW graph connectivity on clustered data (found by gap 3) | Open source | P0 | ✅ |
 | 19 | HNSW build throughput | Open source | P1 | 🟡 parallel batch build; ⬜ live inserts, SIMD |
 
@@ -185,7 +185,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   explicit payload index types (keyword, integer range, geo, full-text);
   float16/bfloat16 storage; group-by and pagination by score.
 
-### 17. Community and launch readiness — P0 · 🟡
+### 17. Community and launch readiness — P0 · ✅ (Helm pending)
 
 - **Done (2026-10-16):** a verified five-minute quickstart (the old one
   failed with 401 because the API now always needs a key); full-text search
@@ -194,10 +194,8 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   a multi-arch GHCR image; a releasing guide with cadence and changelog
   rules; label and Discussions guidance in CONTRIBUTING.
 - **Remaining:**
-  - Docker one-liner. The server refuses non-loopback listeners without TLS
-    once the dashboard is enabled, so `docker run` needs certificates. Decide
-    on a container-friendly default (for example a dev mode that allows
-    plain HTTP inside the container when published only on 127.0.0.1).
+  - ~~Docker one-liner~~ done: the image serves HTTPS with a self-signed
+    certificate (`-tls-self-signed`) and reads `GIDEONDB_API_KEY`.
   - Helm chart (Kustomize manifests exist in `deployments/kubernetes`).
   - Enable GitHub Discussions, create the labels, make the GHCR package
     public after the first release.

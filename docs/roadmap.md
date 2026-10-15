@@ -147,3 +147,20 @@ until maintainers have measured the implementation.
 
 The release scope and gates are defined in the [technical
 design](technical-design.md#50-first-usable-release-v010).
+
+## After 0.1.0
+
+Open-source work planned after the first public release, in rough priority
+order (details in the gap analysis):
+
+- Standard benchmarks (SIFT1M, GIST1M, GloVe, Cohere 1M) and VectorDBBench
+  runs, then published comparisons.
+- Faster live HNSW inserts and SIMD distance kernels.
+- Named vectors per record, float16/bfloat16 storage and explicit payload
+  index types.
+- Product quantization, and binary codes inside HNSW.
+- Reranking (cross-encoder or external API) and multi-vector late interaction.
+- Embedded "lite" mode: a stable Go library API and a Python wheel.
+- Disk-resident ANN index for datasets larger than memory.
+- `text` over gRPC and in every SDK; Streamable HTTP for the MCP server; a
+  Helm chart.

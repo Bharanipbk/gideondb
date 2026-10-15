@@ -16,6 +16,11 @@ func (f Files) load() (tls.Certificate, *x509.CertPool, error) {
 	if err != nil {
 		return tls.Certificate{}, nil, fmt.Errorf("load TLS identity: %w", err)
 	}
+	// Without a CA the server presents its certificate and asks clients for
+	// none; internal mutual TLS always configures a CA.
+	if f.CA == "" {
+		return certificate, nil, nil
+	}
 	data, err := os.ReadFile(f.CA)
 	if err != nil {
 		return tls.Certificate{}, nil, fmt.Errorf("load TLS CA: %w", err)
@@ -36,6 +41,9 @@ func ServerConfig(files Files) (*tls.Config, error) {
 		certificate, roots, err := files.load()
 		if err != nil {
 			return nil, err
+		}
+		if roots == nil {
+			return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}}, nil
 		}
 		return &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{certificate}, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: roots}, nil
 	}

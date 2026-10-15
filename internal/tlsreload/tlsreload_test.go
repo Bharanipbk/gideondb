@@ -94,3 +94,37 @@ func write(t *testing.T, path string, data []byte) {
 		t.Fatal(err)
 	}
 }
+
+func TestServerConfigWithoutCA(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := filepath.Join(dir, "tls.crt"), filepath.Join(dir, "tls.key")
+	ca, caKey, caPEM := makeCA(t, 1)
+	_, leafPEM, keyPEM := makeLeaf(t, 2, ca, caKey)
+	writePair(t, certPath, keyPath, leafPEM, keyPEM)
+	config, err := ServerConfig(Files{Cert: certPath, Key: keyPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		connection, err := listener.Accept()
+		if err == nil {
+			_ = connection.(*tls.Conn).Handshake()
+			_ = connection.Close()
+		}
+	}()
+	roots := x509.NewCertPool()
+	roots.AppendCertsFromPEM(caPEM)
+	connection, err := tls.Dial("tcp", listener.Addr().String(), &tls.Config{RootCAs: roots, ServerName: "localhost", MinVersion: tls.VersionTLS13})
+	if err != nil {
+		t.Fatalf("handshake without client certificate: %v", err)
+	}
+	_ = connection.Close()
+	if _, err := ServerConfig(Files{Cert: filepath.Join(dir, "missing.crt"), Key: keyPath}); err == nil {
+		t.Fatal("missing certificate must fail")
+	}
+}

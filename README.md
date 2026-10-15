@@ -145,36 +145,25 @@ Without `make`, use:
 docker build -t gideondb:dev .
 ```
 
-Create and start a container with port `6333` published and data stored in a
-named Docker volume:
+Start it with HTTPS on a self-signed certificate (created on first start),
+an API key and dashboard credentials:
 
 ```bash
-docker run --name gideondb --detach \
-  --publish 6333:6333 \
-  --volume gideondb-data:/var/lib/gideondb \
-  gideondb:dev \
-  -data-path /var/lib/gideondb \
-  -http-address 0.0.0.0:6333 \
-  -allow-unauthenticated
+export GIDEONDB_API_KEY="$(openssl rand -hex 24)"
+docker run -d --name gideondb -p 127.0.0.1:6333:6333 -v gideondb-data:/var/lib/gideondb \
+  -e GIDEONDB_API_KEY -e GIDEONDB_DASHBOARD_USERNAME=admin \
+  -e GIDEONDB_DASHBOARD_PASSWORD='choose-a-long-password' \
+  gideondb:dev
+curl -k https://127.0.0.1:6333/v1/ready
+curl -k -H "Authorization: Bearer $GIDEONDB_API_KEY" https://127.0.0.1:6333/v1/collections
 ```
 
-The explicit `-allow-unauthenticated` flag is required because the server
-otherwise refuses an unauthenticated non-loopback listener. This setup is for
-local development only.
-
-Check the container and API:
-
-```bash
-docker ps --filter name=gideondb
-docker logs gideondb
-curl -fsS http://127.0.0.1:6333/v1/health
-curl -fsS http://127.0.0.1:6333/v1/ready
-```
-
-The dashboard is available at
-[http://127.0.0.1:6333/dashboard/](http://127.0.0.1:6333/dashboard/), and the
-same [quickstart API requests](docs/getting-started/quickstart.md) work against
-the container.
+After the first release the same command works with
+`ghcr.io/bharanipbk/gideondb:latest` instead of a local build. The dashboard is
+at [https://127.0.0.1:6333/dashboard/](https://127.0.0.1:6333/dashboard/); the
+browser warns about the self-signed certificate. See the
+[Docker guide](docs/operations/docker.md) for verifying the certificate and for
+production TLS.
 
 Stop and remove the container with:
 
@@ -185,7 +174,7 @@ docker rm gideondb
 
 The `gideondb-data` volume is not removed, so a new container using the same
 volume resumes with the existing data. To run the container in the foreground
-and remove it automatically when stopped, omit `--name gideondb --detach` and
+and remove it automatically when stopped, omit `--name gideondb -d` and
 add `--rm`.
 
 For an authenticated/TLS-enabled container, host bind mounts, and production

@@ -5,7 +5,32 @@ describe unreleased experimental work.
 
 ## Unreleased
 
+## 0.1.0 — 2026-10-16
+
+First public open-source release. Pre-alpha: minor releases may contain
+documented breaking changes; see the compatibility contract.
+
 ### Added
+
+- Server-side embedding: collections can name a `vectorizer` from the new
+  `-embedders-file` (any OpenAI-compatible API, including OpenAI, Azure,
+  Ollama, vLLM, LM Studio and TEI). Records and searches without a vector are
+  embedded from `text`, with batching, timeouts, key files and a per-node
+  content-hash cache; `GET /v1/embedders` reports cache counters.
+- `gideondb-mcp`, a Model Context Protocol server for agents: search, record
+  and collection tools (writes and admin are opt-in), and per-user long-term
+  memory with TTL and recency-weighted recall.
+- `$text` (whole-word) and `$geo_radius` metadata filters, `offset` score
+  pagination, and `group_by`/`group_size` result grouping on single-node and
+  cluster search. The Go client adds `Offset`, `SearchGroups` and `Text`.
+- Parallel HNSW batch construction for checkpoints and rebuilds: 50,000 x 384
+  builds in about 11 s on 8 cores instead of about 40 s.
+- `-tls-self-signed` (or `GIDEONDB_TLS_SELF_SIGNED=true`) serves HTTPS with a
+  certificate generated into the data directory, and `GIDEONDB_API_KEY`
+  supplies the API key without a file. The Docker image uses both by default.
+- Full-text search with snippets in the embedded documentation reader.
+- A tag-triggered release workflow publishing binaries, checksums and a
+  multi-arch image to GHCR, and a releasing guide.
 
 - BM25 keyword search: records accept an optional `text` field (up to 1 MiB)
   that is tokenized and indexed per segment, and search accepts `text`.
@@ -369,14 +394,31 @@ describe unreleased experimental work.
 
 ### Changed
 
+- The Docker image now listens on `0.0.0.0:6333` with HTTPS
+  (`-tls-self-signed`) by default, and its health check uses HTTPS. Override
+  the command to change this.
+- HNSW uses the paper's neighbour-selection heuristic, 2xM base-layer links
+  and mL = 1/ln(M) levels. Recall on clustered data rose from 0.57 to 1.00.
+  The persisted graph is now version 2; version 1 graphs still load, but
+  older binaries cannot read version 2.
 - Sparse-only searches now return only records sharing at least one query
   term. Previously every record in the namespace was returned, with score 0
   for non-matching records. Weighted dense + sparse scores are unchanged.
 
+### Fixed
+
+- `-tls-cert-file` without `-tls-ca-file` failed at startup with
+  `open : no such file or directory`; single-node HTTPS now works without a CA.
+- The Dockerfile could not build the server (missing `go.sum`, `gen/` and
+  `pkg/`).
+- The quickstart failed with 401 because the API always needs a key once the
+  dashboard is enabled; it now creates and uses one.
+
 ### Known limitations
 
-- Catalog, WAL and segment formats remain experimental; the checkpoint payload
-  is JSON and indexes rebuild during startup.
-- HNSW graph adjacency is not yet packed or persisted directly.
-- gRPC and distributed execution are not implemented; HNSW checkpoints still
-  rebuild their graph in memory during recovery.
+- Catalog, WAL and segment formats remain experimental.
+- Live inserts into a mutable segment still build HNSW one vector at a time.
+- `text` is not yet accepted over gRPC or by the non-Go SDKs for server-side
+  embedding.
+- One vector per record; named vectors, float16 storage and product
+  quantization are not available yet. See the roadmap.

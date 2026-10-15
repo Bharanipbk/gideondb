@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -53,6 +54,7 @@ func main() {
 	enableStaticRouting := flag.Bool("enable-static-routing", false, "activate immutable static placement only while all peer views converge")
 	tlsCertFile := flag.String("tls-cert-file", "", "TLS certificate chain file")
 	tlsKeyFile := flag.String("tls-key-file", "", "TLS private key file")
+	tlsSelfSigned := flag.Bool("tls-self-signed", strings.EqualFold(os.Getenv("GIDEONDB_TLS_SELF_SIGNED"), "true"), "serve HTTPS with a self-signed certificate kept in <data-path>/tls when no -tls-cert-file is given (for containers and evaluation)")
 	tlsCAFile := flag.String("tls-ca-file", "", "private CA bundle for mutual TLS on internal APIs")
 	nodeTLSCertFile := flag.String("node-tls-cert-file", "", "outbound node-client certificate; defaults to tls-cert-file")
 	nodeTLSKeyFile := flag.String("node-tls-key-file", "", "outbound node-client private key; defaults to tls-key-file")
@@ -73,6 +75,12 @@ func main() {
 	}
 	if *healthcheckURL != "" {
 		client := &http.Client{Timeout: 3 * time.Second}
+		// A probe of this process's own loopback listener cannot learn
+		// anything from certificate verification, and self-signed
+		// container certificates would fail it.
+		if target, parseErr := url.Parse(*healthcheckURL); parseErr == nil && target.Scheme == "https" && rest.IsLoopbackAddress(net.JoinHostPort(target.Hostname(), "0")) {
+			client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS12}} //nolint:gosec // loopback self-probe only
+		}
 		response, err := client.Get(*healthcheckURL)
 		if err != nil {
 			logger.Error("healthcheck failed", "error", err)
@@ -144,6 +152,15 @@ func main() {
 	dashboardBootstrap := strings.EqualFold(os.Getenv("GIDEONDB_DASHBOARD_BOOTSTRAP"), "true")
 	offline := *backupTo != "" || *verifyData || *migrateData
 	if !offline {
+		if *tlsSelfSigned && *tlsCertFile == "" && *tlsKeyFile == "" {
+			certPath, keyPath, certErr := ensureSelfSignedCertificate(filepath.Join(*dataPath, "tls"), *address, *advertiseAddress)
+			if certErr != nil {
+				logger.Error("create self-signed TLS certificate", "error", certErr)
+				os.Exit(2)
+			}
+			*tlsCertFile, *tlsKeyFile = certPath, keyPath
+			logger.Warn("serving HTTPS with a self-signed certificate; use -tls-cert-file and -tls-key-file in production", "certificate", certPath)
+		}
 		if dashboardPassword != "" && dashboardPasswordFile != "" {
 			logger.Error("configure only one of GIDEONDB_DASHBOARD_PASSWORD or GIDEONDB_DASHBOARD_PASSWORD_FILE")
 			os.Exit(2)
@@ -201,6 +218,20 @@ func main() {
 			}
 			apiKey = loaded
 		}
+		// GIDEONDB_API_KEY suits containers, where mounting a 0600 file owned
+		// by the non-root user is awkward. It is visible to anyone who can
+		// inspect the process environment, so prefer -api-key-file.
+		if environmentKey := strings.TrimSpace(os.Getenv("GIDEONDB_API_KEY")); environmentKey != "" {
+			if *apiKeyFile != "" {
+				logger.Error("configure only one of -api-key-file or GIDEONDB_API_KEY")
+				os.Exit(2)
+			}
+			if len(environmentKey) < 16 {
+				logger.Error("GIDEONDB_API_KEY must contain at least 16 characters")
+				os.Exit(2)
+			}
+			apiKey = environmentKey
+		}
 		if *principalsFile != "" {
 			if _, principalsErr := rest.LoadPrincipalsFile(*principalsFile); principalsErr != nil {
 				logger.Error("load principals", "error", principalsErr)
@@ -230,7 +261,7 @@ func main() {
 	}
 	var internalClient *http.Client
 	var serverTLSConfig *tls.Config
-	if *tlsCAFile != "" {
+	if *tlsCertFile != "" {
 		serverFiles := tlsreload.Files{Cert: *tlsCertFile, Key: *tlsKeyFile, CA: *tlsCAFile}
 		var tlsErr error
 		serverTLSConfig, tlsErr = tlsreload.ServerConfig(serverFiles)
@@ -238,6 +269,8 @@ func main() {
 			logger.Error("load server TLS identity", "error", tlsErr)
 			os.Exit(2)
 		}
+	}
+	if *tlsCAFile != "" {
 		clientCert, clientKey := *nodeTLSCertFile, *nodeTLSKeyFile
 		if clientCert == "" {
 			clientCert, clientKey = *tlsCertFile, *tlsKeyFile
