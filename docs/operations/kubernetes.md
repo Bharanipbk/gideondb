@@ -6,6 +6,9 @@ headless Service for peer discovery, a readiness-gated client Service,
 credential and private-CA TLS Secrets, mandatory host anti-affinity, a quorum-preserving
 PodDisruptionBudget, and restricted ingress.
 
+The [Helm chart](helm.md) renders the same topology with configurable values
+and generated credentials.
+
 ## Prerequisites
 
 - Kubernetes 1.27 or newer

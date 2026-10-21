@@ -1,0 +1,13 @@
+{{- if and .Values.podDisruptionBudget.enabled (gt (int .Values.replicaCount) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "gideondb.fullname" . }}
+  labels:
+    {{- include "gideondb.labels" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable | default (add1 (div (int .Values.replicaCount) 2)) }}
+  selector:
+    matchLabels:
+      {{- include "gideondb.selectorLabels" . | nindent 6 }}
+{{- end }}

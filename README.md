@@ -36,7 +36,18 @@ For evaluation or rollout, follow the staged [adoption guide](docs/getting-start
 Try GideonDB in five minutes with the [quickstart](docs/getting-started/quickstart.md):
 start a local server, create a collection, insert vectors and run a filtered
 search with `curl`. To give an AI agent search and long-term memory, run the
-[MCP server](docs/integrations/mcp.md).
+[MCP server](docs/integrations/mcp.md) or use the
+[agent framework adapters](docs/integrations/agents.md) (LangGraph, OpenAI
+Agents, Claude Agent SDK, CrewAI).
+
+For zero configuration on one machine, run `gideondb -lite` (loopback only, no
+keys or certificates) or embed the engine in a Go program with `pkg/lite`; see
+[lite and embedded mode](docs/getting-started/lite.md). On Kubernetes, install
+the [Helm chart](docs/operations/helm.md):
+
+```bash
+helm install gideondb deployments/helm/gideondb
+```
 
 ## Project status
 

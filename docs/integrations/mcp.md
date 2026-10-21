@@ -112,3 +112,6 @@ claude mcp add gideondb --env GIDEONDB_API_KEY=<your key> -- gideondb-mcp -allow
 - Stdio transport only; Streamable HTTP is not implemented yet.
 - Single-node REST endpoints; distributed search and writes are not exposed.
 - `prune_memories` scans the user's namespace on the node it talks to.
+
+For framework-native adapters that share this memory layout (LangGraph,
+OpenAI Agents, Claude Agent SDK, CrewAI), see [agent frameworks](agents.md).

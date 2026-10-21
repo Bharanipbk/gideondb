@@ -5,6 +5,25 @@ describe unreleased experimental work.
 
 ## Unreleased
 
+### Added
+
+- Lite and embedded mode: `pkg/lite`, a stable Go library API that opens a
+  local data directory in-process (collections, upsert, get, delete, dense,
+  filtered, BM25 and hybrid search), and `gideondb -lite` (or
+  `GIDEONDB_LITE=true`), a zero-config loopback-only server with no
+  authentication or TLS, the dashboard off by default, data in
+  `~/.gideondb/lite`, and a startup banner. Python's `LiteServer` runs the
+  lite binary as a child process. Examples in `examples/lite-go` and
+  `examples/lite_python.py`.
+- Helm chart in `deployments/helm/gideondb` with single-node and three-node
+  values, generated credentials, private-CA TLS, probes, disruption budget,
+  anti-affinity and NetworkPolicy; `make validate-helm` and a CI job lint and
+  render it.
+- Agent framework adapters in `gideondb_integrations`: a LangGraph
+  `BaseStore`, a `MemoryStore` sharing the MCP server's memory layout, and
+  `memory_tools` for function-calling frameworks (OpenAI Agents, CrewAI,
+  LangChain), plus OpenAI Agents and Claude Agent SDK MCP examples.
+
 ## 0.1.0 — 2026-10-16
 
 First public open-source release. Pre-alpha: minor releases may contain

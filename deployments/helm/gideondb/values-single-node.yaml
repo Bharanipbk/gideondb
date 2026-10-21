@@ -1,0 +1,7 @@
+# One node: self-signed HTTPS, generated API key and dashboard password.
+#   helm install gideondb deployments/helm/gideondb -f deployments/helm/gideondb/values-single-node.yaml
+replicaCount: 1
+tls:
+  mode: selfSigned
+persistence:
+  size: 20Gi

@@ -1,4 +1,4 @@
-.PHONY: build test test-e2e test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark bench-ann vet fmt run docker validate-single-node validate-kubernetes
+.PHONY: build test test-e2e test-proto-contract test-proto-compatibility test-python-sdk test-python-integrations test-typescript-sdk test-java-sdk test-rust-sdk test-dotnet-sdk test-dashboard test-operations-scripts race benchmark bench-ann vet fmt run docker validate-single-node validate-kubernetes validate-helm
 
 DOTNET ?= dotnet
 
@@ -10,6 +10,9 @@ docker:
 
 validate-single-node:
 	go run ./cmd/gideondb-loadtest -vectors "$${VECTORS:-100000}" -dimension "$${DIMENSION:-128}" -shards "$${SHARDS:-8}" -queries "$${QUERIES:-200}" -concurrency "$${CONCURRENCY:-8}" -wal-sync "$${WAL_SYNC:-always}"
+
+validate-helm:
+	scripts/validate-helm.sh
 
 validate-kubernetes:
 	./scripts/kubernetes-gate.sh
@@ -45,7 +48,7 @@ test-python-sdk:
 
 test-python-integrations:
 	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src:integrations/python python3 -m unittest discover -s integrations/python/tests -v
-	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src:integrations/python python3 -m py_compile examples/ollama_semantic_search.py examples/huggingface_semantic_search.py examples/openai_compatible_semantic_search.py examples/cohere_semantic_search.py
+	PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=sdk/python/src:integrations/python python3 -m py_compile examples/ollama_semantic_search.py examples/huggingface_semantic_search.py examples/openai_compatible_semantic_search.py examples/cohere_semantic_search.py examples/lite_python.py examples/agents/langgraph_memory.py examples/agents/openai_agents_mcp.py examples/agents/claude_agent_sdk_mcp.py examples/agents/function_tools_memory.py
 
 test-typescript-sdk:
 	npm test --prefix sdk/typescript
