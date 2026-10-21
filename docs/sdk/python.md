@@ -65,3 +65,30 @@ Run the SDK tests from the repository root:
 ```bash
 make test-python-sdk
 ```
+
+## Hybrid search, quantization and server-side embedding
+
+```python
+# Flat index with binary quantization and a server-side vectorizer.
+db.create_collection({
+    "name": "articles", "dimension": 384, "metric": "cosine", "shard_count": 1,
+    "vectorizer": "minilm",
+    "index": {"type": "flat", "quantization": "binary", "oversampling": 4},
+})
+
+# The vector is optional when text is given: the server embeds it and indexes it for BM25.
+db.upsert("articles", {"id": "a1", "text": "vector databases", "sparse_vector": {"vector": 1.2}})
+
+# Text-only search (embedded server-side, fused with BM25).
+db.search("articles", None, 10, text="vector databases")
+
+# Hybrid dense + lexical with reciprocal rank fusion; alpha is the dense weight (0..1, default 0.5).
+db.search("articles", embedding, 10, text="vector databases", alpha=0.7, fusion="rrf")
+
+# Sparse-only search.
+db.search("articles", None, 10, sparse_vector={"vector": 1.0})
+```
+
+`fusion` is `"weighted"` (default) or `"rrf"`. `quantization: "binary"` is only
+valid on flat indexes; `oversampling` (1-100, default 4) controls how many
+candidates are rescored at full precision.

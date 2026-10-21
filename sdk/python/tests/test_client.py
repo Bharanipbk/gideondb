@@ -103,3 +103,40 @@ class ClientTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HybridTest(unittest.TestCase):
+    def test_hybrid_text_sparse_and_quantized_vectorizer_bodies(self):
+        opener = QueueOpener(
+            [
+                Response(201, {"name": "docs"}),
+                Response(body={"records": []}),
+                Response(body={"results": []}),
+                Response(body={"results": []}),
+                Response(body={"results": [], "partial": False}),
+            ]
+        )
+        sdk = Client("https://db.example", opener=opener)
+        config = {
+            "name": "docs", "dimension": 384, "metric": "cosine", "shard_count": 1,
+            "vectorizer": "minilm",
+            "index": {"type": "flat", "quantization": "binary", "oversampling": 4},
+        }
+        sdk.create_collection(config)
+        sdk.batch_upsert("docs", [{"id": "a", "text": "hello world", "sparse_vector": {"hello": 1.5}}])
+        sdk.search("docs", None, 3, text="hello", alpha=0.3, fusion="rrf")
+        sdk.search("docs", None, 1, sparse_vector={"hello": 2.0})
+        sdk.distributed_search("docs", [1, 0], 2, text="hi", sparse_vector={"hi": 1.0}, fusion="weighted")
+        bodies = [json.loads(r.data) for r, _ in opener.requests]
+        self.assertEqual(bodies[0], config)
+        self.assertEqual(bodies[1], {"records": [{"id": "a", "text": "hello world", "sparse_vector": {"hello": 1.5}}]})
+        self.assertEqual(bodies[2], {"top_k": 3, "text": "hello", "alpha": 0.3, "fusion": "rrf"})
+        self.assertEqual(bodies[3], {"top_k": 1, "sparse_vector": {"hello": 2.0}})
+        self.assertEqual(bodies[4], {"top_k": 2, "vector": [1, 0], "text": "hi", "sparse_vector": {"hi": 1.0}, "fusion": "weighted"})
+        with self.assertRaises(ValueError):
+            sdk.search("docs", None, 1)
+        with self.assertRaises(ValueError):
+            sdk.search("docs", None, 1, text="x", alpha=1.5)
+        with self.assertRaises(ValueError):
+            sdk.search("docs", None, 1, text="x", fusion="max")
+        self.assertEqual(len(opener.requests), 5)

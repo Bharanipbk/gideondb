@@ -50,3 +50,32 @@ Run the dependency-free contract tests from the repository root:
 ```sh
 make test-dotnet-sdk
 ```
+
+## Text, sparse, and hybrid search
+
+`VectorRecord.Text` is indexed for BM25 and embedded server-side when the
+collection has a `Vectorizer` and no vector is given; `SparseVector` holds
+positive term weights. `SearchOptions` accepts `Text`, `SparseVector`, `Alpha`
+(dense weight 0..1, default 0.5) and `Fusion` (`"weighted"` default or `"rrf"`);
+text-only and sparse-only searches omit the vector. Binary quantization is a
+flat-index option.
+
+```csharp
+await client.CreateCollectionAsync(new CollectionConfig
+{
+    Name = "articles", Dimension = 384, Metric = "cosine", ShardCount = 1,
+    Vectorizer = "all-minilm-l6-v2",
+    Index = new IndexConfig { Type = "flat", Quantization = "binary", Oversampling = 4 }
+});
+
+await client.UpsertAsync("articles", new VectorRecord
+{
+    Id = "a1", Text = "vector databases explained",
+    SparseVector = new Dictionary<string, float> { ["vector"] = 1.2f, ["database"] = 0.8f }
+});
+
+var hits = await client.SearchAsync("articles", new SearchOptions
+{
+    Text = "vector database", Alpha = 0.7, Fusion = "rrf", TopK = 5
+});
+```

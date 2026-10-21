@@ -57,6 +57,10 @@ type IndexConfig struct {
 	M              int    `json:"m,omitempty"`
 	EFConstruction int    `json:"ef_construction,omitempty"`
 	EFSearch       int    `json:"ef_search,omitempty"`
+	// Quantization "binary" keeps 1-bit codes and rescores Oversampling*k
+	// candidates exactly (flat index only; default oversampling 4).
+	Quantization string `json:"quantization,omitempty"`
+	Oversampling int    `json:"oversampling,omitempty"`
 }
 
 type CollectionDescription struct {
@@ -67,8 +71,8 @@ type CollectionDescription struct {
 type Record struct {
 	ID     string    `json:"id"`
 	Vector []float32 `json:"vector,omitempty"`
-	// Text is embedded by the collection's server-side vectorizer instead of
-	// sending Vector. It is request-only; the server stores it in payload.text.
+	// Text is indexed for BM25 keyword search and, without Vector, embedded
+	// by the collection's server-side vectorizer.
 	Text         string             `json:"text,omitempty"`
 	SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
 	Metadata     map[string]any     `json:"metadata,omitempty"`
@@ -95,10 +99,14 @@ type RecordPage struct {
 
 type SearchOptions struct {
 	Vector []float32
-	// Text is embedded by the collection's vectorizer instead of Vector.
+	// Text drives BM25 keyword retrieval and, without Vector, is embedded by
+	// the collection's vectorizer.
 	Text         string
 	SparseVector map[string]float32
-	Alpha        *float32
+	// Alpha is the dense weight for weighted fusion (server default 0.5).
+	Alpha *float32
+	// Fusion is "weighted" (server default) or "rrf".
+	Fusion       string
 	TopK         int
 	EFSearch     int
 	Namespace    string
@@ -330,6 +338,9 @@ func searchBody(options SearchOptions, distributed bool) map[string]any {
 	}
 	if options.Alpha != nil {
 		body["alpha"] = *options.Alpha
+	}
+	if options.Fusion != "" {
+		body["fusion"] = options.Fusion
 	}
 	if options.EFSearch != 0 {
 		body["ef_search"] = options.EFSearch

@@ -127,30 +127,38 @@ class Client:
     def search(
         self,
         collection: str,
-        vector: Sequence[float],
+        vector: Sequence[float] | None,
         top_k: int,
         *,
         namespace: str = "",
         filter: Mapping[str, Any] | None = None,
+        text: str = "",
+        sparse_vector: Mapping[str, float] | None = None,
+        alpha: float | None = None,
+        fusion: str = "",
     ) -> list[dict[str, Any]]:
         response = self._request(
             "POST",
             f"{self._collection_path(collection)}/search",
-            self._search_body(vector, top_k, namespace, filter),
+            self._search_body(vector, top_k, namespace, filter, text, sparse_vector, alpha, fusion),
         )
         return response["results"]
 
     def distributed_search(
         self,
         collection: str,
-        vector: Sequence[float],
+        vector: Sequence[float] | None,
         top_k: int,
         *,
         namespace: str = "",
         filter: Mapping[str, Any] | None = None,
         allow_partial: bool = False,
+        text: str = "",
+        sparse_vector: Mapping[str, float] | None = None,
+        alpha: float | None = None,
+        fusion: str = "",
     ) -> dict[str, Any]:
-        body = self._search_body(vector, top_k, namespace, filter)
+        body = self._search_body(vector, top_k, namespace, filter, text, sparse_vector, alpha, fusion)
         if allow_partial:
             body["allow_partial"] = True
         return self._request(
@@ -173,12 +181,32 @@ class Client:
 
     @staticmethod
     def _search_body(
-        vector: Sequence[float],
+        vector: Sequence[float] | None,
         top_k: int,
         namespace: str,
         filter: Mapping[str, Any] | None,
+        text: str = "",
+        sparse_vector: Mapping[str, float] | None = None,
+        alpha: float | None = None,
+        fusion: str = "",
     ) -> dict[str, Any]:
-        body: dict[str, Any] = {"vector": vector, "top_k": top_k}
+        if vector is None and not text and not sparse_vector:
+            raise ValueError("search requires a vector, text or sparse_vector")
+        if alpha is not None and not 0 <= alpha <= 1:
+            raise ValueError("alpha must be between 0 and 1")
+        if fusion and fusion not in {"weighted", "rrf"}:
+            raise ValueError('fusion must be "weighted" or "rrf"')
+        body: dict[str, Any] = {"top_k": top_k}
+        if vector is not None:
+            body["vector"] = vector
+        if text:
+            body["text"] = text
+        if sparse_vector:
+            body["sparse_vector"] = dict(sparse_vector)
+        if alpha is not None:
+            body["alpha"] = alpha
+        if fusion:
+            body["fusion"] = fusion
         if namespace:
             body["namespace"] = namespace
         if filter is not None:

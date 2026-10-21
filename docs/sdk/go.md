@@ -56,6 +56,20 @@ Set `Record.SparseVector` to persist sparse term weights. Search with
 both plus an `Alpha` pointer for hybrid retrieval. `Alpha` defaults to `0.5` on
 the server.
 
+Set `Record.Text` to index text for BM25 and search with `SearchOptions.Text`.
+Without a vector, a collection `Vectorizer` embeds the text on the server.
+`SearchOptions.Fusion` is `"weighted"` (default) or `"rrf"`:
+
+```go
+results, err := sdk.Search(ctx, "documents", client.SearchOptions{
+    Text: "write-ahead log recovery", Fusion: "rrf", TopK: 5,
+})
+```
+
+Create a binary-quantized flat collection with
+`client.IndexConfig{Type: "flat", Quantization: "binary", Oversampling: 8}`;
+oversampling defaults to 4.
+
 `Scroll` browses records physically present on one node. Pass its opaque cursor
 unchanged for the next page; vectors require explicit inclusion:
 

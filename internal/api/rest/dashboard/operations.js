@@ -306,13 +306,14 @@ export function setupOperations({api, state, element, showNotice, refresh, deepL
     const [header, ...data] = rows;
     if (!header) return [];
     const columns = header.map(name => name.trim().toLowerCase());
-    if (!columns.includes("id") || !columns.includes("vector")) throw new Error("CSV needs at least \"id\" and \"vector\" columns");
+    if (!columns.includes("id") || !(columns.includes("vector") || columns.includes("text"))) throw new Error("CSV needs an \"id\" column and a \"vector\" or \"text\" column");
     return data.map(values => {
       const record = {}, metadata = {};
       columns.forEach((column, index) => {
         const value = (values[index] ?? "").trim();
         if (column === "id" || column === "namespace") { if (value) record[column] = value; }
-        else if (column === "vector") record.vector = value.startsWith("[") ? JSON.parse(value) : value.split(/[\s;|]+/).filter(Boolean).map(Number);
+        else if (column === "text") { if (value) record.text = value; }
+        else if (column === "vector") { if (value) record.vector = value.startsWith("[") ? JSON.parse(value) : value.split(/[\s;|]+/).filter(Boolean).map(Number); }
         else if (column === "metadata" || column === "payload") { if (value) record[column] = JSON.parse(value); }
         else if (value !== "") metadata[column] = Number.isFinite(Number(value)) && value !== "" ? Number(value) : value;
       });
@@ -337,10 +338,16 @@ export function setupOperations({api, state, element, showNotice, refresh, deepL
       const where = `Record ${index + 1}`;
       if (!record || typeof record !== "object" || Array.isArray(record)) return errors.push(`${where}: not an object`);
       if (typeof record.id !== "string" && typeof record.id !== "number" || String(record.id).trim() === "") return errors.push(`${where}: missing id`);
-      if (!Array.isArray(record.vector) || record.vector.some(value => typeof value !== "number" || !Number.isFinite(value))) return errors.push(`${where} (${record.id}): vector must be an array of numbers`);
-      if (dimension && record.vector.length !== dimension) return errors.push(`${where} (${record.id}): expected ${dimension} dimensions, got ${record.vector.length}`);
-      const clean = {id: String(record.id), vector: record.vector};
-      for (const key of ["namespace", "metadata", "payload", "sparse_vector"]) if (record[key] !== undefined) clean[key] = record[key];
+      const hasText = typeof record.text === "string" && record.text.trim() !== "";
+      if (record.text !== undefined && typeof record.text !== "string") return errors.push(`${where} (${record.id}): text must be a string`);
+      if (record.vector === undefined && !hasText) return errors.push(`${where} (${record.id}): needs a vector or text`);
+      const clean = {id: String(record.id)};
+      if (record.vector !== undefined) {
+        if (!Array.isArray(record.vector) || record.vector.some(value => typeof value !== "number" || !Number.isFinite(value))) return errors.push(`${where} (${record.id}): vector must be an array of numbers`);
+        if (dimension && record.vector.length !== dimension) return errors.push(`${where} (${record.id}): expected ${dimension} dimensions, got ${record.vector.length}`);
+        clean.vector = record.vector;
+      }
+      for (const key of ["namespace", "metadata", "payload", "sparse_vector", "text"]) if (record[key] !== undefined) clean[key] = record[key];
       valid.push(clean);
     });
     return {valid, errors};

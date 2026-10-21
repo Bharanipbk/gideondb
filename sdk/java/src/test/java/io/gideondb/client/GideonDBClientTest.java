@@ -9,7 +9,7 @@ import java.util.Map;
 
 public final class GideonDBClientTest {
     public static void main(String[] args) {
-        lifecycleAndEncoding(); distributedAndErrors(); validationAndBounds();
+        lifecycleAndEncoding(); distributedAndErrors(); validationAndBounds(); hybridAndQuantization();
         System.out.println("Java SDK tests passed");
     }
     private static void lifecycleAndEncoding() {
@@ -46,6 +46,30 @@ public final class GideonDBClientTest {
         try { client.health(); throw new AssertionError("expected bounded response error"); } catch (GideonDBClient.TransportException expected) {}
         try { new GideonDBClient("ftp://db.example"); throw new AssertionError("expected origin error"); } catch (IllegalArgumentException expected) {}
         try { new GideonDBClient("https://db.example/path"); throw new AssertionError("expected path error"); } catch (IllegalArgumentException expected) {}
+    }
+    private static void hybridAndQuantization() {
+        QueueTransport transport = new QueueTransport();
+        transport.add(201, "{\"name\":\"docs\"}");
+        transport.add(200, "{\"id\":\"one\"}");
+        transport.add(200, "{\"results\":[{\"id\":\"one\",\"score\":0.5}]}");
+        transport.add(200, "{\"results\":[]}");
+        GideonDBClient client = new GideonDBClient("https://db.example", "", Duration.ofSeconds(1), transport);
+        Map<String, Object> config = new java.util.LinkedHashMap<>();
+        config.put("name", "docs"); config.put("dimension", 2); config.put("vectorizer", "mini");
+        config.put("index", new java.util.LinkedHashMap<>(Map.of("type", "flat", "quantization", "binary", "oversampling", 4)));
+        client.createCollection(config);
+        String created = transport.requests.get(0).body();
+        check(created.contains("\"vectorizer\":\"mini\"") && created.contains("\"quantization\":\"binary\"") && created.contains("\"oversampling\":4"), "collection quantization body");
+        client.upsert("docs", Map.of("id", "one", "text", "hello world", "sparse_vector", Map.of("hello", 1.5)));
+        String record = transport.requests.get(1).body();
+        check(record.contains("\"text\":\"hello world\"") && record.contains("\"sparse_vector\":{\"hello\":1.5}") && !record.contains("\"vector\""), "text record body");
+        client.search("docs", new GideonDBClient.SearchOptions().text("hello").sparseVector(Map.of("hello", 2.0)).alpha(0.25).fusion("rrf").topK(3));
+        check("{\"top_k\":3,\"text\":\"hello\",\"sparse_vector\":{\"hello\":2.0},\"alpha\":0.25,\"fusion\":\"rrf\"}".equals(transport.requests.get(2).body()), "hybrid search body: " + transport.requests.get(2).body());
+        client.search("docs", new GideonDBClient.SearchOptions().vector(List.of(1, 0)).text("hello").topK(1));
+        check(transport.requests.get(3).body().startsWith("{\"vector\":[1,0],\"top_k\":1,\"text\":\"hello\""), "dense plus text body");
+        try { new GideonDBClient.SearchOptions().alpha(1.5).text("x").toBody(); throw new AssertionError("expected alpha error"); } catch (IllegalArgumentException expected) {}
+        try { new GideonDBClient.SearchOptions().fusion("max").text("x").toBody(); throw new AssertionError("expected fusion error"); } catch (IllegalArgumentException expected) {}
+        try { new GideonDBClient.SearchOptions().toBody(); throw new AssertionError("expected empty search error"); } catch (IllegalArgumentException expected) {}
     }
     private static void check(boolean value, String message) { if (!value) throw new AssertionError(message); }
     private static final class QueueTransport implements GideonDBClient.Transport {

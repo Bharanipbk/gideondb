@@ -89,13 +89,25 @@ func (s *Server) distributedSearch(ctx context.Context, request *v1.SearchReques
 	if request.GetFilter() != nil {
 		filter = request.GetFilter().AsMap()
 	}
+	fusion, err := fromProtoFusion(request.GetFusion())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	if request.GetSparseVector() == nil && request.GetText() == "" {
+		fusion = ""
+	}
+	// The REST coordinator embeds text once before fanning out.
 	payload, err := json.Marshal(struct {
-		Vector       []float32      `json:"vector"`
-		TopK         uint32         `json:"top_k"`
-		Namespace    string         `json:"namespace,omitempty"`
-		Filter       map[string]any `json:"filter,omitempty"`
-		AllowPartial bool           `json:"allow_partial,omitempty"`
-	}{Vector: request.GetVector(), TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial()})
+		Vector       []float32          `json:"vector"`
+		SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
+		Text         string             `json:"text,omitempty"`
+		Alpha        *float32           `json:"alpha,omitempty"`
+		Fusion       core.FusionMode    `json:"fusion,omitempty"`
+		TopK         uint32             `json:"top_k"`
+		Namespace    string             `json:"namespace,omitempty"`
+		Filter       map[string]any     `json:"filter,omitempty"`
+		AllowPartial bool               `json:"allow_partial,omitempty"`
+	}{Vector: request.GetVector(), SparseVector: request.GetSparseVector(), Text: request.GetText(), Alpha: request.Alpha, Fusion: fusion, TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial()})
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "search filter cannot be encoded")
 	}
