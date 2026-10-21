@@ -76,6 +76,12 @@ describe unreleased experimental work.
   `memory_tools` for function-calling frameworks (OpenAI Agents, CrewAI,
   LangChain), plus OpenAI Agents and Claude Agent SDK MCP examples.
 
+### Fixed
+
+- Parallel HNSW builds could leave a node with more links than its layer
+  allows, so a sealed segment's graph failed to load and large REST ingests
+  returned HTTP 500 at checkpoint. Insertion now prunes the node's own list.
+
 ## 0.1.0 — 2026-10-16
 
 First public open-source release. Pre-alpha: minor releases may contain

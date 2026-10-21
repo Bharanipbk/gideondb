@@ -9,7 +9,7 @@ index behaviour from HTTP, WAL and sharding overhead.
 # Synthetic clustered data (default: 100 clusters, intrinsic dimension 32)
 make bench-ann VECTORS=50000 DIMENSION=384
 
-# Standard datasets in .fvecs format (SIFT1M, GIST1M, …)
+# Standard datasets in .fvecs format; see standard-datasets.md
 go run ./cmd/gideondb-bench -base sift_base.fvecs -queries sift_query.fvecs \
   -metric l2 -query-count 1000 -configs flat,hnsw,hnsw-ef256 -json sift.json
 ```
@@ -87,6 +87,8 @@ reported; QPS and latency were not reproducible.
   `ef_search` 64 and 256). The `Build s` column above still measures live
   one-at-a-time inserts into a mutable segment, which stay serial.
 
-These are synthetic results. Before publishing comparisons with other systems,
-run the standard datasets (SIFT1M, GIST1M, GloVe, Cohere 1M) and
-VectorDBBench end to end through the server API.
+These are synthetic results. For SIFT1M and GloVe, including an end-to-end
+run through the HTTP server with concurrent and filtered queries, see
+[standard datasets](standard-datasets.md). For kernel and insert throughput,
+see [distance kernels](distance-kernels.md). Comparisons with other systems
+wait for VectorDBBench.
