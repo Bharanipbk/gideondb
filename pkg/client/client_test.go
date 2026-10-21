@@ -173,3 +173,40 @@ func TestClientOffsetAndGroups(t *testing.T) {
 		t.Fatalf("groups = %+v, %v", groups, err)
 	}
 }
+
+func TestClientHybridSearchAndBinaryQuantization(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sdk, err := client.New("http://gideondb.test", client.Options{HTTPClient: inMemoryHTTPClient(rest.New(db, nil).Handler())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	created, err := sdk.CreateCollection(ctx, client.CollectionConfig{Name: "h", Dimension: 2, Metric: "cosine", ShardCount: 1, Index: client.IndexConfig{Type: "flat", Quantization: "binary", Oversampling: 8}})
+	if err != nil || created.Index.Quantization != "binary" || created.Index.Oversampling != 8 {
+		t.Fatalf("created = %+v, %v", created, err)
+	}
+	records := []client.Record{
+		{ID: "a", Vector: []float32{1, 0}, Text: "graph search with hnsw", SparseVector: map[string]float32{"graph": 1}},
+		{ID: "b", Vector: []float32{0, 1}, Text: "write ahead log recovery"},
+	}
+	if _, err := sdk.BatchUpsert(ctx, "h", records); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := sdk.Get(ctx, "h", "", "a")
+	if err != nil || stored.Text != "graph search with hnsw" || stored.SparseVector["graph"] != 1 {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+	results, err := sdk.Search(ctx, "h", client.SearchOptions{Text: "recovery log", TopK: 1, Fusion: "rrf"})
+	if err != nil || len(results) != 1 || results[0].ID != "b" {
+		t.Fatalf("text search = %v, %v", results, err)
+	}
+	alpha := float32(0.2)
+	results, err = sdk.Search(ctx, "h", client.SearchOptions{Vector: []float32{1, 0}, SparseVector: map[string]float32{"graph": 1}, Alpha: &alpha, TopK: 2})
+	if err != nil || len(results) == 0 || results[0].ID != "a" {
+		t.Fatalf("hybrid search = %v, %v", results, err)
+	}
+}

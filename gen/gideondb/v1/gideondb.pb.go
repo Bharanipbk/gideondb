@@ -139,6 +139,108 @@ func (IndexType) EnumDescriptor() ([]byte, []int) {
 	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{1}
 }
 
+// Quantization selects compressed candidate codes for an index.
+type Quantization int32
+
+const (
+	// Unspecified keeps full-precision vectors only.
+	Quantization_QUANTIZATION_UNSPECIFIED Quantization = 0
+	// Binary keeps 1-bit sign codes and rescores candidates exactly. Flat only.
+	Quantization_QUANTIZATION_BINARY Quantization = 1
+)
+
+// Enum value maps for Quantization.
+var (
+	Quantization_name = map[int32]string{
+		0: "QUANTIZATION_UNSPECIFIED",
+		1: "QUANTIZATION_BINARY",
+	}
+	Quantization_value = map[string]int32{
+		"QUANTIZATION_UNSPECIFIED": 0,
+		"QUANTIZATION_BINARY":      1,
+	}
+)
+
+func (x Quantization) Enum() *Quantization {
+	p := new(Quantization)
+	*p = x
+	return p
+}
+
+func (x Quantization) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (Quantization) Descriptor() protoreflect.EnumDescriptor {
+	return file_gideondb_v1_gideondb_proto_enumTypes[2].Descriptor()
+}
+
+func (Quantization) Type() protoreflect.EnumType {
+	return &file_gideondb_v1_gideondb_proto_enumTypes[2]
+}
+
+func (x Quantization) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use Quantization.Descriptor instead.
+func (Quantization) EnumDescriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{2}
+}
+
+// FusionMode selects how dense, sparse and text rankings are combined.
+type FusionMode int32
+
+const (
+	// Unspecified selects weighted fusion.
+	FusionMode_FUSION_MODE_UNSPECIFIED FusionMode = 0
+	// Weighted blends normalized scores with alpha as the dense weight.
+	FusionMode_FUSION_MODE_WEIGHTED FusionMode = 1
+	// Rrf sums reciprocal ranks, 1/(60+rank), per signal.
+	FusionMode_FUSION_MODE_RRF FusionMode = 2
+)
+
+// Enum value maps for FusionMode.
+var (
+	FusionMode_name = map[int32]string{
+		0: "FUSION_MODE_UNSPECIFIED",
+		1: "FUSION_MODE_WEIGHTED",
+		2: "FUSION_MODE_RRF",
+	}
+	FusionMode_value = map[string]int32{
+		"FUSION_MODE_UNSPECIFIED": 0,
+		"FUSION_MODE_WEIGHTED":    1,
+		"FUSION_MODE_RRF":         2,
+	}
+)
+
+func (x FusionMode) Enum() *FusionMode {
+	p := new(FusionMode)
+	*p = x
+	return p
+}
+
+func (x FusionMode) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (FusionMode) Descriptor() protoreflect.EnumDescriptor {
+	return file_gideondb_v1_gideondb_proto_enumTypes[3].Descriptor()
+}
+
+func (FusionMode) Type() protoreflect.EnumType {
+	return &file_gideondb_v1_gideondb_proto_enumTypes[3]
+}
+
+func (x FusionMode) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use FusionMode.Descriptor instead.
+func (FusionMode) EnumDescriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{3}
+}
+
 // Acknowledgement controls replicated-write durability before success returns.
 type Acknowledgement int32
 
@@ -180,11 +282,11 @@ func (x Acknowledgement) String() string {
 }
 
 func (Acknowledgement) Descriptor() protoreflect.EnumDescriptor {
-	return file_gideondb_v1_gideondb_proto_enumTypes[2].Descriptor()
+	return file_gideondb_v1_gideondb_proto_enumTypes[4].Descriptor()
 }
 
 func (Acknowledgement) Type() protoreflect.EnumType {
-	return &file_gideondb_v1_gideondb_proto_enumTypes[2]
+	return &file_gideondb_v1_gideondb_proto_enumTypes[4]
 }
 
 func (x Acknowledgement) Number() protoreflect.EnumNumber {
@@ -193,7 +295,7 @@ func (x Acknowledgement) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Acknowledgement.Descriptor instead.
 func (Acknowledgement) EnumDescriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{2}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{4}
 }
 
 // Collection defines immutable vector and shard configuration.
@@ -208,7 +310,10 @@ type Collection struct {
 	// ShardCount is the immutable number of logical shards.
 	ShardCount uint32 `protobuf:"varint,4,opt,name=shard_count,json=shardCount,proto3" json:"shard_count,omitempty"`
 	// Index contains flat or HNSW configuration.
-	Index         *IndexConfig `protobuf:"bytes,5,opt,name=index,proto3" json:"index,omitempty"`
+	Index *IndexConfig `protobuf:"bytes,5,opt,name=index,proto3" json:"index,omitempty"`
+	// Vectorizer names a server-configured embedding model; records and
+	// searches may then send text instead of a vector. Optional.
+	Vectorizer    string `protobuf:"bytes,6,opt,name=vectorizer,proto3" json:"vectorizer,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -278,6 +383,13 @@ func (x *Collection) GetIndex() *IndexConfig {
 	return nil
 }
 
+func (x *Collection) GetVectorizer() string {
+	if x != nil {
+		return x.Vectorizer
+	}
+	return ""
+}
+
 // IndexConfig contains index selection and HNSW tuning parameters.
 type IndexConfig struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -288,7 +400,12 @@ type IndexConfig struct {
 	// EfConstruction controls HNSW construction breadth.
 	EfConstruction uint32 `protobuf:"varint,3,opt,name=ef_construction,json=efConstruction,proto3" json:"ef_construction,omitempty"`
 	// EfSearch controls default HNSW query breadth.
-	EfSearch      uint32 `protobuf:"varint,4,opt,name=ef_search,json=efSearch,proto3" json:"ef_search,omitempty"`
+	EfSearch uint32 `protobuf:"varint,4,opt,name=ef_search,json=efSearch,proto3" json:"ef_search,omitempty"`
+	// Quantization enables compressed candidate generation; flat index only.
+	Quantization Quantization `protobuf:"varint,5,opt,name=quantization,proto3,enum=gideondb.v1.Quantization" json:"quantization,omitempty"`
+	// Oversampling rescores oversampling*top_k binary candidates (1-100,
+	// default 4 when quantization is binary).
+	Oversampling  uint32 `protobuf:"varint,6,opt,name=oversampling,proto3" json:"oversampling,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -351,6 +468,20 @@ func (x *IndexConfig) GetEfSearch() uint32 {
 	return 0
 }
 
+func (x *IndexConfig) GetQuantization() Quantization {
+	if x != nil {
+		return x.Quantization
+	}
+	return Quantization_QUANTIZATION_UNSPECIFIED
+}
+
+func (x *IndexConfig) GetOversampling() uint32 {
+	if x != nil {
+		return x.Oversampling
+	}
+	return 0
+}
+
 // Record is the durable vector, metadata, payload, and versioned key.
 type Record struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -367,7 +498,12 @@ type Record struct {
 	// Version is the server-assigned monotonic record version.
 	Version uint64 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`
 	// Namespace partitions identifiers within a collection.
-	Namespace     string `protobuf:"bytes,7,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace string `protobuf:"bytes,7,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	// SparseVector maps term identifiers to positive weights for sparse retrieval.
+	SparseVector map[string]float32 `protobuf:"bytes,8,rep,name=sparse_vector,json=sparseVector,proto3" json:"sparse_vector,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed32,2,opt,name=value"`
+	// Text is indexed for BM25 keyword retrieval (at most 1 MiB). Without a
+	// vector, a collection vectorizer embeds it.
+	Text          string `protobuf:"bytes,9,opt,name=text,proto3" json:"text,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -447,6 +583,20 @@ func (x *Record) GetVersion() uint64 {
 func (x *Record) GetNamespace() string {
 	if x != nil {
 		return x.Namespace
+	}
+	return ""
+}
+
+func (x *Record) GetSparseVector() map[string]float32 {
+	if x != nil {
+		return x.SparseVector
+	}
+	return nil
+}
+
+func (x *Record) GetText() string {
+	if x != nil {
+		return x.Text
 	}
 	return ""
 }
@@ -1360,7 +1510,7 @@ func (x *GetResponse) GetRecord() *Record {
 	return nil
 }
 
-// SearchRequest contains one dense-vector nearest-neighbor query.
+// SearchRequest contains one dense, sparse, keyword or hybrid query.
 type SearchRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Collection is the target collection name.
@@ -1374,7 +1524,16 @@ type SearchRequest struct {
 	// Filter is the metadata-filter AST documented by the filtering guide.
 	Filter *structpb.Struct `protobuf:"bytes,5,opt,name=filter,proto3" json:"filter,omitempty"`
 	// AllowPartial permits explicit shard failures in distributed mode.
-	AllowPartial  bool `protobuf:"varint,6,opt,name=allow_partial,json=allowPartial,proto3" json:"allow_partial,omitempty"`
+	AllowPartial bool `protobuf:"varint,6,opt,name=allow_partial,json=allowPartial,proto3" json:"allow_partial,omitempty"`
+	// SparseVector adds sparse retrieval over record sparse vectors.
+	SparseVector map[string]float32 `protobuf:"bytes,7,rep,name=sparse_vector,json=sparseVector,proto3" json:"sparse_vector,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed32,2,opt,name=value"`
+	// Text adds BM25 keyword retrieval; without a vector a collection
+	// vectorizer also embeds it for the dense side.
+	Text string `protobuf:"bytes,8,opt,name=text,proto3" json:"text,omitempty"`
+	// Alpha is the dense weight in [0, 1] for weighted fusion (default 0.5).
+	Alpha *float32 `protobuf:"fixed32,9,opt,name=alpha,proto3,oneof" json:"alpha,omitempty"`
+	// Fusion selects weighted (default) or reciprocal-rank fusion.
+	Fusion        FusionMode `protobuf:"varint,10,opt,name=fusion,proto3,enum=gideondb.v1.FusionMode" json:"fusion,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1449,6 +1608,34 @@ func (x *SearchRequest) GetAllowPartial() bool {
 		return x.AllowPartial
 	}
 	return false
+}
+
+func (x *SearchRequest) GetSparseVector() map[string]float32 {
+	if x != nil {
+		return x.SparseVector
+	}
+	return nil
+}
+
+func (x *SearchRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *SearchRequest) GetAlpha() float32 {
+	if x != nil && x.Alpha != nil {
+		return *x.Alpha
+	}
+	return 0
+}
+
+func (x *SearchRequest) GetFusion() FusionMode {
+	if x != nil {
+		return x.Fusion
+	}
+	return FusionMode_FUSION_MODE_UNSPECIFIED
 }
 
 // SearchResponse contains ordered matches and distributed execution metadata.
@@ -2981,7 +3168,7 @@ var File_gideondb_v1_gideondb_proto protoreflect.FileDescriptor
 
 const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\n" +
-	"\x1agideondb/v1/gideondb.proto\x12\vgideondb.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xc4\x01\n" +
+	"\x1agideondb/v1/gideondb.proto\x12\vgideondb.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xe4\x01\n" +
 	"\n" +
 	"Collection\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
@@ -2989,12 +3176,17 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x06metric\x18\x03 \x01(\x0e2\x1b.gideondb.v1.DistanceMetricR\x06metric\x12\x1f\n" +
 	"\vshard_count\x18\x04 \x01(\rR\n" +
 	"shardCount\x12.\n" +
-	"\x05index\x18\x05 \x01(\v2\x18.gideondb.v1.IndexConfigR\x05index\"\x8d\x01\n" +
+	"\x05index\x18\x05 \x01(\v2\x18.gideondb.v1.IndexConfigR\x05index\x12\x1e\n" +
+	"\n" +
+	"vectorizer\x18\x06 \x01(\tR\n" +
+	"vectorizer\"\xf0\x01\n" +
 	"\vIndexConfig\x12*\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x16.gideondb.v1.IndexTypeR\x04type\x12\f\n" +
 	"\x01m\x18\x02 \x01(\rR\x01m\x12'\n" +
 	"\x0fef_construction\x18\x03 \x01(\rR\x0eefConstruction\x12\x1b\n" +
-	"\tef_search\x18\x04 \x01(\rR\befSearch\"\x84\x02\n" +
+	"\tef_search\x18\x04 \x01(\rR\befSearch\x12=\n" +
+	"\fquantization\x18\x05 \x01(\x0e2\x19.gideondb.v1.QuantizationR\fquantization\x12\"\n" +
+	"\foversampling\x18\x06 \x01(\rR\foversampling\"\xa5\x03\n" +
 	"\x06Record\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x16\n" +
 	"\x06vector\x18\x02 \x03(\x02R\x06vector\x123\n" +
@@ -3002,7 +3194,12 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x122\n" +
 	"\x15timestamp_unix_millis\x18\x05 \x01(\x03R\x13timestampUnixMillis\x12\x18\n" +
 	"\aversion\x18\x06 \x01(\x04R\aversion\x12\x1c\n" +
-	"\tnamespace\x18\a \x01(\tR\tnamespace\"\xba\x01\n" +
+	"\tnamespace\x18\a \x01(\tR\tnamespace\x12J\n" +
+	"\rsparse_vector\x18\b \x03(\v2%.gideondb.v1.Record.SparseVectorEntryR\fsparseVector\x12\x12\n" +
+	"\x04text\x18\t \x01(\tR\x04text\x1a?\n" +
+	"\x11SparseVectorEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x02R\x05value:\x028\x01\"\xba\x01\n" +
 	"\fSearchResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x02R\x05score\x123\n" +
@@ -3065,7 +3262,7 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1c\n" +
 	"\tnamespace\x18\x03 \x01(\tR\tnamespace\":\n" +
 	"\vGetResponse\x12+\n" +
-	"\x06record\x18\x01 \x01(\v2\x13.gideondb.v1.RecordR\x06record\"\xd0\x01\n" +
+	"\x06record\x18\x01 \x01(\v2\x13.gideondb.v1.RecordR\x06record\"\xce\x03\n" +
 	"\rSearchRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
@@ -3074,7 +3271,16 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x05top_k\x18\x03 \x01(\rR\x04topK\x12\x1c\n" +
 	"\tnamespace\x18\x04 \x01(\tR\tnamespace\x12/\n" +
 	"\x06filter\x18\x05 \x01(\v2\x17.google.protobuf.StructR\x06filter\x12#\n" +
-	"\rallow_partial\x18\x06 \x01(\bR\fallowPartial\"\xf6\x01\n" +
+	"\rallow_partial\x18\x06 \x01(\bR\fallowPartial\x12Q\n" +
+	"\rsparse_vector\x18\a \x03(\v2,.gideondb.v1.SearchRequest.SparseVectorEntryR\fsparseVector\x12\x12\n" +
+	"\x04text\x18\b \x01(\tR\x04text\x12\x19\n" +
+	"\x05alpha\x18\t \x01(\x02H\x00R\x05alpha\x88\x01\x01\x12/\n" +
+	"\x06fusion\x18\n" +
+	" \x01(\x0e2\x17.gideondb.v1.FusionModeR\x06fusion\x1a?\n" +
+	"\x11SparseVectorEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x02R\x05value:\x028\x01B\b\n" +
+	"\x06_alpha\"\xf6\x01\n" +
 	"\x0eSearchResponse\x123\n" +
 	"\aresults\x18\x01 \x03(\v2\x19.gideondb.v1.SearchResultR\aresults\x125\n" +
 	"\bfailures\x18\x02 \x03(\v2\x19.gideondb.v1.ShardFailureR\bfailures\x12\x18\n" +
@@ -3192,7 +3398,15 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\tIndexType\x12\x1a\n" +
 	"\x16INDEX_TYPE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fINDEX_TYPE_FLAT\x10\x01\x12\x13\n" +
-	"\x0fINDEX_TYPE_HNSW\x10\x02*\x83\x01\n" +
+	"\x0fINDEX_TYPE_HNSW\x10\x02*E\n" +
+	"\fQuantization\x12\x1c\n" +
+	"\x18QUANTIZATION_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13QUANTIZATION_BINARY\x10\x01*X\n" +
+	"\n" +
+	"FusionMode\x12\x1b\n" +
+	"\x17FUSION_MODE_UNSPECIFIED\x10\x00\x12\x18\n" +
+	"\x14FUSION_MODE_WEIGHTED\x10\x01\x12\x13\n" +
+	"\x0fFUSION_MODE_RRF\x10\x02*\x83\x01\n" +
 	"\x0fAcknowledgement\x12\x1f\n" +
 	"\x1bACKNOWLEDGEMENT_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ACKNOWLEDGEMENT_LEADER\x10\x01\x12\x1a\n" +
@@ -3232,128 +3446,136 @@ func file_gideondb_v1_gideondb_proto_rawDescGZIP() []byte {
 	return file_gideondb_v1_gideondb_proto_rawDescData
 }
 
-var file_gideondb_v1_gideondb_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_gideondb_v1_gideondb_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_gideondb_v1_gideondb_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
+var file_gideondb_v1_gideondb_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
 var file_gideondb_v1_gideondb_proto_goTypes = []any{
 	(DistanceMetric)(0),                // 0: gideondb.v1.DistanceMetric
 	(IndexType)(0),                     // 1: gideondb.v1.IndexType
-	(Acknowledgement)(0),               // 2: gideondb.v1.Acknowledgement
-	(*Collection)(nil),                 // 3: gideondb.v1.Collection
-	(*IndexConfig)(nil),                // 4: gideondb.v1.IndexConfig
-	(*Record)(nil),                     // 5: gideondb.v1.Record
-	(*SearchResult)(nil),               // 6: gideondb.v1.SearchResult
-	(*CreateCollectionRequest)(nil),    // 7: gideondb.v1.CreateCollectionRequest
-	(*CreateCollectionResponse)(nil),   // 8: gideondb.v1.CreateCollectionResponse
-	(*DeleteCollectionRequest)(nil),    // 9: gideondb.v1.DeleteCollectionRequest
-	(*DeleteCollectionResponse)(nil),   // 10: gideondb.v1.DeleteCollectionResponse
-	(*ListCollectionsRequest)(nil),     // 11: gideondb.v1.ListCollectionsRequest
-	(*ListCollectionsResponse)(nil),    // 12: gideondb.v1.ListCollectionsResponse
-	(*DescribeCollectionRequest)(nil),  // 13: gideondb.v1.DescribeCollectionRequest
-	(*DescribeCollectionResponse)(nil), // 14: gideondb.v1.DescribeCollectionResponse
-	(*UpsertRequest)(nil),              // 15: gideondb.v1.UpsertRequest
-	(*UpsertResponse)(nil),             // 16: gideondb.v1.UpsertResponse
-	(*BatchUpsertRequest)(nil),         // 17: gideondb.v1.BatchUpsertRequest
-	(*BatchUpsertResponse)(nil),        // 18: gideondb.v1.BatchUpsertResponse
-	(*DeleteRequest)(nil),              // 19: gideondb.v1.DeleteRequest
-	(*DeleteResponse)(nil),             // 20: gideondb.v1.DeleteResponse
-	(*GetRequest)(nil),                 // 21: gideondb.v1.GetRequest
-	(*GetResponse)(nil),                // 22: gideondb.v1.GetResponse
-	(*SearchRequest)(nil),              // 23: gideondb.v1.SearchRequest
-	(*SearchResponse)(nil),             // 24: gideondb.v1.SearchResponse
-	(*BatchSearchRequest)(nil),         // 25: gideondb.v1.BatchSearchRequest
-	(*BatchSearchResponse)(nil),        // 26: gideondb.v1.BatchSearchResponse
-	(*ScrollRequest)(nil),              // 27: gideondb.v1.ScrollRequest
-	(*ScrollResponse)(nil),             // 28: gideondb.v1.ScrollResponse
-	(*ShardFailure)(nil),               // 29: gideondb.v1.ShardFailure
-	(*ShardWriteOutcome)(nil),          // 30: gideondb.v1.ShardWriteOutcome
-	(*ClusterStatusRequest)(nil),       // 31: gideondb.v1.ClusterStatusRequest
-	(*ClusterStatusResponse)(nil),      // 32: gideondb.v1.ClusterStatusResponse
-	(*ListNodesRequest)(nil),           // 33: gideondb.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),          // 34: gideondb.v1.ListNodesResponse
-	(*Node)(nil),                       // 35: gideondb.v1.Node
-	(*ListShardsRequest)(nil),          // 36: gideondb.v1.ListShardsRequest
-	(*ListShardsResponse)(nil),         // 37: gideondb.v1.ListShardsResponse
-	(*ShardPlacement)(nil),             // 38: gideondb.v1.ShardPlacement
-	(*HealthRequest)(nil),              // 39: gideondb.v1.HealthRequest
-	(*HealthResponse)(nil),             // 40: gideondb.v1.HealthResponse
-	(*StatsRequest)(nil),               // 41: gideondb.v1.StatsRequest
-	(*StatsResponse)(nil),              // 42: gideondb.v1.StatsResponse
-	(*SnapshotRequest)(nil),            // 43: gideondb.v1.SnapshotRequest
-	(*SnapshotResponse)(nil),           // 44: gideondb.v1.SnapshotResponse
-	(*RestoreRequest)(nil),             // 45: gideondb.v1.RestoreRequest
-	(*RestoreResponse)(nil),            // 46: gideondb.v1.RestoreResponse
-	(*structpb.Struct)(nil),            // 47: google.protobuf.Struct
+	(Quantization)(0),                  // 2: gideondb.v1.Quantization
+	(FusionMode)(0),                    // 3: gideondb.v1.FusionMode
+	(Acknowledgement)(0),               // 4: gideondb.v1.Acknowledgement
+	(*Collection)(nil),                 // 5: gideondb.v1.Collection
+	(*IndexConfig)(nil),                // 6: gideondb.v1.IndexConfig
+	(*Record)(nil),                     // 7: gideondb.v1.Record
+	(*SearchResult)(nil),               // 8: gideondb.v1.SearchResult
+	(*CreateCollectionRequest)(nil),    // 9: gideondb.v1.CreateCollectionRequest
+	(*CreateCollectionResponse)(nil),   // 10: gideondb.v1.CreateCollectionResponse
+	(*DeleteCollectionRequest)(nil),    // 11: gideondb.v1.DeleteCollectionRequest
+	(*DeleteCollectionResponse)(nil),   // 12: gideondb.v1.DeleteCollectionResponse
+	(*ListCollectionsRequest)(nil),     // 13: gideondb.v1.ListCollectionsRequest
+	(*ListCollectionsResponse)(nil),    // 14: gideondb.v1.ListCollectionsResponse
+	(*DescribeCollectionRequest)(nil),  // 15: gideondb.v1.DescribeCollectionRequest
+	(*DescribeCollectionResponse)(nil), // 16: gideondb.v1.DescribeCollectionResponse
+	(*UpsertRequest)(nil),              // 17: gideondb.v1.UpsertRequest
+	(*UpsertResponse)(nil),             // 18: gideondb.v1.UpsertResponse
+	(*BatchUpsertRequest)(nil),         // 19: gideondb.v1.BatchUpsertRequest
+	(*BatchUpsertResponse)(nil),        // 20: gideondb.v1.BatchUpsertResponse
+	(*DeleteRequest)(nil),              // 21: gideondb.v1.DeleteRequest
+	(*DeleteResponse)(nil),             // 22: gideondb.v1.DeleteResponse
+	(*GetRequest)(nil),                 // 23: gideondb.v1.GetRequest
+	(*GetResponse)(nil),                // 24: gideondb.v1.GetResponse
+	(*SearchRequest)(nil),              // 25: gideondb.v1.SearchRequest
+	(*SearchResponse)(nil),             // 26: gideondb.v1.SearchResponse
+	(*BatchSearchRequest)(nil),         // 27: gideondb.v1.BatchSearchRequest
+	(*BatchSearchResponse)(nil),        // 28: gideondb.v1.BatchSearchResponse
+	(*ScrollRequest)(nil),              // 29: gideondb.v1.ScrollRequest
+	(*ScrollResponse)(nil),             // 30: gideondb.v1.ScrollResponse
+	(*ShardFailure)(nil),               // 31: gideondb.v1.ShardFailure
+	(*ShardWriteOutcome)(nil),          // 32: gideondb.v1.ShardWriteOutcome
+	(*ClusterStatusRequest)(nil),       // 33: gideondb.v1.ClusterStatusRequest
+	(*ClusterStatusResponse)(nil),      // 34: gideondb.v1.ClusterStatusResponse
+	(*ListNodesRequest)(nil),           // 35: gideondb.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),          // 36: gideondb.v1.ListNodesResponse
+	(*Node)(nil),                       // 37: gideondb.v1.Node
+	(*ListShardsRequest)(nil),          // 38: gideondb.v1.ListShardsRequest
+	(*ListShardsResponse)(nil),         // 39: gideondb.v1.ListShardsResponse
+	(*ShardPlacement)(nil),             // 40: gideondb.v1.ShardPlacement
+	(*HealthRequest)(nil),              // 41: gideondb.v1.HealthRequest
+	(*HealthResponse)(nil),             // 42: gideondb.v1.HealthResponse
+	(*StatsRequest)(nil),               // 43: gideondb.v1.StatsRequest
+	(*StatsResponse)(nil),              // 44: gideondb.v1.StatsResponse
+	(*SnapshotRequest)(nil),            // 45: gideondb.v1.SnapshotRequest
+	(*SnapshotResponse)(nil),           // 46: gideondb.v1.SnapshotResponse
+	(*RestoreRequest)(nil),             // 47: gideondb.v1.RestoreRequest
+	(*RestoreResponse)(nil),            // 48: gideondb.v1.RestoreResponse
+	nil,                                // 49: gideondb.v1.Record.SparseVectorEntry
+	nil,                                // 50: gideondb.v1.SearchRequest.SparseVectorEntry
+	(*structpb.Struct)(nil),            // 51: google.protobuf.Struct
 }
 var file_gideondb_v1_gideondb_proto_depIdxs = []int32{
 	0,  // 0: gideondb.v1.Collection.metric:type_name -> gideondb.v1.DistanceMetric
-	4,  // 1: gideondb.v1.Collection.index:type_name -> gideondb.v1.IndexConfig
+	6,  // 1: gideondb.v1.Collection.index:type_name -> gideondb.v1.IndexConfig
 	1,  // 2: gideondb.v1.IndexConfig.type:type_name -> gideondb.v1.IndexType
-	47, // 3: gideondb.v1.Record.metadata:type_name -> google.protobuf.Struct
-	47, // 4: gideondb.v1.Record.payload:type_name -> google.protobuf.Struct
-	47, // 5: gideondb.v1.SearchResult.metadata:type_name -> google.protobuf.Struct
-	47, // 6: gideondb.v1.SearchResult.payload:type_name -> google.protobuf.Struct
-	3,  // 7: gideondb.v1.CreateCollectionRequest.collection:type_name -> gideondb.v1.Collection
-	3,  // 8: gideondb.v1.CreateCollectionResponse.collection:type_name -> gideondb.v1.Collection
-	3,  // 9: gideondb.v1.ListCollectionsResponse.collections:type_name -> gideondb.v1.Collection
-	3,  // 10: gideondb.v1.DescribeCollectionResponse.collection:type_name -> gideondb.v1.Collection
-	5,  // 11: gideondb.v1.UpsertRequest.record:type_name -> gideondb.v1.Record
-	2,  // 12: gideondb.v1.UpsertRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
-	5,  // 13: gideondb.v1.UpsertResponse.record:type_name -> gideondb.v1.Record
-	5,  // 14: gideondb.v1.BatchUpsertRequest.records:type_name -> gideondb.v1.Record
-	2,  // 15: gideondb.v1.BatchUpsertRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
-	5,  // 16: gideondb.v1.BatchUpsertResponse.records:type_name -> gideondb.v1.Record
-	30, // 17: gideondb.v1.BatchUpsertResponse.outcomes:type_name -> gideondb.v1.ShardWriteOutcome
-	2,  // 18: gideondb.v1.DeleteRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
-	5,  // 19: gideondb.v1.GetResponse.record:type_name -> gideondb.v1.Record
-	47, // 20: gideondb.v1.SearchRequest.filter:type_name -> google.protobuf.Struct
-	6,  // 21: gideondb.v1.SearchResponse.results:type_name -> gideondb.v1.SearchResult
-	29, // 22: gideondb.v1.SearchResponse.failures:type_name -> gideondb.v1.ShardFailure
-	23, // 23: gideondb.v1.BatchSearchRequest.searches:type_name -> gideondb.v1.SearchRequest
-	24, // 24: gideondb.v1.BatchSearchResponse.responses:type_name -> gideondb.v1.SearchResponse
-	5,  // 25: gideondb.v1.ScrollResponse.records:type_name -> gideondb.v1.Record
-	35, // 26: gideondb.v1.ListNodesResponse.nodes:type_name -> gideondb.v1.Node
-	38, // 27: gideondb.v1.ListShardsResponse.shards:type_name -> gideondb.v1.ShardPlacement
-	7,  // 28: gideondb.v1.GideonDBService.CreateCollection:input_type -> gideondb.v1.CreateCollectionRequest
-	9,  // 29: gideondb.v1.GideonDBService.DeleteCollection:input_type -> gideondb.v1.DeleteCollectionRequest
-	11, // 30: gideondb.v1.GideonDBService.ListCollections:input_type -> gideondb.v1.ListCollectionsRequest
-	13, // 31: gideondb.v1.GideonDBService.DescribeCollection:input_type -> gideondb.v1.DescribeCollectionRequest
-	15, // 32: gideondb.v1.GideonDBService.Upsert:input_type -> gideondb.v1.UpsertRequest
-	17, // 33: gideondb.v1.GideonDBService.BatchUpsert:input_type -> gideondb.v1.BatchUpsertRequest
-	19, // 34: gideondb.v1.GideonDBService.Delete:input_type -> gideondb.v1.DeleteRequest
-	21, // 35: gideondb.v1.GideonDBService.Get:input_type -> gideondb.v1.GetRequest
-	23, // 36: gideondb.v1.GideonDBService.Search:input_type -> gideondb.v1.SearchRequest
-	25, // 37: gideondb.v1.GideonDBService.BatchSearch:input_type -> gideondb.v1.BatchSearchRequest
-	27, // 38: gideondb.v1.GideonDBService.Scroll:input_type -> gideondb.v1.ScrollRequest
-	31, // 39: gideondb.v1.GideonDBService.ClusterStatus:input_type -> gideondb.v1.ClusterStatusRequest
-	33, // 40: gideondb.v1.GideonDBService.ListNodes:input_type -> gideondb.v1.ListNodesRequest
-	36, // 41: gideondb.v1.GideonDBService.ListShards:input_type -> gideondb.v1.ListShardsRequest
-	39, // 42: gideondb.v1.GideonDBService.Health:input_type -> gideondb.v1.HealthRequest
-	41, // 43: gideondb.v1.GideonDBService.Stats:input_type -> gideondb.v1.StatsRequest
-	43, // 44: gideondb.v1.GideonDBService.Snapshot:input_type -> gideondb.v1.SnapshotRequest
-	45, // 45: gideondb.v1.GideonDBService.Restore:input_type -> gideondb.v1.RestoreRequest
-	8,  // 46: gideondb.v1.GideonDBService.CreateCollection:output_type -> gideondb.v1.CreateCollectionResponse
-	10, // 47: gideondb.v1.GideonDBService.DeleteCollection:output_type -> gideondb.v1.DeleteCollectionResponse
-	12, // 48: gideondb.v1.GideonDBService.ListCollections:output_type -> gideondb.v1.ListCollectionsResponse
-	14, // 49: gideondb.v1.GideonDBService.DescribeCollection:output_type -> gideondb.v1.DescribeCollectionResponse
-	16, // 50: gideondb.v1.GideonDBService.Upsert:output_type -> gideondb.v1.UpsertResponse
-	18, // 51: gideondb.v1.GideonDBService.BatchUpsert:output_type -> gideondb.v1.BatchUpsertResponse
-	20, // 52: gideondb.v1.GideonDBService.Delete:output_type -> gideondb.v1.DeleteResponse
-	22, // 53: gideondb.v1.GideonDBService.Get:output_type -> gideondb.v1.GetResponse
-	24, // 54: gideondb.v1.GideonDBService.Search:output_type -> gideondb.v1.SearchResponse
-	26, // 55: gideondb.v1.GideonDBService.BatchSearch:output_type -> gideondb.v1.BatchSearchResponse
-	28, // 56: gideondb.v1.GideonDBService.Scroll:output_type -> gideondb.v1.ScrollResponse
-	32, // 57: gideondb.v1.GideonDBService.ClusterStatus:output_type -> gideondb.v1.ClusterStatusResponse
-	34, // 58: gideondb.v1.GideonDBService.ListNodes:output_type -> gideondb.v1.ListNodesResponse
-	37, // 59: gideondb.v1.GideonDBService.ListShards:output_type -> gideondb.v1.ListShardsResponse
-	40, // 60: gideondb.v1.GideonDBService.Health:output_type -> gideondb.v1.HealthResponse
-	42, // 61: gideondb.v1.GideonDBService.Stats:output_type -> gideondb.v1.StatsResponse
-	44, // 62: gideondb.v1.GideonDBService.Snapshot:output_type -> gideondb.v1.SnapshotResponse
-	46, // 63: gideondb.v1.GideonDBService.Restore:output_type -> gideondb.v1.RestoreResponse
-	46, // [46:64] is the sub-list for method output_type
-	28, // [28:46] is the sub-list for method input_type
-	28, // [28:28] is the sub-list for extension type_name
-	28, // [28:28] is the sub-list for extension extendee
-	0,  // [0:28] is the sub-list for field type_name
+	2,  // 3: gideondb.v1.IndexConfig.quantization:type_name -> gideondb.v1.Quantization
+	51, // 4: gideondb.v1.Record.metadata:type_name -> google.protobuf.Struct
+	51, // 5: gideondb.v1.Record.payload:type_name -> google.protobuf.Struct
+	49, // 6: gideondb.v1.Record.sparse_vector:type_name -> gideondb.v1.Record.SparseVectorEntry
+	51, // 7: gideondb.v1.SearchResult.metadata:type_name -> google.protobuf.Struct
+	51, // 8: gideondb.v1.SearchResult.payload:type_name -> google.protobuf.Struct
+	5,  // 9: gideondb.v1.CreateCollectionRequest.collection:type_name -> gideondb.v1.Collection
+	5,  // 10: gideondb.v1.CreateCollectionResponse.collection:type_name -> gideondb.v1.Collection
+	5,  // 11: gideondb.v1.ListCollectionsResponse.collections:type_name -> gideondb.v1.Collection
+	5,  // 12: gideondb.v1.DescribeCollectionResponse.collection:type_name -> gideondb.v1.Collection
+	7,  // 13: gideondb.v1.UpsertRequest.record:type_name -> gideondb.v1.Record
+	4,  // 14: gideondb.v1.UpsertRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
+	7,  // 15: gideondb.v1.UpsertResponse.record:type_name -> gideondb.v1.Record
+	7,  // 16: gideondb.v1.BatchUpsertRequest.records:type_name -> gideondb.v1.Record
+	4,  // 17: gideondb.v1.BatchUpsertRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
+	7,  // 18: gideondb.v1.BatchUpsertResponse.records:type_name -> gideondb.v1.Record
+	32, // 19: gideondb.v1.BatchUpsertResponse.outcomes:type_name -> gideondb.v1.ShardWriteOutcome
+	4,  // 20: gideondb.v1.DeleteRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
+	7,  // 21: gideondb.v1.GetResponse.record:type_name -> gideondb.v1.Record
+	51, // 22: gideondb.v1.SearchRequest.filter:type_name -> google.protobuf.Struct
+	50, // 23: gideondb.v1.SearchRequest.sparse_vector:type_name -> gideondb.v1.SearchRequest.SparseVectorEntry
+	3,  // 24: gideondb.v1.SearchRequest.fusion:type_name -> gideondb.v1.FusionMode
+	8,  // 25: gideondb.v1.SearchResponse.results:type_name -> gideondb.v1.SearchResult
+	31, // 26: gideondb.v1.SearchResponse.failures:type_name -> gideondb.v1.ShardFailure
+	25, // 27: gideondb.v1.BatchSearchRequest.searches:type_name -> gideondb.v1.SearchRequest
+	26, // 28: gideondb.v1.BatchSearchResponse.responses:type_name -> gideondb.v1.SearchResponse
+	7,  // 29: gideondb.v1.ScrollResponse.records:type_name -> gideondb.v1.Record
+	37, // 30: gideondb.v1.ListNodesResponse.nodes:type_name -> gideondb.v1.Node
+	40, // 31: gideondb.v1.ListShardsResponse.shards:type_name -> gideondb.v1.ShardPlacement
+	9,  // 32: gideondb.v1.GideonDBService.CreateCollection:input_type -> gideondb.v1.CreateCollectionRequest
+	11, // 33: gideondb.v1.GideonDBService.DeleteCollection:input_type -> gideondb.v1.DeleteCollectionRequest
+	13, // 34: gideondb.v1.GideonDBService.ListCollections:input_type -> gideondb.v1.ListCollectionsRequest
+	15, // 35: gideondb.v1.GideonDBService.DescribeCollection:input_type -> gideondb.v1.DescribeCollectionRequest
+	17, // 36: gideondb.v1.GideonDBService.Upsert:input_type -> gideondb.v1.UpsertRequest
+	19, // 37: gideondb.v1.GideonDBService.BatchUpsert:input_type -> gideondb.v1.BatchUpsertRequest
+	21, // 38: gideondb.v1.GideonDBService.Delete:input_type -> gideondb.v1.DeleteRequest
+	23, // 39: gideondb.v1.GideonDBService.Get:input_type -> gideondb.v1.GetRequest
+	25, // 40: gideondb.v1.GideonDBService.Search:input_type -> gideondb.v1.SearchRequest
+	27, // 41: gideondb.v1.GideonDBService.BatchSearch:input_type -> gideondb.v1.BatchSearchRequest
+	29, // 42: gideondb.v1.GideonDBService.Scroll:input_type -> gideondb.v1.ScrollRequest
+	33, // 43: gideondb.v1.GideonDBService.ClusterStatus:input_type -> gideondb.v1.ClusterStatusRequest
+	35, // 44: gideondb.v1.GideonDBService.ListNodes:input_type -> gideondb.v1.ListNodesRequest
+	38, // 45: gideondb.v1.GideonDBService.ListShards:input_type -> gideondb.v1.ListShardsRequest
+	41, // 46: gideondb.v1.GideonDBService.Health:input_type -> gideondb.v1.HealthRequest
+	43, // 47: gideondb.v1.GideonDBService.Stats:input_type -> gideondb.v1.StatsRequest
+	45, // 48: gideondb.v1.GideonDBService.Snapshot:input_type -> gideondb.v1.SnapshotRequest
+	47, // 49: gideondb.v1.GideonDBService.Restore:input_type -> gideondb.v1.RestoreRequest
+	10, // 50: gideondb.v1.GideonDBService.CreateCollection:output_type -> gideondb.v1.CreateCollectionResponse
+	12, // 51: gideondb.v1.GideonDBService.DeleteCollection:output_type -> gideondb.v1.DeleteCollectionResponse
+	14, // 52: gideondb.v1.GideonDBService.ListCollections:output_type -> gideondb.v1.ListCollectionsResponse
+	16, // 53: gideondb.v1.GideonDBService.DescribeCollection:output_type -> gideondb.v1.DescribeCollectionResponse
+	18, // 54: gideondb.v1.GideonDBService.Upsert:output_type -> gideondb.v1.UpsertResponse
+	20, // 55: gideondb.v1.GideonDBService.BatchUpsert:output_type -> gideondb.v1.BatchUpsertResponse
+	22, // 56: gideondb.v1.GideonDBService.Delete:output_type -> gideondb.v1.DeleteResponse
+	24, // 57: gideondb.v1.GideonDBService.Get:output_type -> gideondb.v1.GetResponse
+	26, // 58: gideondb.v1.GideonDBService.Search:output_type -> gideondb.v1.SearchResponse
+	28, // 59: gideondb.v1.GideonDBService.BatchSearch:output_type -> gideondb.v1.BatchSearchResponse
+	30, // 60: gideondb.v1.GideonDBService.Scroll:output_type -> gideondb.v1.ScrollResponse
+	34, // 61: gideondb.v1.GideonDBService.ClusterStatus:output_type -> gideondb.v1.ClusterStatusResponse
+	36, // 62: gideondb.v1.GideonDBService.ListNodes:output_type -> gideondb.v1.ListNodesResponse
+	39, // 63: gideondb.v1.GideonDBService.ListShards:output_type -> gideondb.v1.ListShardsResponse
+	42, // 64: gideondb.v1.GideonDBService.Health:output_type -> gideondb.v1.HealthResponse
+	44, // 65: gideondb.v1.GideonDBService.Stats:output_type -> gideondb.v1.StatsResponse
+	46, // 66: gideondb.v1.GideonDBService.Snapshot:output_type -> gideondb.v1.SnapshotResponse
+	48, // 67: gideondb.v1.GideonDBService.Restore:output_type -> gideondb.v1.RestoreResponse
+	50, // [50:68] is the sub-list for method output_type
+	32, // [32:50] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_gideondb_v1_gideondb_proto_init() }
@@ -3361,13 +3583,14 @@ func file_gideondb_v1_gideondb_proto_init() {
 	if File_gideondb_v1_gideondb_proto != nil {
 		return
 	}
+	file_gideondb_v1_gideondb_proto_msgTypes[20].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gideondb_v1_gideondb_proto_rawDesc), len(file_gideondb_v1_gideondb_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   44,
+			NumEnums:      5,
+			NumMessages:   46,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

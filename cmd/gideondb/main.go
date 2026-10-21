@@ -415,6 +415,7 @@ func main() {
 			RestoreDirectory:   *grpcRestorePath,
 			ClusterSnapshotter: apiServer,
 			ServerOptions:      grpcOptions,
+			Embedders:          embedders,
 		})
 		defer grpcServer.Stop()
 	}

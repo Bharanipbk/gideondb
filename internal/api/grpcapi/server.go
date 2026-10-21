@@ -21,6 +21,7 @@ import (
 	v1 "github.com/Bharanipbk/gideondb/gen/gideondb/v1"
 	"github.com/Bharanipbk/gideondb/internal/cluster"
 	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/embedding"
 	"github.com/Bharanipbk/gideondb/internal/engine"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
 	"google.golang.org/grpc"
@@ -77,6 +78,9 @@ type Options struct {
 	RestoreDirectory    string
 	ClusterSnapshotter  ClusterSnapshotter
 	ServerOptions       []grpc.ServerOption
+	// Embedders resolves collection vectorizers for text-only records and
+	// searches. Nil disables embedding; text still drives BM25.
+	Embedders *embedding.Registry
 }
 
 type Principal struct {
@@ -109,6 +113,15 @@ func (s *Server) CreateCollection(_ context.Context, request *v1.CreateCollectio
 	config, err := fromProtoCollection(request.GetCollection())
 	if err != nil {
 		return nil, mapError(err)
+	}
+	if config.Vectorizer != "" {
+		model, ok := s.options.Embedders.Get(config.Vectorizer)
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "vectorizer %q is not configured on this node", config.Vectorizer)
+		}
+		if model.Dimension() > 0 && model.Dimension() != config.Dimension {
+			return nil, status.Errorf(codes.InvalidArgument, "vectorizer %q produces %d dimensions, collection has %d", config.Vectorizer, model.Dimension(), config.Dimension)
+		}
 	}
 	if err := s.engine.CreateCollection(config); err != nil {
 		return nil, mapError(err)
@@ -153,6 +166,7 @@ func (s *Server) Upsert(ctx context.Context, request *v1.UpsertRequest) (*v1.Ups
 		return nil, mapError(err)
 	}
 	if s.options.EnableStaticRouting && s.options.DistributedUpsert != nil {
+		// The REST coordinator embeds text once before fanning out.
 		response, err := s.distributedBatchUpsert(ctx, request.GetCollection(), []core.Record{record}, request.GetAcknowledgement())
 		if err != nil {
 			return nil, err
@@ -162,6 +176,11 @@ func (s *Server) Upsert(ctx context.Context, request *v1.UpsertRequest) (*v1.Ups
 		}
 		return &v1.UpsertResponse{Record: response.GetRecords()[0]}, nil
 	}
+	records := []core.Record{record}
+	if err := s.embedRecords(ctx, request.GetCollection(), records); err != nil {
+		return nil, err
+	}
+	record = records[0]
 	stored, err := s.engine.Upsert(request.GetCollection(), record)
 	if err != nil {
 		return nil, mapError(err)
@@ -187,6 +206,9 @@ func (s *Server) BatchUpsert(ctx context.Context, request *v1.BatchUpsertRequest
 	}
 	if s.options.EnableStaticRouting && s.options.DistributedUpsert != nil {
 		return s.distributedBatchUpsert(ctx, request.GetCollection(), records, request.GetAcknowledgement())
+	}
+	if err := s.embedRecords(ctx, request.GetCollection(), records); err != nil {
+		return nil, err
 	}
 	stored, err := s.engine.BatchUpsert(request.GetCollection(), records)
 	if err != nil {
@@ -233,7 +255,24 @@ func (s *Server) Search(ctx context.Context, request *v1.SearchRequest) (*v1.Sea
 	if err != nil {
 		return nil, mapError(err)
 	}
-	results, err := s.engine.SearchFiltered(request.GetCollection(), request.GetNamespace(), request.GetVector(), int(request.GetTopK()), filter)
+	vector, err := s.embedQuery(ctx, request.GetCollection(), request.GetVector(), request.GetText())
+	if err != nil {
+		return nil, err
+	}
+	var results []core.SearchResult
+	if request.GetSparseVector() != nil || request.GetText() != "" {
+		fusion, err := fromProtoFusion(request.GetFusion())
+		if err != nil {
+			return nil, mapError(err)
+		}
+		if alpha := searchAlpha(request); alpha < 0 || alpha > 1 {
+			return nil, status.Error(codes.InvalidArgument, "alpha must be between 0 and 1")
+		}
+		query := core.HybridQuery{Dense: vector, Sparse: request.GetSparseVector(), Text: request.GetText(), Alpha: searchAlpha(request), Fusion: fusion, TopK: int(request.GetTopK())}
+		results, err = s.engine.SearchHybrid(request.GetCollection(), request.GetNamespace(), query, filter)
+	} else {
+		results, err = s.engine.SearchFiltered(request.GetCollection(), request.GetNamespace(), vector, int(request.GetTopK()), filter)
+	}
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -708,7 +747,15 @@ func fromProtoCollection(value *v1.Collection) (core.CollectionConfig, error) {
 	if value.GetIndex().GetType() == v1.IndexType_INDEX_TYPE_HNSW {
 		indexType = core.IndexHNSW
 	}
-	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch())}}
+	quantization := core.QuantizationNone
+	switch value.GetIndex().GetQuantization() {
+	case v1.Quantization_QUANTIZATION_UNSPECIFIED:
+	case v1.Quantization_QUANTIZATION_BINARY:
+		quantization = core.QuantizationBinary
+	default:
+		return core.CollectionConfig{}, fmtInvalid("unsupported quantization")
+	}
+	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Vectorizer: value.GetVectorizer(), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch()), Quantization: quantization, Oversampling: int(value.GetIndex().GetOversampling())}}
 	if err := config.Validate(); err != nil {
 		return core.CollectionConfig{}, err
 	}
@@ -719,14 +766,15 @@ func toProtoCollection(value core.CollectionConfig) *v1.Collection {
 	metrics := map[core.Metric]v1.DistanceMetric{core.MetricCosine: v1.DistanceMetric_DISTANCE_METRIC_COSINE, core.MetricDot: v1.DistanceMetric_DISTANCE_METRIC_DOT, core.MetricL2: v1.DistanceMetric_DISTANCE_METRIC_L2}
 	indexTypes := map[core.IndexType]v1.IndexType{core.IndexFlat: v1.IndexType_INDEX_TYPE_FLAT, core.IndexHNSW: v1.IndexType_INDEX_TYPE_HNSW}
 	value = value.Normalized()
-	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch)}}
+	quantizations := map[core.Quantization]v1.Quantization{core.QuantizationBinary: v1.Quantization_QUANTIZATION_BINARY}
+	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Vectorizer: value.Vectorizer, Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch), Quantization: quantizations[value.Index.Quantization], Oversampling: uint32(value.Index.Oversampling)}}
 }
 
 func fromProtoRecord(value *v1.Record) (core.Record, error) {
 	if value == nil {
 		return core.Record{}, fmtInvalid("record is required")
 	}
-	return core.Record{ID: value.GetId(), Vector: append([]float32(nil), value.GetVector()...), Metadata: structMap(value.GetMetadata()), Payload: structMap(value.GetPayload()), Timestamp: value.GetTimestampUnixMillis(), Version: value.GetVersion(), Namespace: value.GetNamespace()}, nil
+	return core.Record{ID: value.GetId(), Vector: append([]float32(nil), value.GetVector()...), Metadata: structMap(value.GetMetadata()), Payload: structMap(value.GetPayload()), Timestamp: value.GetTimestampUnixMillis(), Version: value.GetVersion(), Namespace: value.GetNamespace(), SparseVector: copySparse(value.GetSparseVector()), Text: value.GetText()}, nil
 }
 
 func toProtoRecord(value core.Record) (*v1.Record, error) {
@@ -738,7 +786,37 @@ func toProtoRecord(value core.Record) (*v1.Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &v1.Record{Id: value.ID, Vector: append([]float32(nil), value.Vector...), Metadata: metadataValue, Payload: payloadValue, TimestampUnixMillis: value.Timestamp, Version: value.Version, Namespace: value.Namespace}, nil
+	return &v1.Record{Id: value.ID, Vector: append([]float32(nil), value.Vector...), Metadata: metadataValue, Payload: payloadValue, TimestampUnixMillis: value.Timestamp, Version: value.Version, Namespace: value.Namespace, SparseVector: copySparse(value.SparseVector), Text: value.Text}, nil
+}
+
+func copySparse(value map[string]float32) map[string]float32 {
+	if value == nil {
+		return nil
+	}
+	result := make(map[string]float32, len(value))
+	for term, weight := range value {
+		result[term] = weight
+	}
+	return result
+}
+
+func fromProtoFusion(value v1.FusionMode) (core.FusionMode, error) {
+	switch value {
+	case v1.FusionMode_FUSION_MODE_UNSPECIFIED, v1.FusionMode_FUSION_MODE_WEIGHTED:
+		return core.FusionWeighted, nil
+	case v1.FusionMode_FUSION_MODE_RRF:
+		return core.FusionRRF, nil
+	default:
+		return "", fmtInvalid("unsupported fusion")
+	}
+}
+
+// searchAlpha returns the dense weight, defaulting to 0.5 like REST.
+func searchAlpha(request *v1.SearchRequest) float32 {
+	if request.Alpha != nil {
+		return request.GetAlpha()
+	}
+	return 0.5
 }
 
 func toProtoResults(values []core.SearchResult) ([]*v1.SearchResult, error) {
