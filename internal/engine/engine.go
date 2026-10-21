@@ -647,13 +647,24 @@ func (e *Engine) InstallReplicaSnapshot(name string, shardID uint32, sequence ui
 			return err
 		}
 	}
+	if manifest.GraphFile, err = writeDiskANN(c.Config(), directory, segmentBase+".diskann", records, manifest.GraphFile); err != nil {
+		return err
+	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
 	}
 	if err := e.logs[name][shardID].Reset(sequence + 1); err != nil {
 		return err
 	}
-	if err := c.ReplaceShardRecords(shardID, records); err != nil {
+	if c.Config().Index.Type == core.IndexDiskANN && manifest.GraphFile != "" {
+		metadataIndex, err := metadata.LoadBinary(filterData, manifest.RecordCount)
+		if err != nil {
+			return err
+		}
+		if err := c.InstallDiskANNShardWithMetadata(shardID, records, filepath.Join(directory, manifest.GraphFile), metadataIndex); err != nil {
+			return err
+		}
+	} else if err := c.ReplaceShardRecords(shardID, records); err != nil {
 		return err
 	}
 	e.checkpointLSN[name][shardID] = sequence
@@ -998,7 +1009,9 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 		var records []core.Record
 		if manifest.Format == 3 {
 			var locations []segmentfile.VectorLocation
-			if config.Index.Type == core.IndexFlat {
+			diskANN := config.Index.Type == core.IndexDiskANN && manifest.GraphFile != ""
+			if config.Index.Type == core.IndexFlat || diskANN {
+				// DiskANN files carry their own vectors, so only records are read.
 				records, locations, err = resolveMappedSegments(directory, manifest.Segments)
 			} else {
 				records, _, err = materializeSegments(directory, manifest.Segments)
@@ -1041,6 +1054,10 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 				}
 				if err := c.InstallHNSWShardWithMetadata(uint32(shardID), records, graph, metadataIndex); err != nil {
 					return err
+				}
+			} else if diskANN {
+				if err := c.InstallDiskANNShardWithMetadata(uint32(shardID), records, filepath.Join(directory, manifest.GraphFile), metadataIndex); err != nil {
+					return fmt.Errorf("open multi-segment diskann index: %w", err)
 				}
 			} else if err := c.InstallRecordsShardWithMetadata(uint32(shardID), records, metadataIndex); err != nil {
 				return err
@@ -1101,7 +1118,12 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 					return fmt.Errorf("restore filter index for %s shard %d: %w", config.Name, shardID, filterErr)
 				}
 			}
-			if manifest.GraphFile != "" {
+			if manifest.GraphFile != "" && config.Index.Type == core.IndexDiskANN {
+				if err := c.InstallDiskANNShardWithMetadata(uint32(shardID), records, filepath.Join(directory, manifest.GraphFile), metadataIndex); err != nil {
+					return fmt.Errorf("open diskann index for %s shard %d: %w", config.Name, shardID, err)
+				}
+				records = nil
+			} else if manifest.GraphFile != "" {
 				graph, err := segmentfile.ReadGraph(directory, manifest)
 				if err != nil {
 					return fmt.Errorf("load hnsw graph for %s shard %d: %w", config.Name, shardID, err)
@@ -1247,6 +1269,9 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 			return err
 		}
 	}
+	if manifest.GraphFile, err = writeDiskANN(c.Config(), directory, fmt.Sprintf("segment-%020d-view.diskann", maxLSN), records, manifest.GraphFile); err != nil {
+		return err
+	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
 	}
@@ -1260,6 +1285,14 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 	}
 	if c.Config().Index.Type == core.IndexHNSW {
 		if err := c.InstallHNSWShardWithMetadata(shardID, records, graphData, metadataIndex); err != nil {
+			return err
+		}
+	} else if c.Config().Index.Type == core.IndexDiskANN && manifest.GraphFile != "" {
+		if err := c.InstallDiskANNShardWithMetadata(shardID, records, filepath.Join(directory, manifest.GraphFile), metadataIndex); err != nil {
+			return err
+		}
+	} else if c.Config().Index.Type == core.IndexDiskANN {
+		if err := c.InstallRecordsShardWithMetadata(shardID, records, metadataIndex); err != nil {
 			return err
 		}
 	} else {
@@ -1284,6 +1317,19 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 		}
 	}
 	return nil
+}
+
+// writeDiskANN builds the DiskANN file for a sealed shard of a diskann
+// collection and returns its name for Manifest.GraphFile, which the index
+// type disambiguates. Other index types and empty shards keep current.
+func writeDiskANN(config core.CollectionConfig, directory, name string, records []core.Record, current string) (string, error) {
+	if config.Index.Type != core.IndexDiskANN || len(records) == 0 {
+		return current, nil
+	}
+	if err := segment.BuildDiskANN(config, records, filepath.Join(directory, name)); err != nil {
+		return "", fmt.Errorf("build diskann index: %w", err)
+	}
+	return name, nil
 }
 
 func (e *Engine) shardSegmentDir(name string, shardID uint32) string {

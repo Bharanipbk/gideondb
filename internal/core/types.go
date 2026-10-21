@@ -88,6 +88,9 @@ type IndexType string
 const (
 	IndexFlat IndexType = "flat"
 	IndexHNSW IndexType = "hnsw"
+	// IndexDiskANN serves sealed segments from a disk-resident Vamana graph;
+	// the mutable segment uses the flat index until checkpoint.
+	IndexDiskANN IndexType = "diskann"
 )
 
 // IndexConfig selects the collection-local vector index. Zero values select
@@ -101,6 +104,10 @@ type IndexConfig struct {
 	// and rescores Oversampling*k candidates at full precision. Flat only.
 	Quantization Quantization `json:"quantization,omitempty"`
 	Oversampling int          `json:"oversampling,omitempty"`
+	// MaxDegree (Vamana R) and Alpha (robust-prune factor) tune DiskANN,
+	// which reuses EFConstruction and EFSearch as its build and search lists.
+	MaxDegree int     `json:"max_degree,omitempty"`
+	Alpha     float32 `json:"alpha,omitempty"`
 }
 
 type Quantization string
@@ -123,6 +130,20 @@ func (c CollectionConfig) Normalized() CollectionConfig {
 		}
 		if c.Index.EFSearch == 0 {
 			c.Index.EFSearch = 64
+		}
+	}
+	if c.Index.Type == IndexDiskANN {
+		if c.Index.MaxDegree == 0 {
+			c.Index.MaxDegree = 64
+		}
+		if c.Index.Alpha == 0 {
+			c.Index.Alpha = 1.2
+		}
+		if c.Index.EFConstruction == 0 {
+			c.Index.EFConstruction = 128
+		}
+		if c.Index.EFSearch == 0 {
+			c.Index.EFSearch = 100
 		}
 	}
 	if c.Index.Quantization == QuantizationBinary && c.Index.Oversampling == 0 {
@@ -160,8 +181,27 @@ func (c CollectionConfig) Validate() error {
 		if c.Index.EFSearch < 1 || c.Index.EFSearch > 10000 {
 			return fmt.Errorf("%w: hnsw ef_search must be between 1 and 10000", ErrInvalidArgument)
 		}
+	case IndexDiskANN:
+		if c.Index.M != 0 {
+			return fmt.Errorf("%w: diskann uses max_degree, not m", ErrInvalidArgument)
+		}
+		if c.Index.MaxDegree < 4 || c.Index.MaxDegree > 256 {
+			return fmt.Errorf("%w: diskann max_degree must be between 4 and 256", ErrInvalidArgument)
+		}
+		if !(c.Index.Alpha >= 1 && c.Index.Alpha <= 2) {
+			return fmt.Errorf("%w: diskann alpha must be between 1 and 2", ErrInvalidArgument)
+		}
+		if c.Index.EFConstruction < c.Index.MaxDegree || c.Index.EFConstruction > 10000 {
+			return fmt.Errorf("%w: diskann ef_construction must be between max_degree and 10000", ErrInvalidArgument)
+		}
+		if c.Index.EFSearch < 1 || c.Index.EFSearch > 10000 {
+			return fmt.Errorf("%w: diskann ef_search must be between 1 and 10000", ErrInvalidArgument)
+		}
 	default:
 		return fmt.Errorf("%w: unsupported index type %q", ErrInvalidArgument, c.Index.Type)
+	}
+	if c.Index.Type != IndexDiskANN && (c.Index.MaxDegree != 0 || c.Index.Alpha != 0) {
+		return fmt.Errorf("%w: max_degree and alpha require the diskann index", ErrInvalidArgument)
 	}
 	switch c.Index.Quantization {
 	case QuantizationNone:

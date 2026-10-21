@@ -22,7 +22,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine + REST; 🟡 gRPC/SDK/dashboard |
 | 2 | Binary and product quantization | Open source | P0 | ✅ binary; ⬜ PQ |
 | 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
-| 4 | Disk-resident ANN index | Open source / Cloud | P1 | ⬜ |
+| 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
 | 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ⬜ |
 | 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory; ⬜ agent SDK adapters |
@@ -103,14 +103,20 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   - Publish comparisons with Qdrant, Milvus and pgvector, but only after gap
     19 is fixed.
 
-### 4. Disk-resident ANN index — P1
+### 4. Disk-resident ANN index — P1 · ✅
 
-- **Current state:** HNSW graphs live in memory; segments are mmap-oriented
-  but the graph is not designed for SSD access patterns.
-- **Why it matters:** RAM-bound indexes cap dataset size per node and make
-  cloud pricing uncompetitive at 100M+ vectors.
-- **Direction:** DiskANN/Vamana-style graph with compressed vectors in RAM and
-  full vectors on SSD; select per collection.
+- **Done (2026-10-21):** `"index": {"type": "diskann"}` serves checkpointed
+  segments from a Vamana graph (`max_degree` R, `alpha` 1.2, `ef_construction`
+  and `ef_search` L, medoid entry). Vectors and adjacency live in fixed-size
+  records in a memory-mapped, versioned `.diskann` file; the heap keeps 8-bit
+  navigation codes. Beam search scores expanded nodes exactly from disk;
+  filters fall back to exact scans when selective. The mutable segment stays
+  flat until checkpoint; older checkpoints and other index types are
+  unchanged. See [DiskANN index](../indexing/diskann.md).
+- **Results (50,000 × 128 clustered):** recall@10 1.000 at 1,462 QPS with
+  17 MiB segment heap, against 82 MiB for HNSW at the same recall.
+- **Remaining:** graph construction is in memory per shard and rebuilt each
+  checkpoint; no PQ codes, direct I/O or gRPC index type yet.
 
 ### 5. Server-side embedding — P1 · ✅ REST
 

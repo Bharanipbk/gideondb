@@ -3,6 +3,7 @@ package segment
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/distance"
 	"github.com/Bharanipbk/gideondb/internal/index"
 	"github.com/Bharanipbk/gideondb/internal/index/binary"
+	"github.com/Bharanipbk/gideondb/internal/index/diskann"
 	"github.com/Bharanipbk/gideondb/internal/index/flat"
 	"github.com/Bharanipbk/gideondb/internal/index/hnsw"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
@@ -108,7 +110,8 @@ func New(config core.CollectionConfig) (*Segment, error) {
 		idx, err = binary.New(config.Dimension, config.Index.Oversampling, func(query []float32, id uint64) (float32, error) {
 			return distance.Score(config.Metric, query, s.records[id].Vector)
 		})
-	case config.Index.Type == core.IndexFlat:
+	case config.Index.Type == core.IndexFlat || config.Index.Type == core.IndexDiskANN:
+		// DiskANN graphs are built only when a segment is sealed.
 		idx, err = flat.New(indexConfig)
 	case config.Index.Type == core.IndexHNSW:
 		idx, err = hnsw.New(indexConfig)
@@ -174,6 +177,62 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex()}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
+		s.records[ordinal] = cloneRecord(record)
+		s.lexical.add(ordinal, record)
+		s.ordinals[key(record.Namespace, record.ID)] = ordinal
+		if !loadedMetadata {
+			s.metadata.Upsert(ordinal, record.Metadata)
+		}
+	}
+	return s, nil
+}
+
+// DiskANNTag digests the record keys in order so a DiskANN file is only
+// ever served with the records whose ordinals it was built from.
+func DiskANNTag(records []core.Record) uint64 {
+	digest := fnv.New64a()
+	for _, record := range records {
+		_, _ = digest.Write([]byte(key(record.Namespace, record.ID)))
+		_, _ = digest.Write([]byte{0xff})
+	}
+	return digest.Sum64()
+}
+
+// BuildDiskANN builds a Vamana graph over records, which must carry their
+// vectors, and writes it with the vectors to path. Record order defines the
+// ordinals that NewDiskANNWithMetadata expects.
+func BuildDiskANN(config core.CollectionConfig, records []core.Record, path string) error {
+	vectors := make([][]float32, len(records))
+	for position, record := range records {
+		vectors[position] = record.Vector
+	}
+	params := diskann.Params{MaxDegree: config.Index.MaxDegree, BuildList: config.Index.EFConstruction, Alpha: config.Index.Alpha}
+	graph, err := diskann.BuildGraph(config.Metric, vectors, params, 0)
+	if err != nil {
+		return err
+	}
+	return diskann.WriteFile(path, config.Metric, vectors, graph, params.MaxDegree, DiskANNTag(records))
+}
+
+// NewDiskANNWithMetadata opens a sealed segment served from the DiskANN file
+// at path. Record vectors are not retained; reads come from the file.
+func NewDiskANNWithMetadata(config core.CollectionConfig, records []core.Record, path string, metadataIndex *metadata.Index) (*Segment, error) {
+	idx, err := diskann.Open(path, config.Metric, config.Dimension, len(records), DiskANNTag(records), config.Index.EFSearch)
+	if err != nil {
+		return nil, err
+	}
+	loadedMetadata := metadataIndex != nil
+	if metadataIndex == nil {
+		metadataIndex = metadata.NewIndex()
+	}
+	s := &Segment{
+		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
+		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
+		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(),
+	}
+	for position, record := range records {
+		ordinal := uint64(position + 1)
+		record.Vector = nil
 		s.records[ordinal] = cloneRecord(record)
 		s.lexical.add(ordinal, record)
 		s.ordinals[key(record.Namespace, record.ID)] = ordinal

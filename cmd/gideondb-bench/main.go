@@ -100,6 +100,10 @@ func main() {
 		"binary":     {Type: core.IndexFlat, Quantization: core.QuantizationBinary},
 		"binary-x10": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 10},
 		"binary-x20": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 20},
+		// diskann configs build the sealed-segment file in a temporary
+		// directory and search it memory-mapped, as a checkpoint would.
+		"diskann":       {Type: core.IndexDiskANN},
+		"diskann-ef200": {Type: core.IndexDiskANN, EFSearch: 200},
 	}
 	var configs []benchConfig
 	for _, name := range strings.Split(*configsFlag, ",") {
@@ -136,13 +140,18 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 	settle()
 	before := heapAlloc()
 	started := time.Now()
-	seg, err := segment.New(collection)
-	if err != nil {
-		fail(err)
-	}
-	for i, vector := range base {
-		if err := seg.Upsert(core.Record{ID: id(i), Vector: vector}); err != nil {
+	var seg *segment.Segment
+	if collection.Index.Type == core.IndexDiskANN {
+		seg = sealedDiskANN(collection, base)
+	} else {
+		var err error
+		if seg, err = segment.New(collection); err != nil {
 			fail(err)
+		}
+		for i, vector := range base {
+			if err := seg.Upsert(core.Record{ID: id(i), Vector: vector}); err != nil {
+				fail(err)
+			}
 		}
 	}
 	build := time.Since(started)
@@ -180,6 +189,27 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 		Queries: len(queries), K: k, Metric: string(metric), GoVersion: runtime.Version(),
 		Architecture: runtime.GOOS + "/" + runtime.GOARCH, CPUs: runtime.NumCPU(),
 	}
+}
+
+func sealedDiskANN(collection core.CollectionConfig, base [][]float32) *segment.Segment {
+	directory, err := os.MkdirTemp("", "gideondb-bench-diskann-")
+	if err != nil {
+		fail(err)
+	}
+	defer os.RemoveAll(directory) // the open mapping keeps the file alive
+	records := make([]core.Record, len(base))
+	for i, vector := range base {
+		records[i] = core.Record{ID: id(i), Vector: vector}
+	}
+	path := directory + "/segment.diskann"
+	if err := segment.BuildDiskANN(collection, records, path); err != nil {
+		fail(err)
+	}
+	seg, err := segment.NewDiskANNWithMetadata(collection, records, path, nil)
+	if err != nil {
+		fail(err)
+	}
+	return seg
 }
 
 func groundTruth(base, queries [][]float32, metric core.Metric, k int) [][]string {

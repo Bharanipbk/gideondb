@@ -5,6 +5,15 @@ describe unreleased experimental work.
 
 ## Unreleased
 
+### Added
+
+- `"index": {"type": "diskann"}`: checkpointed segments are served from a
+  disk-resident Vamana graph (`max_degree`, `alpha`, `ef_construction`,
+  `ef_search`). Vectors and adjacency stay in a memory-mapped `.diskann`
+  file and only 8-bit navigation codes stay on the heap; the mutable segment
+  uses the flat index until checkpoint. Existing collections and checkpoints
+  are unchanged. `gideondb-bench` adds `diskann` and `diskann-ef200`.
+
 ## 0.1.0 — 2026-10-16
 
 First public open-source release. Pre-alpha: minor releases may contain
