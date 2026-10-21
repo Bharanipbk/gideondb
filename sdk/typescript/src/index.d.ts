@@ -13,6 +13,10 @@ export interface IndexConfig {
   m?: number;
   ef_construction?: number;
   ef_search?: number;
+  /** "binary" is supported on flat indexes only. */
+  quantization?: "binary";
+  /** Candidate multiplier for rescoring quantized results (1-100, server default 4). */
+  oversampling?: number;
 }
 
 export interface CollectionConfig {
@@ -20,12 +24,19 @@ export interface CollectionConfig {
   dimension: number;
   metric: Metric;
   shard_count: number;
+  /** Name of a server embedding model used to embed record and query text. */
+  vectorizer?: string;
   index?: IndexConfig;
 }
 
 export interface VectorRecord {
   id: string;
-  vector: number[];
+  /** Optional when `text` is given and the collection has a vectorizer. */
+  vector?: number[];
+  /** Indexed for BM25 and embedded server-side when no vector is given. */
+  text?: string;
+  /** Term -> positive weight. */
+  sparse_vector?: Record<string, number>;
   metadata?: Record<string, unknown>;
   payload?: Record<string, unknown>;
   timestamp?: number;
@@ -41,9 +52,16 @@ export interface RecordPage {
   authoritative_placement?: boolean;
 }
 
+export type Fusion = "weighted" | "rrf";
+
 export interface SearchRequest {
-  vector: number[];
+  vector?: number[];
   topK: number;
+  text?: string;
+  sparseVector?: Record<string, number>;
+  /** Dense weight 0..1 (server default 0.5). */
+  alpha?: number;
+  fusion?: Fusion;
   namespace?: string;
   filter?: Record<string, unknown>;
   allowPartial?: boolean;
