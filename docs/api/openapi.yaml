@@ -349,6 +349,22 @@ paths:
                   reasons: {type: array, items: {type: string}}
                 required: [ready, authoritative, static_routing_enabled, metadata_epoch, digests, peers_checked, reasons]
         "401": {$ref: "#/components/responses/Error"}
+  /rerankers:
+    get:
+      operationId: listRerankers
+      description: Names of the cross-encoder rerankers configured on this node (from -rerankers-file) and the count of failed rerank calls.
+      responses:
+        "200":
+          description: Configured rerankers.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rerankers: {type: array, items: {type: string}}
+                  rerank_failures: {type: integer, minimum: 0}
+                required: [rerankers, rerank_failures]
+        "401": {$ref: "#/components/responses/Error"}
   /collections:
     get:
       operationId: listCollections
@@ -502,9 +518,21 @@ paths:
                   type: object
                   additionalProperties: true
                   description: Metadata filter expression documented in docs/indexing/filtering.md.
+                using: {type: string, description: Named vector field to search instead of the default vector. Cannot be combined with sparse_vector or text.}
+                multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
+                candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
+                rerank: {$ref: "#/components/schemas/RerankSpec"}
               required: [top_k]
       responses:
-        "200": {description: Ordered exact-search results.}
+        "200":
+          description: Ordered search results. When rerank was requested, rerank reports whether the second stage was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results: {type: array, items: {$ref: "#/components/schemas/SearchResult"}}
+                  rerank: {$ref: "#/components/schemas/RerankStatus"}
         "400": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
@@ -534,10 +562,14 @@ paths:
                 ef_search: {type: integer, minimum: 1, maximum: 10000}
                 namespace: {type: string}
                 filter: {type: object, additionalProperties: true}
+                using: {type: string, description: Named vector field to search instead of the default vector. Cannot be combined with sparse_vector or text.}
+                multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
+                candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
+                rerank: {$ref: "#/components/schemas/RerankSpec"}
               required: [top_k]
       responses:
         "200":
-          description: Results from exactly one local logical shard.
+          description: Results from exactly one local logical shard. A maxsim rerank is applied on the shard; for a cross_encoder rerank over record text, results carry text for the coordinator.
           headers:
             X-GideonDB-Metadata-Epoch: {schema: {type: integer, minimum: 1}}
         "400": {$ref: "#/components/responses/Error"}
@@ -805,6 +837,10 @@ paths:
                 namespace: {type: string}
                 filter: {type: object, additionalProperties: true}
                 allow_partial: {type: boolean, default: false}
+                using: {type: string, description: Named vector field to search instead of the default vector. Cannot be combined with sparse_vector or text.}
+                multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
+                candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
+                rerank: {$ref: "#/components/schemas/RerankSpec"}
               required: [top_k]
       responses:
         "200":
@@ -819,6 +855,7 @@ paths:
                   failures: {type: array, items: {$ref: "#/components/schemas/ShardSearchFailure"}}
                   metadata_epoch: {type: integer, minimum: 1}
                   authoritative_placement: {type: boolean}
+                  rerank: {$ref: "#/components/schemas/RerankStatus"}
                 required: [results, partial, failures, metadata_epoch, authoritative_placement]
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -1081,7 +1118,43 @@ components:
         metric: {type: string, enum: [cosine, dot, l2]}
         shard_count: {type: integer, minimum: 1}
         index: {$ref: "#/components/schemas/IndexConfig"}
+        vectors:
+          type: object
+          maxProperties: 16
+          description: Named vector fields beside the default vector, keyed by field name (^[a-zA-Z][a-zA-Z0-9_-]{0,63}$).
+          additionalProperties: {$ref: "#/components/schemas/VectorField"}
       required: [name, dimension, metric, shard_count]
+    VectorField:
+      type: object
+      additionalProperties: false
+      properties:
+        dimension: {type: integer, minimum: 1, maximum: 65536}
+        metric: {type: string, enum: [cosine, dot, l2]}
+        index: {$ref: "#/components/schemas/IndexConfig"}
+        datatype: {type: string, enum: [float32, float16, bfloat16], default: float32, description: Storage precision. Half types are rounded at write time and scored in float32.}
+        multi_vector: {type: boolean, default: false, description: Store a list of vectors per record (late interaction) and search with MaxSim.}
+      required: [dimension, metric]
+    RerankSpec:
+      type: object
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [maxsim, cross_encoder]}
+        candidates: {type: integer, minimum: 1, maximum: 1000, description: First-stage results to rerank. Default 50 (capped by the reranker's max_documents), never fewer than offset + top_k.}
+        field: {type: string, description: Multi-vector field for maxsim.}
+        multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Query token vectors for maxsim.}
+        model: {type: string, description: Server-configured reranker name for cross_encoder.}
+        query: {type: string, description: Query text for cross_encoder.}
+        document: {type: string, default: text, description: "Document source for cross_encoder: text, payload.<key> or metadata.<key>."}
+      required: [type]
+    RerankStatus:
+      type: object
+      properties:
+        applied: {type: boolean, description: False when a cross-encoder failed or timed out; results then keep first-stage order.}
+        type: {type: string, enum: [maxsim, cross_encoder]}
+        model: {type: string}
+        candidates: {type: integer}
+        error: {type: string}
+      required: [applied, type, candidates]
     IndexConfig:
       type: object
       additionalProperties: false
@@ -1107,6 +1180,14 @@ components:
         namespace: {type: string}
         timestamp: {type: integer, format: int64, readOnly: true}
         version: {type: integer, format: uint64, readOnly: true}
+        vectors:
+          type: object
+          description: Named dense vectors keyed by declared field name.
+          additionalProperties: {type: array, items: {type: number, format: float}}
+        multi_vectors:
+          type: object
+          description: Named multi-vectors (up to 1024 vectors each) keyed by declared multi-vector field name.
+          additionalProperties: {type: array, items: {type: array, items: {type: number, format: float}}}
       required: [id, vector]
     RecordSummary:
       type: object

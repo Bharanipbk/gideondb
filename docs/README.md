@@ -16,6 +16,9 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Metadata filtering](indexing/filtering.md)
 - [Sparse, keyword (BM25) and hybrid retrieval](indexing/sparse-hybrid.md)
 - [Binary quantization](indexing/binary-quantization.md)
+- [Named vectors and float16/bfloat16 storage](indexing/named-vectors.md)
+- [Multi-vector (late interaction) search](indexing/multi-vector.md)
+- [Reranking (MaxSim and cross-encoders)](indexing/reranking.md)
 
 ## Client SDKs
 

@@ -29,6 +29,26 @@ type storedRecord struct {
 	Version      uint64             `json:"version"`
 	Namespace    string             `json:"namespace,omitempty"`
 	Text         string             `json:"text,omitempty"`
+	// Named and multi-vectors exist only in record column version 2.
+	Vectors      map[string][]float32   `json:"vectors,omitempty"`
+	MultiVectors map[string][][]float32 `json:"multi_vectors,omitempty"`
+}
+
+// Record column versions. Version 2 adds named and multi-vectors to the
+// record JSON and is written only when a record carries them, so files
+// without named vectors stay readable by older binaries, while older
+// binaries refuse (rather than silently drop) named vectors.
+const (
+	recordColumnVersion      = 1
+	namedRecordColumnVersion = 2
+)
+
+func (r storedRecord) record(vector []float32) core.Record {
+	return core.Record{
+		ID: r.ID, Vector: vector, SparseVector: r.SparseVector, Metadata: r.Metadata, Payload: r.Payload,
+		Timestamp: r.Timestamp, Version: r.Version, Namespace: r.Namespace, Text: r.Text,
+		Vectors: r.Vectors, MultiVectors: r.MultiVectors,
+	}
 }
 
 // WriteBundle writes record and vector columns. Publishing the returned
@@ -47,6 +67,7 @@ func WriteBundle(directory, baseName string, records []core.Record, dimension in
 	}
 	stored := make([]storedRecord, len(records))
 	vectors := make([]byte, int(vectorBytes))
+	recordVersion := uint16(recordColumnVersion)
 	for position, record := range records {
 		if len(record.Vector) != dimension {
 			return Manifest{}, fmt.Errorf("record %q dimension mismatch", record.ID)
@@ -54,6 +75,10 @@ func WriteBundle(directory, baseName string, records []core.Record, dimension in
 		stored[position] = storedRecord{
 			ID: record.ID, SparseVector: record.SparseVector, Metadata: record.Metadata, Payload: record.Payload,
 			Timestamp: record.Timestamp, Version: record.Version, Namespace: record.Namespace, Text: record.Text,
+			Vectors: record.Vectors, MultiVectors: record.MultiVectors,
+		}
+		if len(record.Vectors) > 0 || len(record.MultiVectors) > 0 {
+			recordVersion = namedRecordColumnVersion
 		}
 		start := position * dimension * 4
 		for offset, value := range record.Vector {
@@ -65,7 +90,7 @@ func WriteBundle(directory, baseName string, records []core.Record, dimension in
 		return Manifest{}, err
 	}
 	recordsName, vectorsName := baseName+".records", baseName+".vectors"
-	if err := writeColumn(filepath.Join(directory, recordsName), recordMagic, 0, uint64(len(records)), maxLSN, recordPayload); err != nil {
+	if err := writeVersionedColumn(filepath.Join(directory, recordsName), recordMagic, recordVersion, 0, uint64(len(records)), maxLSN, recordPayload); err != nil {
 		return Manifest{}, err
 	}
 	if err := writeColumn(filepath.Join(directory, vectorsName), vectorMagic, uint32(dimension), uint64(len(records)), maxLSN, vectors); err != nil {
@@ -115,10 +140,7 @@ func ReadBundle(directory string, manifest Manifest) ([]core.Record, error) {
 		for offset := range vector {
 			vector[offset] = math.Float32frombits(binary.LittleEndian.Uint32(vectorPayload[start+offset*4:]))
 		}
-		records[position] = core.Record{
-			ID: item.ID, Vector: vector, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload,
-			Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace, Text: item.Text,
-		}
+		records[position] = item.record(vector)
 	}
 	return records, nil
 }
@@ -145,7 +167,7 @@ func ReadRecordColumn(directory string, manifest Manifest) ([]core.Record, error
 	}
 	records := make([]core.Record, len(stored))
 	for position, item := range stored {
-		records[position] = core.Record{ID: item.ID, SparseVector: item.SparseVector, Metadata: item.Metadata, Payload: item.Payload, Timestamp: item.Timestamp, Version: item.Version, Namespace: item.Namespace, Text: item.Text}
+		records[position] = item.record(nil)
 	}
 	return records, nil
 }
@@ -206,9 +228,13 @@ func ReadTombstones(directory, name string, maxLSN uint64) ([]string, error) {
 }
 
 func writeColumn(path string, magic [4]byte, dimension uint32, count, maxLSN uint64, payload []byte) error {
+	return writeVersionedColumn(path, magic, 1, dimension, count, maxLSN, payload)
+}
+
+func writeVersionedColumn(path string, magic [4]byte, columnVersion uint16, dimension uint32, count, maxLSN uint64, payload []byte) error {
 	var header [columnHeaderSize]byte
 	copy(header[:4], magic[:])
-	binary.LittleEndian.PutUint16(header[4:6], 1)
+	binary.LittleEndian.PutUint16(header[4:6], columnVersion)
 	binary.LittleEndian.PutUint32(header[8:12], dimension)
 	binary.LittleEndian.PutUint64(header[16:24], count)
 	binary.LittleEndian.PutUint64(header[24:32], maxLSN)
@@ -234,7 +260,9 @@ func readColumn(path string, expectedMagic [4]byte, expectedDimension uint32) (u
 	if string(header[:4]) != string(expectedMagic[:]) {
 		return 0, 0, nil, fmt.Errorf("invalid column magic")
 	}
-	if binary.LittleEndian.Uint16(header[4:6]) != 1 || binary.LittleEndian.Uint16(header[6:8]) != 0 ||
+	columnVersion := binary.LittleEndian.Uint16(header[4:6])
+	supported := columnVersion == 1 || (expectedMagic == recordMagic && columnVersion == namedRecordColumnVersion)
+	if !supported || binary.LittleEndian.Uint16(header[6:8]) != 0 ||
 		binary.LittleEndian.Uint32(header[12:16]) != 0 || binary.LittleEndian.Uint32(header[44:48]) != 0 {
 		return 0, 0, nil, fmt.Errorf("unsupported column version, flags, or reserved fields")
 	}

@@ -163,6 +163,10 @@ func (c *Collection) PrepareUpsert(record core.Record) (core.Record, error) {
 	if record.ID == "" {
 		return core.Record{}, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
 	}
+	record, err := c.config.PrepareNamedVectors(record)
+	if err != nil {
+		return core.Record{}, err
+	}
 	record.Version = c.version.Add(1)
 	record.Timestamp = time.Now().UnixNano()
 	return record, nil

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Bharanipbk/gideondb/internal/embedding"
+	"github.com/Bharanipbk/gideondb/internal/rerank"
 	"io"
 	"log/slog"
 	"net/http"
@@ -61,6 +62,8 @@ type Server struct {
 	rateLimiter         *requestRateLimiter
 	dashboardAuth       *dashboardAuthenticator
 	embedders           *embedding.Registry
+	rerankers           *rerank.Registry
+	rerankFailures      atomic.Uint64
 }
 
 func New(e *engine.Engine, logger *slog.Logger) *Server {
@@ -81,6 +84,7 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 	}
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
 	s.embedders = options.Embedders
+	s.rerankers = options.Rerankers
 	if options.DashboardCredentialsFile != "" {
 		var authErr error
 		s.dashboardAuth, authErr = loadDashboardAuthenticator(options.DashboardCredentialsFile)
@@ -223,6 +227,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/collections/{name}/vectors/{id}", s.protected(s.delete))
 	s.mux.HandleFunc("POST /v1/collections/{name}/search", s.protected(s.search))
 	s.mux.HandleFunc("GET /v1/embedders", s.protected(s.embedderStats))
+	s.mux.HandleFunc("GET /v1/rerankers", s.protected(s.rerankerList))
 }
 
 func (s *Server) currentMetadataEpoch() uint64 {
@@ -774,6 +779,13 @@ type searchRequest struct {
 	Offset    int             `json:"offset,omitempty"`
 	GroupBy   string          `json:"group_by,omitempty"`
 	GroupSize int             `json:"group_size,omitempty"`
+	// Using names a vector field to search instead of the default vector;
+	// MultiVector is a late-interaction query for a multi-vector field.
+	Using       string      `json:"using,omitempty"`
+	MultiVector [][]float32 `json:"multi_vector,omitempty"`
+	Candidates  int         `json:"candidates,omitempty"`
+	// Rerank is an optional second stage over the first-stage candidates.
+	Rerank *core.RerankSpec `json:"rerank,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {
@@ -811,12 +823,7 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	var results []core.SearchResult
-	if request.hybrid() {
-		results, err = s.engine.SearchShardHybrid(r.PathValue("collection"), uint32(shardID), request.Namespace, request.hybridQuery(), filter)
-	} else {
-		results, err = s.engine.SearchShardFilteredWithEF(r.PathValue("collection"), uint32(shardID), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
-	}
+	results, err := s.searchShardStage(r.PathValue("collection"), uint32(shardID), request, filter)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -864,18 +871,36 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := s.prepareRerank(r.PathValue("name"), &request); err != nil {
+		writeError(w, err)
+		return
+	}
 	var results []core.SearchResult
-	if request.hybrid() {
+	switch {
+	case request.named():
+		results, err = s.engine.SearchNamed(r.PathValue("name"), request.Namespace, request.namedQuery(), filter)
+	case request.hybrid():
 		results, err = s.engine.SearchHybrid(r.PathValue("name"), request.Namespace, request.hybridQuery(), filter)
-	} else {
+	default:
 		results, err = s.engine.SearchFilteredWithEF(r.PathValue("name"), request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	}
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	key, shaped := shape.apply(results)
-	writeJSON(w, http.StatusOK, map[string]any{key: shaped})
+	var status *rerankStatus
+	if request.Rerank != nil {
+		if results, status, err = s.rerankLocal(r.Context(), r.PathValue("name"), *request.Rerank, results); err != nil {
+			writeError(w, err)
+			return
+		}
+	}
+	key, shaped := shape.apply(clearText(results))
+	response := map[string]any{key: shaped}
+	if status != nil {
+		response["rerank"] = status
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) rejectStandaloneDataPath(w http.ResponseWriter) bool {
