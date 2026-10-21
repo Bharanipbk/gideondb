@@ -118,6 +118,18 @@ public final class GideonDBClient {
         return requestObject("POST", clusterCollectionPath(collection) + "/search", body);
     }
 
+    /** Dense, lexical (text), sparse, or hybrid search described by {@link SearchOptions}. */
+    public List<Map<String, Object>> search(String collection, SearchOptions options) {
+        return objectList(requestObject("POST", collectionPath(collection) + "/search",
+                Objects.requireNonNull(options, "options").toBody()).get("results"));
+    }
+
+    public Map<String, Object> distributedSearch(String collection, SearchOptions options, boolean allowPartial) {
+        Map<String, Object> body = Objects.requireNonNull(options, "options").toBody();
+        if (allowPartial) body.put("allow_partial", true);
+        return requestObject("POST", clusterCollectionPath(collection) + "/search", body);
+    }
+
     public Map<String, Object> distributedBatchUpsert(String collection,
             List<Map<String, Object>> records, String acknowledgement) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -167,6 +179,54 @@ public final class GideonDBClient {
         if (filter != null) body.put("filter", filter);
         if (namespace != null && !namespace.isBlank()) body.put("namespace", namespace);
         return body;
+    }
+
+    /**
+     * Search request options. At least one of vector, text, or sparseVector is required. When text is
+     * given without a vector, no vector is sent (the server embeds it if the collection has a vectorizer).
+     */
+    public static final class SearchOptions {
+        private List<? extends Number> vector;
+        private int topK = 10;
+        private Map<String, Object> filter;
+        private String namespace;
+        private String text;
+        private Map<String, ? extends Number> sparseVector;
+        private Double alpha;
+        private String fusion;
+
+        public SearchOptions vector(List<? extends Number> value) { this.vector = value; return this; }
+        public SearchOptions topK(int value) { this.topK = value; return this; }
+        public SearchOptions filter(Map<String, Object> value) { this.filter = value; return this; }
+        public SearchOptions namespace(String value) { this.namespace = value; return this; }
+        public SearchOptions text(String value) { this.text = value; return this; }
+        public SearchOptions sparseVector(Map<String, ? extends Number> value) { this.sparseVector = value; return this; }
+        /** Dense weight from 0 to 1 for hybrid weighted fusion (server default 0.5). */
+        public SearchOptions alpha(double value) { this.alpha = value; return this; }
+        /** "weighted" (server default) or "rrf". */
+        public SearchOptions fusion(String value) { this.fusion = value; return this; }
+
+        Map<String, Object> toBody() {
+            if (topK <= 0) throw new IllegalArgumentException("topK must be positive");
+            boolean hasText = text != null && !text.isBlank();
+            boolean hasSparse = sparseVector != null && !sparseVector.isEmpty();
+            if (vector == null && !hasText && !hasSparse)
+                throw new IllegalArgumentException("search requires a vector, text, or sparseVector");
+            if (alpha != null && (!(alpha >= 0 && alpha <= 1)))
+                throw new IllegalArgumentException("alpha must be between 0 and 1");
+            if (fusion != null && !fusion.isEmpty() && !"weighted".equals(fusion) && !"rrf".equals(fusion))
+                throw new IllegalArgumentException("fusion must be \"weighted\" or \"rrf\"");
+            Map<String, Object> body = new LinkedHashMap<>();
+            if (vector != null) body.put("vector", vector);
+            body.put("top_k", topK);
+            if (filter != null) body.put("filter", filter);
+            if (namespace != null && !namespace.isBlank()) body.put("namespace", namespace);
+            if (hasText) body.put("text", text);
+            if (hasSparse) body.put("sparse_vector", sparseVector);
+            if (alpha != null) body.put("alpha", alpha);
+            if (fusion != null && !fusion.isEmpty()) body.put("fusion", fusion);
+            return body;
+        }
     }
 
     private static String collectionPath(String name) { return "/v1/collections/" + encode(name); }

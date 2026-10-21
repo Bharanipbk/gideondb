@@ -57,3 +57,25 @@ Run strict compilation and behavioral tests from the repository root:
 ```sh
 make test-java-sdk
 ```
+
+## Text, sparse, and hybrid search
+
+Records may carry `text` (indexed for BM25 and embedded server-side when the
+collection has a `vectorizer` and no vector is given) and a `sparse_vector` of
+positive term weights. `SearchOptions` builds dense, text-only, sparse-only, or
+hybrid queries; `alpha` (0..1, default 0.5) weights the dense side and `fusion`
+is `"weighted"` (default) or `"rrf"`. Binary quantization is a flat-index option.
+
+```java
+client.createCollection(Map.of(
+    "name", "articles", "dimension", 384, "metric", "cosine",
+    "vectorizer", "all-minilm-l6-v2",
+    "index", Map.of("type", "flat", "quantization", "binary", "oversampling", 4)));
+
+client.upsert("articles", Map.of(
+    "id", "a1", "text", "vector databases explained",
+    "sparse_vector", Map.of("vector", 1.2, "database", 0.8)));
+
+var hits = client.search("articles", new GideonDBClient.SearchOptions()
+    .text("vector database").alpha(0.7).fusion("rrf").topK(5));
+```
