@@ -60,10 +60,15 @@ The current dashboard provides:
 
 - a persistent dark/light appearance switch shared by login and console views;
 - node health, runtime identity, leadership, and catalog totals;
-- collection creation, inspection, and confirmation-gated deletion;
+- collection creation (index type flat or HNSW, optional binary quantization
+  with oversampling on flat indexes, optional server-side vectorizer),
+  inspection, and confirmation-gated deletion;
 - cursor-based, node-local record browsing, exact-ID lookup, record insertion,
-  and confirmation-gated deletion, with optional explicit vector reveal;
-- manual vector search with namespaces and metadata filters;
+  and confirmation-gated deletion, with optional explicit vector reveal; a record
+  may carry `text`, and the vector is optional when text is given;
+- manual vector, text-only, or hybrid search with namespaces and metadata
+  filters; when a text query is present the playground also sends the fusion
+  mode (weighted or RRF) and `alpha` (dense weight, 0-1);
 - cluster membership, readiness, and shard-placement views.
 - cumulative HTTP request volume, average latency, in-flight work, and server
   errors by bounded route template;
@@ -119,10 +124,13 @@ or delete it. Deletion requires typing the collection name.
 
 - a JSON array of records, or an object with a `records` array;
 - JSON Lines (`.jsonl` / `.ndjson`), one record per line;
-- CSV with `id` and `vector` columns. Vectors may be space-, `;`- or
+- CSV with an `id` column and a `vector` and/or `text` column. Vectors may be space-, `;`- or
   `|`-separated, or a JSON array. Optional `namespace`, `metadata` (JSON) and
   `payload` (JSON) columns are honored; any other column becomes a metadata
   field.
+
+JSON records may include `text` and `sparse_vector`, which are passed through;
+`vector` is optional when `text` is present.
 
 The browser validates every record against the collection's dimension before
 uploading. Invalid records are listed and skipped. Valid records are sent to

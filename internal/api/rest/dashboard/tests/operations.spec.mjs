@@ -100,3 +100,56 @@ test("recovery point shows the manifest or the server's refusal", async ({ page 
   await page.getByRole("button", { name: "Download manifest" }).click();
   expect((await download).suggestedFilename()).toBe("dashboard-test.json");
 });
+
+test("binary-quantized collection, text records, and hybrid search", async ({ page }, testInfo) => {
+  const name = `hybrid-${testInfo.project.name}-${Date.now()}`;
+  await navigate(page, testInfo, "Collections");
+  await page.getByRole("button", { name: "Create collection" }).click();
+  const dialog = page.locator("#create-dialog");
+  await dialog.getByLabel("Name").fill(name);
+  await dialog.getByLabel("Dimensions").fill("3");
+  await dialog.getByLabel("Index type").selectOption("hnsw");
+  await expect(dialog.locator('#create-quantization option[value="binary"]')).toHaveAttribute("disabled", "");
+  await dialog.getByLabel("Index type").selectOption("flat");
+  await expect(dialog.getByLabel("Oversampling")).toBeHidden();
+  await dialog.getByLabel("Quantization").selectOption("binary");
+  await dialog.getByLabel("Oversampling").fill("8");
+  await dialog.getByRole("button", { name: "Create", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.getByRole("link", { name: `Open collection ${name}` }).click();
+  await expect(page.locator("#detail-index")).toContainText("binary");
+  await expect(page.locator("#detail-index")).toContainText("8");
+
+  await navigate(page, testInfo, "Data explorer");
+  await page.locator("#explorer-collection").selectOption(name);
+  for (const [id, vector, text] of [["doc-a", "1, 0, 0", "gideon vector database"], ["doc-b", "0, 1, 0", "unrelated cooking recipe"]]) {
+    await page.getByRole("button", { name: "Insert record" }).click();
+    const insert = page.locator("#insert-dialog");
+    await insert.getByLabel("ID").fill(id);
+    await insert.getByLabel("Vector").fill(vector);
+    await insert.getByLabel("Text").fill(text);
+    await insert.getByRole("button", { name: "Upsert" }).click();
+    await expect(insert).toBeHidden();
+  }
+
+  await navigate(page, testInfo, "Search playground");
+  await page.locator("#search-collection").selectOption(name);
+  await page.getByLabel("Text query").fill("gideon database");
+  let sent = page.waitForRequest(request => request.url().includes("/search"));
+  await page.getByRole("button", { name: "Run search" }).click();
+  let body = (await sent).postDataJSON();
+  expect(body.vector).toBeUndefined();
+  expect(body.text).toBe("gideon database");
+  await expect(page.locator("#search-results .result").first()).toContainText("doc-a");
+
+  await page.locator("#search-form").getByLabel("Vector", { exact: true }).fill("0, 1, 0");
+  await page.getByLabel("Fusion").selectOption("rrf");
+  await page.getByLabel("Alpha (dense weight)").fill("0.3");
+  sent = page.waitForRequest(request => request.url().includes("/search"));
+  await page.getByRole("button", { name: "Run search" }).click();
+  body = (await sent).postDataJSON();
+  expect(body).toMatchObject({ fusion: "rrf", alpha: 0.3, text: "gideon database", vector: [0, 1, 0] });
+  await expect(page.locator("#search-results .result")).toHaveCount(2);
+  const deleted = await page.evaluate(async collection => (await fetch(`/v1/collections/${encodeURIComponent(collection)}`, { method: "DELETE", headers: { "X-GideonDB-CSRF": sessionStorage.getItem("gideondb-dashboard-csrf") } })).ok, name);
+  expect(deleted).toBeTruthy();
+});
