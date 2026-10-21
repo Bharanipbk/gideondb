@@ -19,11 +19,11 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 
 | # | Gap | Track | Priority | Status |
 |---|-----|-------|----------|--------|
-| 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine + REST; 🟡 gRPC/SDK/dashboard |
+| 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine, REST, gRPC, SDKs, dashboard |
 | 2 | Binary and product quantization | Open source | P0 | ✅ binary; ⬜ PQ |
 | 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ⬜ |
-| 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
+| 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST, gRPC, all SDKs; ⬜ Cohere/ONNX providers |
 | 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ⬜ |
 | 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory; ⬜ agent SDK adapters |
 | 8 | Embedded / single-binary "lite" mode | Open source | P2 | ⬜ |
@@ -43,7 +43,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 
 ## Open-source engine gaps
 
-### 1. Indexed sparse / hybrid search and BM25 — P0 · ✅ engine, 🟡 clients
+### 1. Indexed sparse / hybrid search and BM25 — P0 · ✅ engine and clients
 
 - **Done (2026-10-16):**
   - Per-segment inverted indexes for `sparse_vector` (term-at-a-time cosine)
@@ -62,10 +62,6 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Behaviour change:** sparse-only search returns only records sharing a
   query term (see CHANGELOG).
 - **Remaining:**
-  - Expose `text`, `fusion` and `sparse_vector` in the gRPC contract and all
-    six SDKs.
-  - Add a text query box and fusion selector to the dashboard search
-    playground.
   - Use collection-level BM25 statistics instead of per-segment ones.
   - Persist the inverted indexes in checkpoints instead of rebuilding them at
     load.
@@ -86,8 +82,6 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Remaining:**
   - Product quantization (PQ/OPQ) trained per segment at checkpoint.
   - Binary or PQ codes inside HNSW, which needs gap 18 first.
-  - Expose `quantization` in gRPC `CreateCollection` and the dashboard create
-    dialog.
 
 ### 3. Public benchmarks — P0 · 🟡 harness done
 
@@ -112,7 +106,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Direction:** DiskANN/Vamana-style graph with compressed vectors in RAM and
   full vectors on SSD; select per collection.
 
-### 5. Server-side embedding — P1 · ✅ REST
+### 5. Server-side embedding — P1 · ✅ REST, gRPC, SDKs
 
 - **Done (2026-10-16):** collections can name a `vectorizer` from the
   server's `-embedders-file` (OpenAI-compatible APIs: OpenAI, Azure, Ollama,
@@ -121,8 +115,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   timeouts, key files and a per-node LRU cache keyed by content hash;
   `GET /v1/embedders` reports cache counters. Guide:
   [server-side embedding](../indexing/server-side-embedding.md).
-- **Remaining:** `text` on gRPC and in the non-Go SDKs; native Cohere and
-  local ONNX providers.
+- **Remaining:** native Cohere and local ONNX providers.
 
 - **Current state:** Embeddings are generated client-side via the Python
   integrations and examples.

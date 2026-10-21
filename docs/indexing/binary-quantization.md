@@ -73,5 +73,6 @@ whose components are all non-negative.
 - Search is still a linear scan, now over compact codes: about 12× faster per
   vector than exact float scoring in the microbenchmark. For very large
   segments, HNSW remains the lower-latency option.
-- The gRPC `CreateCollection` request does not yet expose `quantization` or
-  `oversampling`. Create quantized collections over REST.
+- gRPC `CreateCollection` takes `IndexConfig.quantization =
+  QUANTIZATION_BINARY` and `oversampling`; every SDK and the dashboard's
+  create dialog expose the same options.
