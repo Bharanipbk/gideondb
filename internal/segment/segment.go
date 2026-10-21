@@ -37,6 +37,12 @@ func NewMapped(config core.CollectionConfig, records []core.Record, source flat.
 }
 
 func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) (*Segment, error) {
+	return NewMappedWithPQ(config, records, source, closer, metadataIndex, nil)
+}
+
+// NewMappedWithPQ is NewMappedWithMetadata with optional persisted product
+// quantization data from BuildPQ for the same records.
+func NewMappedWithPQ(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index, pqData []byte) (*Segment, error) {
 	if source == nil || source.Dimension() != config.Dimension {
 		return nil, fmt.Errorf("%w: mapped source dimension mismatch", core.ErrInvalidArgument)
 	}
@@ -65,6 +71,14 @@ func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, 
 			}
 		}
 		idx = quantized
+	} else if UsesPQ(config, len(records)) {
+		// Codes and codebooks live on the heap; full-precision vectors stay
+		// memory-mapped and are touched only for rescoring.
+		if idx, err = buildPQIndex(config, records, source.VectorCopy, func(query []float32, id uint64) (float32, error) {
+			return source.Score(config.Metric, query, int(id-1))
+		}, pqData); err != nil {
+			return nil, err
+		}
 	} else if idx, err = flat.NewMapped(source, config.Metric, ids); err != nil {
 		return nil, err
 	}
@@ -123,6 +137,12 @@ func New(config core.CollectionConfig) (*Segment, error) {
 }
 
 func NewImmutable(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index) (*Segment, error) {
+	return NewImmutableWithPQ(config, records, metadataIndex, nil)
+}
+
+// NewImmutableWithPQ is NewImmutable with optional persisted product
+// quantization data from BuildPQ for the same records.
+func NewImmutableWithPQ(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index, pqData []byte) (*Segment, error) {
 	s, err := New(config)
 	if err != nil {
 		return nil, err
@@ -131,6 +151,18 @@ func NewImmutable(config core.CollectionConfig, records []core.Record, metadataI
 		if err := s.Upsert(record); err != nil {
 			return nil, err
 		}
+	}
+	if UsesPQ(config, len(records)) && len(s.records) == len(records) {
+		// Ordinals follow records order because the segment started empty.
+		quantized, err := buildPQIndex(config, records, func(position int) ([]float32, error) {
+			return records[position].Vector, nil
+		}, func(query []float32, id uint64) (float32, error) {
+			return distance.Score(config.Metric, query, s.records[id].Vector)
+		}, pqData)
+		if err != nil {
+			return nil, err
+		}
+		s.index = quantized
 	}
 	if metadataIndex != nil {
 		s.metadata = metadataIndex

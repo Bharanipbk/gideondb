@@ -97,10 +97,15 @@ type IndexConfig struct {
 	M              int       `json:"m,omitempty"`
 	EFConstruction int       `json:"ef_construction,omitempty"`
 	EFSearch       int       `json:"ef_search,omitempty"`
-	// Quantization "binary" keeps 1-bit sign codes for candidate generation
-	// and rescores Oversampling*k candidates at full precision. Flat only.
+	// Quantization "binary" keeps 1-bit sign codes and "pq" keeps product
+	// quantization codes for candidate generation; both rescore
+	// Oversampling*k candidates at full precision. Flat only.
 	Quantization Quantization `json:"quantization,omitempty"`
 	Oversampling int          `json:"oversampling,omitempty"`
+	// PQSubspaces is the number of one-byte codes per vector for "pq". It
+	// must divide the dimension; Normalized picks dimension/8 (or the next
+	// smaller exact split) when it is zero.
+	PQSubspaces int `json:"pq_subspaces,omitempty"`
 }
 
 type Quantization string
@@ -108,6 +113,7 @@ type Quantization string
 const (
 	QuantizationNone   Quantization = ""
 	QuantizationBinary Quantization = "binary"
+	QuantizationPQ     Quantization = "pq"
 )
 
 func (c CollectionConfig) Normalized() CollectionConfig {
@@ -127,6 +133,19 @@ func (c CollectionConfig) Normalized() CollectionConfig {
 	}
 	if c.Index.Quantization == QuantizationBinary && c.Index.Oversampling == 0 {
 		c.Index.Oversampling = 4
+	}
+	if c.Index.Quantization == QuantizationPQ {
+		if c.Index.Oversampling == 0 {
+			c.Index.Oversampling = 8
+		}
+		if c.Index.PQSubspaces == 0 && c.Dimension > 0 {
+			for _, width := range []int{8, 4, 2, 1} {
+				if c.Dimension%width == 0 {
+					c.Index.PQSubspaces = c.Dimension / width
+					break
+				}
+			}
+		}
 	}
 	return c
 }
@@ -163,6 +182,9 @@ func (c CollectionConfig) Validate() error {
 	default:
 		return fmt.Errorf("%w: unsupported index type %q", ErrInvalidArgument, c.Index.Type)
 	}
+	if c.Index.PQSubspaces != 0 && c.Index.Quantization != QuantizationPQ {
+		return fmt.Errorf("%w: pq_subspaces requires pq quantization", ErrInvalidArgument)
+	}
 	switch c.Index.Quantization {
 	case QuantizationNone:
 		if c.Index.Oversampling != 0 {
@@ -174,6 +196,16 @@ func (c CollectionConfig) Validate() error {
 		}
 		if c.Index.Oversampling < 1 || c.Index.Oversampling > 100 {
 			return fmt.Errorf("%w: oversampling must be between 1 and 100", ErrInvalidArgument)
+		}
+	case QuantizationPQ:
+		if c.Index.Type != IndexFlat {
+			return fmt.Errorf("%w: pq quantization requires the flat index", ErrInvalidArgument)
+		}
+		if c.Index.Oversampling < 1 || c.Index.Oversampling > 100 {
+			return fmt.Errorf("%w: oversampling must be between 1 and 100", ErrInvalidArgument)
+		}
+		if c.Index.PQSubspaces < 1 || c.Index.PQSubspaces > c.Dimension || c.Dimension%c.Index.PQSubspaces != 0 {
+			return fmt.Errorf("%w: pq_subspaces must be positive and divide the dimension", ErrInvalidArgument)
 		}
 	default:
 		return fmt.Errorf("%w: unsupported quantization %q", ErrInvalidArgument, c.Index.Quantization)

@@ -20,7 +20,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | # | Gap | Track | Priority | Status |
 |---|-----|-------|----------|--------|
 | 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine + REST; 🟡 gRPC/SDK/dashboard |
-| 2 | Binary and product quantization | Open source | P0 | ✅ binary; ⬜ PQ |
+| 2 | Binary and product quantization | Open source | P0 | ✅ binary; ✅ PQ (flat) |
 | 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ⬜ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
@@ -71,7 +71,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
     load.
   - Optional stemming or language analyzers.
 
-### 2. Binary and product quantization — P0 · ✅ binary, ⬜ PQ
+### 2. Binary and product quantization — P0 · ✅ binary, ✅ PQ (flat)
 
 - **Done (2026-10-16):** `"index": {"type": "flat", "quantization":
   "binary", "oversampling": N}` (default N = 4).
@@ -83,8 +83,20 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
     ×10 and 1.000 at ×20, at about 3× the QPS of exact flat search and roughly
     half the segment heap. See
     [binary quantization](../indexing/binary-quantization.md).
+- **Done (2026-10-21):** `"index": {"type": "flat", "quantization": "pq",
+  "pq_subspaces": M, "oversampling": N}` (defaults M = dimension / 8, N = 8).
+  - Per-segment k-means codebooks (M × 256 centroids, fixed seed) are trained
+    when a segment of at least 1,024 vectors is sealed; the mutable segment
+    stays exact.
+  - Search scores one-byte codes with per-query lookup tables (asymmetric
+    distance), then rescores the top `N × k` at full precision.
+  - Codebooks and codes are persisted as an optional `pq_file` in the
+    checkpoint manifest; older checkpoints retrain on load.
+  - Results on 50,000 × 128 clustered data (16 bytes per vector): recall@10
+    0.847 at ×8, 0.891 at ×10 and 0.977 at ×20 (cosine); 0.997 at ×20 for L2. See
+    [product quantization](../indexing/product-quantization.md).
 - **Remaining:**
-  - Product quantization (PQ/OPQ) trained per segment at checkpoint.
+  - OPQ rotation (not needed for recall on the benchmark data so far).
   - Binary or PQ codes inside HNSW, which needs gap 18 first.
   - Expose `quantization` in gRPC `CreateCollection` and the dashboard create
     dialog.
