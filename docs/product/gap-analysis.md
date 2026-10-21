@@ -25,8 +25,8 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
 | 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ✅ REST (MaxSim, cross-encoder); ⬜ gRPC/SDKs |
-| 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory; ⬜ agent SDK adapters |
-| 8 | Embedded / single-binary "lite" mode | Open source | P2 | ⬜ |
+| 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory + agent SDK adapters; ⬜ MCP HTTP transport |
+| 8 | Embedded / single-binary "lite" mode | Open source | P2 | ✅ Go library + `-lite`; Python via subprocess |
 | 9 | Richer data model (multiple named vectors, payload indexes, geo, full-text filters) | Open source | P1 | ✅ named vectors, float16/bfloat16, geo, text filters, group-by, offset (REST); ⬜ payload index types, gRPC/SDKs |
 | 10 | Multi-tenancy, scoped API keys, RBAC | Cloud | P0 | ⬜ |
 | 11 | Quotas, rate limits, usage metering, billing | Cloud | P0 | ⬜ |
@@ -35,7 +35,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 14 | Serverless / scale-to-zero tier | Cloud | P2 | ⬜ |
 | 15 | Enterprise security and compliance | Cloud | P1 | ⬜ |
 | 16 | Query analytics and observability for customers | Cloud | P2 | ⬜ |
-| 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, docs search, release pipeline; ⬜ Helm |
+| 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, Helm chart, docs search, release pipeline; ⬜ repo settings |
 | 18 | HNSW graph connectivity on clustered data (found by gap 3) | Open source | P0 | ✅ |
 | 19 | HNSW build throughput | Open source | P1 | 🟡 parallel batch build; ⬜ live inserts, SIMD |
 
@@ -173,7 +173,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   stage; pluggable rerank step (local model or external API) in the query
   pipeline.
 
-### 7. Agent integrations — P1 · ✅ MCP server and memory
+### 7. Agent integrations — P1 · ✅ MCP server, memory and agent SDK adapters
 
 - **Done (2026-10-16):** `cmd/gideondb-mcp`, a dependency-free MCP server over
   stdio. Read tools by default; write and admin tools behind `-allow-writes`
@@ -182,8 +182,15 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   recall by similarity blended with recency. Text is embedded through any
   OpenAI-compatible endpoint until gap 5 lands. Guide:
   [MCP server](../integrations/mcp.md).
-- **Remaining:** Streamable HTTP transport; adapters for agent SDKs
-  (OpenAI Agents, LangGraph, CrewAI).
+- **Done (2026-10-21):** Python adapters in `gideondb_integrations` sharing
+  the MCP memory layout: a LangGraph `BaseStore` (semantic search with
+  namespace prefixes, value filters, TTL, namespace listing; checked against
+  LangGraph 1.2), a framework-neutral `MemoryStore`, and `memory_tools` for
+  function-calling frameworks (OpenAI Agents, CrewAI, LangChain). OpenAI
+  Agents SDK and Claude Agent SDK examples connect through `gideondb-mcp`.
+  Guide: [agent frameworks](../integrations/agents.md).
+- **Remaining:** Streamable HTTP transport for the MCP server; TypeScript
+  adapters (for example the Vercel AI SDK and LangGraph.js).
 
 - **Current state:** LangChain and LlamaIndex adapters only.
 - **Why it matters:** Agent frameworks are the fastest-growing source of new
@@ -192,9 +199,21 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   tools); simple "memory" API with TTL, recency weighting and per-user
   namespaces; adapters for popular agent SDKs.
 
-### 8. Embedded / lite mode — P2
+### 8. Embedded / lite mode — P2 · ✅
 
-- **Current state:** Runs as a server; no documented in-process use.
+- **Done (2026-10-21):** `pkg/lite`, a stable Go library that wraps the
+  engine without exposing internal types (open a directory, collections,
+  upsert, get, delete, dense/filtered/BM25/hybrid search, close);
+  `gideondb -lite`, a zero-config loopback-only server with no auth or TLS,
+  the dashboard off by default, data in `~/.gideondb/lite` and a startup
+  banner; Python `LiteServer`, which runs the lite binary as a child process.
+  An in-process Python wheel was not built: it would mean cgo bindings and a
+  native wheel per platform for little gain over a local subprocess. Guide:
+  [lite and embedded mode](../getting-started/lite.md).
+- **Remaining:** none planned; revisit a native Python wheel only if
+  subprocess startup becomes a measured problem.
+
+- **Original state:** Runs as a server; no documented in-process use.
 - **Why it matters:** SQLite-style embedding drives adoption in notebooks,
   desktop apps and tests.
 - **Direction:** Stable Go library API in `pkg/`, a Python wheel wrapping a
@@ -225,7 +244,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   explicit payload index types (keyword, integer range, geo, full-text);
   float16/bfloat16 storage; group-by and pagination by score.
 
-### 17. Community and launch readiness — P0 · ✅ (Helm pending)
+### 17. Community and launch readiness — P0 · ✅ (repository settings pending)
 
 - **Done (2026-10-16):** a verified five-minute quickstart (the old one
   failed with 401 because the API now always needs a key); full-text search
@@ -236,7 +255,9 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Remaining:**
   - ~~Docker one-liner~~ done: the image serves HTTPS with a self-signed
     certificate (`-tls-self-signed`) and reads `GIDEONDB_API_KEY`.
-  - Helm chart (Kustomize manifests exist in `deployments/kubernetes`).
+  - ~~Helm chart~~ done (2026-10-21): `deployments/helm/gideondb` with
+    single-node and three-node values, linted and rendered in CI
+    (`make validate-helm`). Guide: [Helm chart](../operations/helm.md).
   - Enable GitHub Discussions, create the labels, make the GHCR package
     public after the first release.
 

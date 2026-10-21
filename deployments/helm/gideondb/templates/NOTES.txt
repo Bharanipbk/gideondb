@@ -1,0 +1,22 @@
+GideonDB {{ .Chart.AppVersion }} is starting as {{ .Values.replicaCount }} node(s) in namespace {{ .Release.Namespace }}.
+
+API key:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "gideondb.secretName" . }} -o jsonpath='{.data.api-key}' | base64 -d
+
+Reach the API from your machine:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "gideondb.fullname" . }} {{ .Values.service.port }}
+  curl -k https://127.0.0.1:{{ .Values.service.port }}/v1/ready
+
+Dashboard: https://127.0.0.1:{{ .Values.service.port }}/ as "{{ .Values.dashboard.username }}"; password:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "gideondb.secretName" . }} -o jsonpath='{.data.dashboard-password}' | base64 -d
+{{- if eq .Values.tls.mode "selfSigned" }}
+
+TLS uses a per-pod self-signed certificate (-k above). Use tls.mode=secret with
+your own CA for production.
+{{- end }}
+{{- if gt (int .Values.replicaCount) 1 }}
+
+The pods discover each other but Raft membership is not bootstrapped
+automatically. Follow docs/operations/helm.md ("Cluster bootstrap") before
+sending traffic.
+{{- end }}

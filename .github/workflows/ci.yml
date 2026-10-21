@@ -92,6 +92,22 @@ jobs:
       - run: python3 scripts/check-markdown-links.py
       - run: python3 scripts/check-sdk-release.py
 
+  helm:
+    name: Helm chart lint and render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install pinned Helm CLI
+        env:
+          HELM_VERSION: v3.17.3
+          HELM_SHA256: ee88b3c851ae6466a3de507f7be73fe94d54cbf2987cbaa3d1a3832ea331f2cd
+        run: |
+          curl -fsSLo "${RUNNER_TEMP}/helm.tar.gz" "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz"
+          echo "${HELM_SHA256}  ${RUNNER_TEMP}/helm.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/helm.tar.gz" -C "${RUNNER_TEMP}" linux-amd64/helm
+          echo "HELM=${RUNNER_TEMP}/linux-amd64/helm" >> "${GITHUB_ENV}"
+      - run: make validate-helm
+
   sdks:
     name: SDKs and framework integrations
     runs-on: ubuntu-latest

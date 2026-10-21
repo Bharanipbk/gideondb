@@ -1,0 +1,12 @@
+apiVersion: v2
+name: gideondb
+description: GideonDB vector database as a single node or a static multi-node cluster
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/Bharanipbk/gideondb
+sources:
+  - https://github.com/Bharanipbk/gideondb
+keywords: [vector-database, ann, hnsw, search]
+license: Apache-2.0

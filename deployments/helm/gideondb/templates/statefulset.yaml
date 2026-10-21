@@ -1,0 +1,201 @@
+{{- $fullname := include "gideondb.fullname" . -}}
+{{- $replicas := int .Values.replicaCount -}}
+{{- $port := int .Values.service.port -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $fullname }}
+  labels:
+    {{- include "gideondb.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "gideondb.headless" . }}
+  replicas: {{ $replicas }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "gideondb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gideondb.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/values: {{ toJson (pick .Values "config" "cluster" "tls" "replicaCount") | sha256sum | trunc 16 }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if eq .Values.podAntiAffinity "hard" }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "gideondb.selectorLabels" . | nindent 18 }}
+              topologyKey: {{ .Values.topologyKey }}
+      {{- else if eq .Values.podAntiAffinity "soft" }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "gideondb.selectorLabels" . | nindent 20 }}
+                topologyKey: {{ .Values.topologyKey }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: gideondb
+          image: {{ include "gideondb.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -advertise-address=$(POD_IP):{{ $port }}
+            - -api-key-file=/run/secrets/gideondb/api-key
+            {{- if eq .Values.tls.mode "secret" }}
+            - -tls-cert-file=/run/tls/tls.crt
+            - -tls-key-file=/run/tls/tls.key
+            - -tls-ca-file=/run/tls/ca.crt
+            {{- else }}
+            - -tls-self-signed
+            {{- end }}
+            {{- range .Values.config.extraArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: GIDEONDB_HTTP_ADDRESS
+              value: "0.0.0.0:{{ $port }}"
+            - name: GIDEONDB_DATA_PATH
+              value: /var/lib/gideondb
+            - name: GIDEONDB_WAL_SYNC
+              value: {{ .Values.config.walSync | quote }}
+            - name: GIDEONDB_CHECKPOINT_EVERY
+              value: {{ .Values.config.checkpointEvery | quote }}
+            - name: GIDEONDB_RATE_LIMIT_PER_SECOND
+              value: {{ .Values.config.rateLimitPerSecond | quote }}
+            - name: GIDEONDB_RATE_LIMIT_BURST
+              value: {{ .Values.config.rateLimitBurst | quote }}
+            - name: GIDEONDB_REPLICATION_FACTOR
+              value: {{ include "gideondb.replicationFactor" . | quote }}
+            - name: GIDEONDB_PLACEMENT_CAPACITY
+              value: {{ .Values.cluster.placementCapacity | quote }}
+            {{- if gt $replicas 1 }}
+            - name: GIDEONDB_ENABLE_STATIC_ROUTING
+              value: "true"
+            - name: GIDEONDB_PEERS
+              value: {{ include "gideondb.peers" . | quote }}
+            {{- end }}
+            - name: GIDEONDB_CLUSTER_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gideondb.secretName" . }}
+                  key: cluster-id
+            - name: GIDEONDB_DASHBOARD_USERNAME
+              value: {{ .Values.dashboard.username | quote }}
+            # An env var, not a file: the server rejects group-readable
+            # password files, and fsGroup makes Secret files group-readable.
+            - name: GIDEONDB_DASHBOARD_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "gideondb.secretName" . }}
+                  key: dashboard-password
+            {{- with .Values.config.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: https
+              containerPort: {{ $port }}
+          startupProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /v1/health
+              port: https
+            periodSeconds: {{ .Values.probes.startup.periodSeconds }}
+            failureThreshold: {{ .Values.probes.startup.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /v1/ready
+              port: https
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.readiness.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /v1/health
+              port: https
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/gideondb
+            - name: credentials
+              mountPath: /run/secrets/gideondb
+              readOnly: true
+            {{- if eq .Values.tls.mode "secret" }}
+            - name: tls
+              mountPath: /run/tls
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: credentials
+          secret:
+            secretName: {{ include "gideondb.secretName" . }}
+            defaultMode: 256
+            items:
+              - key: api-key
+                path: api-key
+        {{- if eq .Values.tls.mode "secret" }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.tls.secretName }}
+            defaultMode: 256
+        {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        {{- with .Values.persistence.annotations }}
+        annotations:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

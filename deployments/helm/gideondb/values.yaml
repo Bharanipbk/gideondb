@@ -1,0 +1,128 @@
+# Default values: one node with a self-signed certificate, suitable for
+# evaluation. See values-cluster.yaml for a three-node cluster and
+# docs/operations/helm.md for every option.
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/bharanipbk/gideondb
+  # Defaults to the chart appVersion.
+  tag: ""
+  # Pin an immutable digest in production, e.g. sha256:abc...; overrides tag.
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+clusterDomain: cluster.local
+
+cluster:
+  # Shared 32-character lowercase hex cluster ID. Generated once and kept in
+  # the chart Secret when empty (and existingSecret is unset).
+  id: ""
+  # Defaults to min(replicaCount, 3) when 0.
+  replicationFactor: 0
+  placementCapacity: 1
+  # Static routing is enabled automatically when replicaCount > 1.
+
+auth:
+  # Bearer API key (at least 16 characters). Generated once when empty.
+  apiKey: ""
+  # Use an existing Secret instead of the chart Secret. It must contain the
+  # keys cluster-id, api-key and dashboard-password.
+  existingSecret: ""
+
+dashboard:
+  username: admin
+  # Generated once when empty. Change it after the first sign-in.
+  password: ""
+
+tls:
+  # selfSigned: each pod generates a certificate in its data volume (single
+  #             node evaluation only; peers cannot verify each other).
+  # secret:     mount tls.crt, tls.key and ca.crt from tls.secretName; ca.crt
+  #             enables mutual TLS on internal APIs (required for clusters).
+  mode: selfSigned
+  secretName: ""
+
+config:
+  walSync: always
+  checkpointEvery: 1000
+  rateLimitPerSecond: 100
+  rateLimitBurst: 200
+  # Optional extra environment variables (list of EnvVar).
+  extraEnv: []
+  # Optional extra command-line flags, e.g. ["-grpc-address=0.0.0.0:6334"].
+  extraArgs: []
+
+service:
+  type: ClusterIP
+  port: 6333
+  annotations: {}
+
+persistence:
+  size: 20Gi
+  # Empty uses the cluster default StorageClass.
+  storageClass: ""
+  accessModes: [ReadWriteOnce]
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 4Gi
+
+probes:
+  startup:
+    periodSeconds: 5
+    # 120 x 5s = ten minutes for WAL and segment recovery.
+    failureThreshold: 120
+  readiness:
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  liveness:
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 4
+
+podDisruptionBudget:
+  # Created only when replicaCount > 1; minAvailable is a quorum by default.
+  enabled: true
+  minAvailable: ""
+
+# hard: never co-locate two pods on one node (requires replicaCount nodes);
+# soft: prefer spreading; none: no rule.
+podAntiAffinity: hard
+topologyKey: kubernetes.io/hostname
+
+networkPolicy:
+  enabled: false
+  # Namespaces with this label may reach port 6333.
+  clientNamespaceLabel:
+    gideondb-client-access: "true"
+
+terminationGracePeriodSeconds: 60
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+priorityClassName: ""
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]

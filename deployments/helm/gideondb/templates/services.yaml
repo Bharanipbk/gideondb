@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gideondb.headless" . }}
+  labels:
+    {{- include "gideondb.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  # Peers must resolve each other before they are ready.
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "gideondb.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: {{ .Values.service.port }}
+      targetPort: https
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "gideondb.fullname" . }}
+  labels:
+    {{- include "gideondb.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "gideondb.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: https
+      port: {{ .Values.service.port }}
+      targetPort: https
