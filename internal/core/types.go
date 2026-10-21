@@ -79,6 +79,9 @@ type CollectionConfig struct {
 	// Vectorizer names a server-configured embedding model. When set, records
 	// and searches may send text instead of a vector. Optional.
 	Vectorizer string `json:"vectorizer,omitempty"`
+	// Vectors declares named vector fields beside the default unnamed
+	// vector. Optional; each field has its own dimension, metric and index.
+	Vectors map[string]VectorField `json:"vectors,omitempty"`
 }
 
 var vectorizerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -250,7 +253,7 @@ func (c CollectionConfig) Validate() error {
 	default:
 		return fmt.Errorf("%w: unsupported quantization %q", ErrInvalidArgument, c.Index.Quantization)
 	}
-	return nil
+	return c.validateVectorFields()
 }
 
 // Record is the externally visible vector record. Metadata and payload use
@@ -266,6 +269,10 @@ type Record struct {
 	Namespace    string             `json:"namespace,omitempty"`
 	// Text is optional document text indexed for BM25 keyword retrieval.
 	Text string `json:"text,omitempty"`
+	// Vectors holds named dense vectors and MultiVectors holds named
+	// late-interaction vector lists, keyed by declared field name.
+	Vectors      map[string][]float32   `json:"vectors,omitempty"`
+	MultiVectors map[string][][]float32 `json:"multi_vectors,omitempty"`
 }
 
 // MaxTextBytes bounds per-record text so a single record cannot dominate a
@@ -342,4 +349,7 @@ type SearchResult struct {
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	Namespace string         `json:"namespace,omitempty"`
+	// Text carries record text between nodes only while a cross-encoder
+	// rerank needs it; it is cleared before results reach clients.
+	Text string `json:"text,omitempty"`
 }

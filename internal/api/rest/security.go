@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Bharanipbk/gideondb/internal/embedding"
+	"github.com/Bharanipbk/gideondb/internal/rerank"
 	"net"
 	"net/http"
 	"os"
@@ -48,6 +49,8 @@ type Options struct {
 	DashboardBootstrap                          bool
 	// Embedders are the models collections may name as their vectorizer.
 	Embedders *embedding.Registry
+	// Rerankers are the cross-encoder endpoints search requests may name.
+	Rerankers *rerank.Registry
 }
 
 type Principal struct {

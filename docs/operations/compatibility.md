@@ -26,7 +26,8 @@ data directory.
 | Cluster protocol | v2 | v1–v2 | Rolling overlap; incompatible peers fail readiness |
 | WAL | version 1 | version 1 | Unknown versions fail closed |
 | Checkpoint manifest | format 3 | formats 1–3 | Formats 1 and 2 migrate through normal checkpoint publication |
-| Record/vector/tombstone columns | version 1 | version 1 | Checksummed little-endian envelope |
+| Record column | version 1, or 2 when records carry named or multi-vectors | versions 1–2 | Version 2 adds `vectors`/`multi_vectors` to record JSON; binaries before named-vector support reject it instead of dropping vectors |
+| Vector/tombstone columns | version 1 | version 1 | Checksummed little-endian envelope |
 | HNSW graph | version 2 | versions 1–2 or absent | A missing legacy graph is rebuilt; version 2 allows 2×M base-layer links, so older binaries reject it |
 | DiskANN file | version 1 | version 1 or absent | Only for `diskann` collections; a missing file serves the shard exactly, an unknown version or mismatched record order fails startup |
 | Metadata filter index | version 1 | version 1 or absent | A missing legacy index is rebuilt |
@@ -60,6 +61,23 @@ manifest remains authoritative until its replacement is durably renamed.
 For a cluster, migrate one compatible voter at a time using the rolling-upgrade
 procedure. Do not migrate every replica simultaneously or combine a binary
 upgrade with membership, capacity, or replication-factor changes.
+
+## Named vectors
+
+Named vectors, multi-vectors and float16/bfloat16 fields are additive: the
+collection config gains an optional `vectors` map and records gain optional
+`vectors` and `multi_vectors`, all omitted when unused. Data written without
+them is byte-for-byte what earlier binaries wrote, and earlier data opens
+unchanged. Half-precision values are rounded before the WAL append, so the
+WAL, checkpoints, backups and replication snapshots carry plain float32 JSON
+values with no new encoding.
+
+Once a collection declares named fields, do not downgrade: checkpoints use
+record column version 2 (refused by older binaries), and older binaries
+replaying the WAL or catalog would ignore the unknown JSON fields. Restore a
+pre-upgrade backup instead. In a cluster, upgrade every node before creating
+collections with named vectors or sending `using`/`rerank`, because peers
+running older binaries reject the new search fields.
 
 ## Downgrades
 

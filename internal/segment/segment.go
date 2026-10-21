@@ -32,6 +32,7 @@ type Segment struct {
 	closer   interface{ Close() error }
 	metric   core.Metric
 	lexical  *lexicalIndex
+	named    map[string]*namedField
 }
 
 func NewMapped(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }) (*Segment, error) {
@@ -103,6 +104,9 @@ func NewMappedWithPQ(config core.CollectionConfig, records []core.Record, source
 			s.metadata.Upsert(ordinal, record.Metadata)
 		}
 	}
+	if err := s.initNamed(config); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -136,6 +140,9 @@ func New(config core.CollectionConfig) (*Segment, error) {
 		return nil, err
 	}
 	s.index = idx
+	if err := s.initNamed(config); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -215,6 +222,9 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 		if !loadedMetadata {
 			s.metadata.Upsert(ordinal, record.Metadata)
 		}
+	}
+	if err := s.initNamed(config); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -302,8 +312,13 @@ func (s *Segment) Upsert(record core.Record) error {
 	if previous, exists := s.records[ordinal]; exists {
 		s.lexical.remove(ordinal, previous)
 	}
+	if err := s.putNamedLocked(ordinal, record); err != nil {
+		return err
+	}
 	s.ordinals[k] = ordinal
-	s.records[ordinal] = cloneRecord(record)
+	stored := cloneRecord(record)
+	stored.Vectors, stored.MultiVectors = nil, nil
+	s.records[ordinal] = stored
 	s.lexical.add(ordinal, record)
 	s.metadata.Upsert(ordinal, record.Metadata)
 	return nil
@@ -324,6 +339,7 @@ func (s *Segment) Get(namespace, id string) (core.Record, error) {
 		}
 		record.Vector = vector
 	}
+	s.attachNamedLocked(ordinal, &record)
 	return record, nil
 }
 
@@ -342,6 +358,7 @@ func (s *Segment) Delete(namespace, id string) error {
 		return err
 	}
 	s.lexical.remove(ordinal, s.records[ordinal])
+	s.removeNamedLocked(ordinal)
 	delete(s.ordinals, k)
 	delete(s.records, ordinal)
 	s.metadata.Delete(ordinal)
@@ -594,9 +611,11 @@ func (s *Segment) Records() []core.Record {
 	result := make([]core.Record, 0, len(s.records))
 	for _, record := range s.records {
 		cloned := cloneRecord(record)
+		ordinal := s.ordinals[key(record.Namespace, record.ID)]
 		if cloned.Vector == nil && s.vectorAt != nil {
-			cloned.Vector, _ = s.vectorAt(int(s.ordinals[key(record.Namespace, record.ID)] - 1))
+			cloned.Vector, _ = s.vectorAt(int(ordinal - 1))
 		}
+		s.attachNamedLocked(ordinal, &cloned)
 		result = append(result, cloned)
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -645,6 +664,22 @@ func cloneRecord(in core.Record) core.Record {
 	}
 	out.Metadata = cloneMap(in.Metadata)
 	out.Payload = cloneMap(in.Payload)
+	if in.Vectors != nil {
+		out.Vectors = make(map[string][]float32, len(in.Vectors))
+		for name, vector := range in.Vectors {
+			out.Vectors[name] = append([]float32(nil), vector...)
+		}
+	}
+	if in.MultiVectors != nil {
+		out.MultiVectors = make(map[string][][]float32, len(in.MultiVectors))
+		for name, list := range in.MultiVectors {
+			copied := make([][]float32, len(list))
+			for i, vector := range list {
+				copied[i] = append([]float32(nil), vector...)
+			}
+			out.MultiVectors[name] = copied
+		}
+	}
 	return out
 }
 

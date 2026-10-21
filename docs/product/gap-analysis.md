@@ -24,10 +24,10 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
-| 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ⬜ |
+| 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ✅ REST (MaxSim, cross-encoder); ⬜ gRPC/SDKs |
 | 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory; ⬜ agent SDK adapters |
 | 8 | Embedded / single-binary "lite" mode | Open source | P2 | ⬜ |
-| 9 | Richer data model (multiple named vectors, payload indexes, geo, full-text filters) | Open source | P1 | 🟡 geo, text filters, group-by, offset; ⬜ named vectors, float16 |
+| 9 | Richer data model (multiple named vectors, payload indexes, geo, full-text filters) | Open source | P1 | ✅ named vectors, float16/bfloat16, geo, text filters, group-by, offset (REST); ⬜ payload index types, gRPC/SDKs |
 | 10 | Multi-tenancy, scoped API keys, RBAC | Cloud | P0 | ⬜ |
 | 11 | Quotas, rate limits, usage metering, billing | Cloud | P0 | ⬜ |
 | 12 | Managed control plane (provision, autoscale, upgrade) | Cloud | P0 | ⬜ |
@@ -150,7 +150,21 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   Ollama, Cohere, local ONNX); `text` field accepted on upsert and search;
   cache embeddings by content hash.
 
-### 6. Reranking and multi-vector — P1
+### 6. Reranking and multi-vector — P1 · ✅ REST
+
+- **Done (2026-10-21):** multi-vector named fields (`"multi_vector": true`,
+  up to 1024 vectors per record) searched with MaxSim: mean-pooled vectors
+  are indexed (flat or HNSW) for candidate generation and candidates are
+  rescored exactly. Search accepts `rerank` with a built-in `maxsim` stage
+  (per shard on the cluster route) or a `cross_encoder` stage calling
+  Cohere/Jina/TEI-compatible `/rerank` endpoints from `-rerankers-file`, with
+  bounded candidates, per-reranker timeouts, and fallback to first-stage
+  results flagged by `rerank.applied=false`. Single-node and `/v1/cluster`
+  REST, OpenAPI. Guides: [multi-vector](../indexing/multi-vector.md),
+  [reranking](../indexing/reranking.md).
+- **Remaining:** gRPC and SDK exposure; token-level candidate generation
+  (PLAID-style centroids) instead of mean pooling; an in-process ONNX
+  cross-encoder.
 
 - **Current state:** Single dense vector per record; no rerank stage.
 - **Why it matters:** Cross-encoder reranking and late-interaction models
@@ -186,14 +200,22 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Direction:** Stable Go library API in `pkg/`, a Python wheel wrapping a
   local engine, and a zero-config single-binary mode.
 
-### 9. Richer data model — P1 · 🟡
+### 9. Richer data model — P1 · ✅ named vectors and float16; 🟡 payload indexes
 
 - **Done (2026-10-16):** `$text` (whole-word) and `$geo_radius` filters,
   `offset` score pagination and `group_by`/`group_size` grouping on single-node
   and cluster search, with Go client support. No persisted format changed.
-- **Remaining (each changes the record or segment format and needs a design
-  note first):** named vectors per record; float16/bfloat16 storage; explicit
-  payload index types with a token index for `$text`.
+- **Done (2026-10-21):** named vectors — up to 16 fields per collection, each
+  with its own dimension, metric, flat/HNSW index and `datatype`; records carry
+  `vectors` beside the unchanged default `vector`, and search picks a field
+  with `using` (single-node and cluster REST, OpenAPI). `float16`/`bfloat16`
+  fields are rounded at write time and scored in float32, halving stored
+  vector memory. Persisted as record column version 2 only when used, so
+  existing data and the API, WAL, backup and replication formats are
+  unchanged. Guide: [named vectors](../indexing/named-vectors.md).
+- **Remaining:** explicit payload index types with a token index for `$text`;
+  named vectors over gRPC and in the SDKs; persisted HNSW graphs for named
+  fields (rebuilt on open today); half precision for the default vector.
 
 - **Current state:** One float32 vector per record, metadata filters,
   namespaces.

@@ -18,6 +18,9 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Binary quantization](indexing/binary-quantization.md)
 - [Product quantization](indexing/product-quantization.md)
 - [DiskANN disk-resident index](indexing/diskann.md)
+- [Named vectors and float16/bfloat16 storage](indexing/named-vectors.md)
+- [Multi-vector (late interaction) search](indexing/multi-vector.md)
+- [Reranking (MaxSim and cross-encoders)](indexing/reranking.md)
 
 ## Client SDKs
 

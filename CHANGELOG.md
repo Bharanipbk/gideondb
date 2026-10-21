@@ -21,6 +21,28 @@ describe unreleased experimental work.
   file and only 8-bit navigation codes stay on the heap; the mutable segment
   uses the flat index until checkpoint. Existing collections and checkpoints
   are unchanged. `gideondb-bench` adds `diskann` and `diskann-ef200`.
+- Named vectors: collections may declare up to 16 named dense vector fields
+  (`vectors`), each with its own dimension, metric, flat/HNSW index and
+  storage `datatype`. Records carry `vectors`, and search selects a field with
+  `using` on single-node and cluster REST search. The default `vector` is
+  unchanged.
+- float16 and bfloat16 storage for named fields: values are rounded at write
+  time (before the WAL) and scored in float32, halving the field's stored
+  vector memory.
+- Multi-vector (late interaction) fields: records carry `multi_vectors` (up to
+  1024 vectors each, e.g. ColBERT tokens); search takes `multi_vector` and
+  rescores mean-pooled index candidates with MaxSim.
+- Search `rerank` stage: built-in `maxsim` over a multi-vector field, and
+  `cross_encoder` through Cohere/Jina/TEI-compatible `/rerank` endpoints
+  configured with `-rerankers-file`. Candidate counts are bounded, calls time
+  out, and failures return first-stage results with `rerank.applied=false`.
+  `GET /v1/rerankers` lists configured rerankers.
+
+### Changed
+
+- Checkpoint record columns that contain named or multi-vectors are written
+  as record column version 2; other columns stay version 1. See the
+  compatibility guide before downgrading.
 
 ## 0.1.0 — 2026-10-16
 
