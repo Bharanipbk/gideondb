@@ -505,6 +505,37 @@ func (c *Collection) InstallHNSWShardWithMetadata(shardID uint32, records []core
 	return c.shards[shardID].InstallImmutable(base)
 }
 
+// InstallDiskANNShardWithMetadata serves a sealed shard from the DiskANN file
+// at path, built from records in this order by segment.BuildDiskANN.
+func (c *Collection) InstallDiskANNShardWithMetadata(shardID uint32, records []core.Record, path string, metadataIndex *metadata.Index) error {
+	if c.config.Index.Type != core.IndexDiskANN {
+		return fmt.Errorf("%w: diskann checkpoints require a diskann index", core.ErrInvalidArgument)
+	}
+	if int(shardID) >= len(c.shards) {
+		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
+	}
+	for _, record := range records {
+		if c.RouteShard(record.Namespace, record.ID) != shardID {
+			return fmt.Errorf("diskann segment record routed to wrong shard")
+		}
+		for {
+			current := c.version.Load()
+			if current >= record.Version || c.version.CompareAndSwap(current, record.Version) {
+				break
+			}
+		}
+	}
+	base, err := segment.NewDiskANNWithMetadata(c.config, records, path, metadataIndex)
+	if err != nil {
+		return err
+	}
+	if err := c.shards[shardID].InstallImmutable(base); err != nil {
+		_ = base.Close()
+		return err
+	}
+	return nil
+}
+
 func (c *Collection) Close() error {
 	var first error
 	for _, s := range c.shards {

@@ -103,6 +103,10 @@ func main() {
 		"pq":         {Type: core.IndexFlat, Quantization: core.QuantizationPQ},
 		"pq-x10":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 10},
 		"pq-x20":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 20},
+		// diskann configs build the sealed-segment file in a temporary
+		// directory and search it memory-mapped, as a checkpoint would.
+		"diskann":       {Type: core.IndexDiskANN},
+		"diskann-ef200": {Type: core.IndexDiskANN, EFSearch: 200},
 	}
 	var configs []benchConfig
 	for _, name := range strings.Split(*configsFlag, ",") {
@@ -141,7 +145,10 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 	started := time.Now()
 	var seg *segment.Segment
 	var err error
-	if collection.Index.Quantization == core.QuantizationPQ {
+	switch {
+	case collection.Index.Type == core.IndexDiskANN:
+		seg = sealedDiskANN(collection, base)
+	case collection.Index.Quantization == core.QuantizationPQ:
 		// PQ codebooks are trained when a segment is sealed, so build time
 		// includes k-means training and encoding.
 		records := make([]core.Record, len(base))
@@ -149,7 +156,7 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 			records[i] = core.Record{ID: id(i), Vector: vector}
 		}
 		seg, err = segment.NewImmutable(collection, records, nil)
-	} else {
+	default:
 		seg, err = segment.New(collection)
 		for i, vector := range base {
 			if err != nil {
@@ -196,6 +203,27 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 		Queries: len(queries), K: k, Metric: string(metric), GoVersion: runtime.Version(),
 		Architecture: runtime.GOOS + "/" + runtime.GOARCH, CPUs: runtime.NumCPU(),
 	}
+}
+
+func sealedDiskANN(collection core.CollectionConfig, base [][]float32) *segment.Segment {
+	directory, err := os.MkdirTemp("", "gideondb-bench-diskann-")
+	if err != nil {
+		fail(err)
+	}
+	defer os.RemoveAll(directory) // the open mapping keeps the file alive
+	records := make([]core.Record, len(base))
+	for i, vector := range base {
+		records[i] = core.Record{ID: id(i), Vector: vector}
+	}
+	path := directory + "/segment.diskann"
+	if err := segment.BuildDiskANN(collection, records, path); err != nil {
+		fail(err)
+	}
+	seg, err := segment.NewDiskANNWithMetadata(collection, records, path, nil)
+	if err != nil {
+		fail(err)
+	}
+	return seg
 }
 
 func groundTruth(base, queries [][]float32, metric core.Metric, k int) [][]string {

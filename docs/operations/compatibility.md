@@ -28,6 +28,7 @@ data directory.
 | Checkpoint manifest | format 3 | formats 1–3 | Formats 1 and 2 migrate through normal checkpoint publication |
 | Record/vector/tombstone columns | version 1 | version 1 | Checksummed little-endian envelope |
 | HNSW graph | version 2 | versions 1–2 or absent | A missing legacy graph is rebuilt; version 2 allows 2×M base-layer links, so older binaries reject it |
+| DiskANN file | version 1 | version 1 or absent | Only for `diskann` collections; a missing file serves the shard exactly, an unknown version or mismatched record order fails startup |
 | Metadata filter index | version 1 | version 1 or absent | A missing legacy index is rebuilt |
 | PQ codebooks and codes (`pq_file`) | version 1 | version 1 or absent | Optional manifest field; a missing, corrupt or mismatched file is retrained from the segment vectors. Older binaries ignore the field and keep the file |
 | Catalog | format 1 | format 1 | Unknown format fails startup |

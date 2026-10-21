@@ -265,7 +265,7 @@ func orphanCandidate(name string) bool {
 	if !strings.HasPrefix(name, "segment-") {
 		return false
 	}
-	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".filter", ".tombstones", ".pq"} {
+	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".diskann", ".filter", ".tombstones", ".pq"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}
