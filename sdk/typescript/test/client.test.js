@@ -83,3 +83,30 @@ test("scroll preserves opaque cursors and explicit vector inclusion", async () =
   await assert.rejects(client.scroll("docs", { limit: 201 }), TypeError);
   await assert.rejects(client.distributedScroll("docs", { limit: 201 }), TypeError);
 });
+
+test("hybrid, text, sparse search and quantized vectorizer collections send exact bodies", async () => {
+  const requests = [];
+  const client = new GideonDBClient("https://db.example", { fetch: queuedFetch([
+    jsonResponse({ name: "docs" }, 201),
+    jsonResponse({ records: [] }),
+    jsonResponse({ results: [] }),
+    jsonResponse({ results: [] }),
+    jsonResponse({ results: [], partial: false, failures: [], metadata_epoch: 1, authoritative_placement: true }),
+  ], requests) });
+  const config = { name: "docs", dimension: 384, metric: "cosine", shard_count: 1, vectorizer: "minilm", index: { type: "flat", quantization: "binary", oversampling: 4 } };
+  await client.createCollection(config);
+  await client.batchUpsert("docs", [{ id: "a", text: "hello world", sparse_vector: { hello: 1.5 } }]);
+  await client.search("docs", { text: "hello", topK: 3, alpha: 0.3, fusion: "rrf" });
+  await client.search("docs", { sparseVector: { hello: 2 }, topK: 1 });
+  await client.distributedSearch("docs", { vector: [1, 0], text: "hi", sparseVector: { hi: 1 }, topK: 2, fusion: "weighted" });
+  const bodies = requests.map(r => JSON.parse(r.options.body));
+  assert.deepEqual(bodies[0], config);
+  assert.deepEqual(bodies[1], { records: [{ id: "a", text: "hello world", sparse_vector: { hello: 1.5 } }] });
+  assert.deepEqual(bodies[2], { top_k: 3, text: "hello", alpha: 0.3, fusion: "rrf" });
+  assert.deepEqual(bodies[3], { top_k: 1, sparse_vector: { hello: 2 } });
+  assert.deepEqual(bodies[4], { top_k: 2, vector: [1, 0], text: "hi", sparse_vector: { hi: 1 }, fusion: "weighted" });
+  await assert.rejects(client.search("docs", { topK: 1 }), TypeError);
+  await assert.rejects(client.search("docs", { text: "x", topK: 1, alpha: 1.5 }), TypeError);
+  await assert.rejects(client.search("docs", { text: "x", topK: 1, fusion: "max" }), TypeError);
+  assert.equal(requests.length, 5);
+});

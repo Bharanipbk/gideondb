@@ -67,7 +67,7 @@ func main() {
 	metricName := flag.String("metric", "cosine", "cosine, dot or l2")
 	basePath := flag.String("base", "", ".fvecs base vectors")
 	queriesPath := flag.String("queries", "", ".fvecs query vectors")
-	configsFlag := flag.String("configs", "flat,hnsw,hnsw-ef128,binary,binary-x10", "comma-separated configurations")
+	configsFlag := flag.String("configs", "flat,hnsw,hnsw-ef128,binary,binary-x10,pq,pq-x10", "comma-separated configurations")
 	jsonPath := flag.String("json", "", "write results as JSON to this path")
 	seed := flag.Int64("seed", 42, "synthetic data seed")
 	buildMode := flag.String("build", "sealed", "hnsw build: sealed (parallel batch build, as when a segment is sealed) or live (one Upsert per vector)")
@@ -111,6 +111,13 @@ func main() {
 		"binary":     {Type: core.IndexFlat, Quantization: core.QuantizationBinary},
 		"binary-x10": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 10},
 		"binary-x20": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 20},
+		"pq":         {Type: core.IndexFlat, Quantization: core.QuantizationPQ},
+		"pq-x10":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 10},
+		"pq-x20":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 20},
+		// diskann configs build the sealed-segment file in a temporary
+		// directory and search it memory-mapped, as a checkpoint would.
+		"diskann":       {Type: core.IndexDiskANN},
+		"diskann-ef200": {Type: core.IndexDiskANN, EFSearch: 200},
 	}
 	var configs []benchConfig
 	for _, name := range strings.Split(*configsFlag, ",") {
@@ -189,7 +196,22 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 // path a sealed segment takes: a parallel batch build of the graph, then an
 // immutable segment over it. Everything else inserts one record at a time.
 func buildSegment(collection core.CollectionConfig, base [][]float32, buildMode string) *segment.Segment {
-	if collection.Index.Type == core.IndexHNSW && buildMode == "sealed" {
+	switch {
+	case collection.Index.Type == core.IndexDiskANN:
+		return sealedDiskANN(collection, base)
+	case collection.Index.Quantization == core.QuantizationPQ:
+		// PQ codebooks are trained when a segment is sealed, so build time
+		// includes k-means training and encoding.
+		records := make([]core.Record, len(base))
+		for i, vector := range base {
+			records[i] = core.Record{ID: id(i), Vector: vector}
+		}
+		seg, err := segment.NewImmutable(collection, records, nil)
+		if err != nil {
+			fail(err)
+		}
+		return seg
+	case collection.Index.Type == core.IndexHNSW && buildMode == "sealed":
 		records := make([]core.Record, len(base))
 		for i, vector := range base {
 			records[i] = core.Record{ID: id(i), Vector: vector}
@@ -212,6 +234,27 @@ func buildSegment(collection core.CollectionConfig, base [][]float32, buildMode 
 		if err := seg.Upsert(core.Record{ID: id(i), Vector: vector}); err != nil {
 			fail(err)
 		}
+	}
+	return seg
+}
+
+func sealedDiskANN(collection core.CollectionConfig, base [][]float32) *segment.Segment {
+	directory, err := os.MkdirTemp("", "gideondb-bench-diskann-")
+	if err != nil {
+		fail(err)
+	}
+	defer os.RemoveAll(directory) // the open mapping keeps the file alive
+	records := make([]core.Record, len(base))
+	for i, vector := range base {
+		records[i] = core.Record{ID: id(i), Vector: vector}
+	}
+	path := directory + "/segment.diskann"
+	if err := segment.BuildDiskANN(collection, records, path); err != nil {
+		fail(err)
+	}
+	seg, err := segment.NewDiskANNWithMetadata(collection, records, path, nil)
+	if err != nil {
+		fail(err)
 	}
 	return seg
 }

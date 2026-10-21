@@ -110,5 +110,6 @@ The same tokenizer applies to records and queries.
   use the collection's configured `ef_search`.
 - The inverted indexes are rebuilt from record columns at load time, not
   persisted separately. Load time grows with total text volume.
-- The gRPC API and SDKs do not yet expose `text` or `fusion`. Use REST for
-  keyword and RRF queries until they are added.
+- gRPC (`Record.text`, `Record.sparse_vector`, `SearchRequest.text`,
+  `sparse_vector`, `alpha`, `fusion`), all six SDKs and the dashboard search
+  playground expose the same fields.

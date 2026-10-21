@@ -101,8 +101,11 @@ misses. It never returns URLs or keys.
 
 ## Clients
 
-The Go client sends text with `client.Record{ID: "a1", Text: "..."}` and
-`client.SearchOptions{Text: "...", TopK: 5}`. The
+Every SDK accepts record and search `text` and a collection `vectorizer`; the
+Go client, for example, sends `client.Record{ID: "a1", Text: "..."}` and
+`client.SearchOptions{Text: "...", TopK: 5}`. gRPC takes `Record.text`,
+`SearchRequest.text` and `Collection.vectorizer` with the same rules; text
+embedding failures return `UNAVAILABLE` and timeouts `DEADLINE_EXCEEDED`. The
 [MCP server](../integrations/mcp.md) passes text through to the server when
 it has no embedding model of its own.
 
@@ -111,4 +114,3 @@ it has no embedding model of its own.
 - Only OpenAI-compatible APIs are built in; Cohere's native API and local
   ONNX models are not.
 - The cache is per node and in memory; it is empty after a restart.
-- gRPC requests do not accept `text` yet.

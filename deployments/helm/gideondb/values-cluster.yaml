@@ -1,0 +1,22 @@
+# Three nodes with replication factor 3, private-CA mutual TLS and a quorum
+# disruption budget. Create the TLS Secret first (see docs/operations/helm.md);
+# its certificate SANs must cover <release>-gideondb-{0,1,2}.<release>-gideondb-headless.<namespace>.svc.cluster.local.
+#   helm install gideondb deployments/helm/gideondb -n gideondb -f deployments/helm/gideondb/values-cluster.yaml
+replicaCount: 3
+cluster:
+  replicationFactor: 3
+tls:
+  mode: secret
+  secretName: gideondb-tls
+persistence:
+  size: 100Gi
+resources:
+  requests:
+    cpu: "1"
+    memory: 2Gi
+  limits:
+    cpu: "4"
+    memory: 8Gi
+podAntiAffinity: hard
+networkPolicy:
+  enabled: true

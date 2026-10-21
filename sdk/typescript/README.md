@@ -59,3 +59,30 @@ Run its tests from the repository root:
 ```sh
 make test-typescript-sdk
 ```
+
+## Hybrid search, quantization and server-side embedding
+
+```js
+// Flat index with binary quantization and a server-side vectorizer.
+await client.createCollection({
+  name: "articles", dimension: 384, metric: "cosine", shard_count: 1,
+  vectorizer: "minilm",
+  index: { type: "flat", quantization: "binary", oversampling: 4 },
+});
+
+// The vector is optional when text is given: the server embeds it and indexes it for BM25.
+await client.upsert("articles", { id: "a1", text: "vector databases", sparse_vector: { vector: 1.2 } });
+
+// Text-only search (embedded server-side, fused with BM25).
+await client.search("articles", { text: "vector databases", topK: 10 });
+
+// Hybrid dense + lexical with reciprocal rank fusion; alpha is the dense weight (0..1, default 0.5).
+await client.search("articles", { vector: embedding, text: "vector databases", alpha: 0.7, fusion: "rrf", topK: 10 });
+
+// Sparse-only search.
+await client.search("articles", { sparseVector: { vector: 1.0 }, topK: 10 });
+```
+
+`fusion` is `"weighted"` (default) or `"rrf"`. `quantization: "binary"` is only
+valid on flat indexes; `oversampling` (1-100, default 4) controls how many
+candidates are rescored at full precision.

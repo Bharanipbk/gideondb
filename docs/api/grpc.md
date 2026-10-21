@@ -84,6 +84,28 @@ Writes are not automatically retry-safe after an ambiguous transport failure.
 Batch and distributed responses retain explicit per-shard committed, failed, or
 unknown outcomes.
 
+## Hybrid, keyword and quantized collections
+
+`Record` carries `sparse_vector` (term to positive weight) and `text`
+(at most 1 MiB, indexed for BM25). `SearchRequest` accepts `sparse_vector`,
+`text`, an optional `alpha` (dense weight from 0 through 1, default 0.5) and
+`fusion` (`FUSION_MODE_WEIGHTED`, the default, or `FUSION_MODE_RRF`). A
+request with `sparse_vector` or `text` runs [hybrid retrieval](../indexing/sparse-hybrid.md);
+`vector` may then be empty.
+
+`IndexConfig.quantization = QUANTIZATION_BINARY` with an optional
+`oversampling` from 1 through 100 (default 4) selects
+[binary quantization](../indexing/binary-quantization.md) on the flat index.
+`Collection.vectorizer` names a server embedding model: records and searches
+with `text` and no `vector` are then embedded as described in
+[server-side embedding](../indexing/server-side-embedding.md). An unknown
+vectorizer fails creation with `INVALID_ARGUMENT`; provider failures return
+`UNAVAILABLE` and provider timeouts `DEADLINE_EXCEEDED`. With static routing,
+the REST coordinator embeds once before fanning out.
+
+All of these use new field numbers, so older clients and servers interoperate:
+an old server ignores the new fields, and an old client never sees them.
+
 ## Pagination and streaming bounds
 
 `Scroll` accepts a page size from 1 through 200. Its cursor is opaque and may be

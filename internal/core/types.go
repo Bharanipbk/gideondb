@@ -79,6 +79,9 @@ type CollectionConfig struct {
 	// Vectorizer names a server-configured embedding model. When set, records
 	// and searches may send text instead of a vector. Optional.
 	Vectorizer string `json:"vectorizer,omitempty"`
+	// Vectors declares named vector fields beside the default unnamed
+	// vector. Optional; each field has its own dimension, metric and index.
+	Vectors map[string]VectorField `json:"vectors,omitempty"`
 }
 
 var vectorizerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -88,6 +91,9 @@ type IndexType string
 const (
 	IndexFlat IndexType = "flat"
 	IndexHNSW IndexType = "hnsw"
+	// IndexDiskANN serves sealed segments from a disk-resident Vamana graph;
+	// the mutable segment uses the flat index until checkpoint.
+	IndexDiskANN IndexType = "diskann"
 )
 
 // IndexConfig selects the collection-local vector index. Zero values select
@@ -97,10 +103,19 @@ type IndexConfig struct {
 	M              int       `json:"m,omitempty"`
 	EFConstruction int       `json:"ef_construction,omitempty"`
 	EFSearch       int       `json:"ef_search,omitempty"`
-	// Quantization "binary" keeps 1-bit sign codes for candidate generation
-	// and rescores Oversampling*k candidates at full precision. Flat only.
+	// Quantization "binary" keeps 1-bit sign codes and "pq" keeps product
+	// quantization codes for candidate generation; both rescore
+	// Oversampling*k candidates at full precision. Flat only.
 	Quantization Quantization `json:"quantization,omitempty"`
 	Oversampling int          `json:"oversampling,omitempty"`
+	// PQSubspaces is the number of one-byte codes per vector for "pq". It
+	// must divide the dimension; Normalized picks dimension/8 (or the next
+	// smaller exact split) when it is zero.
+	PQSubspaces int `json:"pq_subspaces,omitempty"`
+	// MaxDegree (Vamana R) and Alpha (robust-prune factor) tune DiskANN,
+	// which reuses EFConstruction and EFSearch as its build and search lists.
+	MaxDegree int     `json:"max_degree,omitempty"`
+	Alpha     float32 `json:"alpha,omitempty"`
 }
 
 type Quantization string
@@ -108,6 +123,7 @@ type Quantization string
 const (
 	QuantizationNone   Quantization = ""
 	QuantizationBinary Quantization = "binary"
+	QuantizationPQ     Quantization = "pq"
 )
 
 func (c CollectionConfig) Normalized() CollectionConfig {
@@ -125,8 +141,35 @@ func (c CollectionConfig) Normalized() CollectionConfig {
 			c.Index.EFSearch = 64
 		}
 	}
+	if c.Index.Type == IndexDiskANN {
+		if c.Index.MaxDegree == 0 {
+			c.Index.MaxDegree = 64
+		}
+		if c.Index.Alpha == 0 {
+			c.Index.Alpha = 1.2
+		}
+		if c.Index.EFConstruction == 0 {
+			c.Index.EFConstruction = 128
+		}
+		if c.Index.EFSearch == 0 {
+			c.Index.EFSearch = 100
+		}
+	}
 	if c.Index.Quantization == QuantizationBinary && c.Index.Oversampling == 0 {
 		c.Index.Oversampling = 4
+	}
+	if c.Index.Quantization == QuantizationPQ {
+		if c.Index.Oversampling == 0 {
+			c.Index.Oversampling = 8
+		}
+		if c.Index.PQSubspaces == 0 && c.Dimension > 0 {
+			for _, width := range []int{8, 4, 2, 1} {
+				if c.Dimension%width == 0 {
+					c.Index.PQSubspaces = c.Dimension / width
+					break
+				}
+			}
+		}
 	}
 	return c
 }
@@ -160,8 +203,30 @@ func (c CollectionConfig) Validate() error {
 		if c.Index.EFSearch < 1 || c.Index.EFSearch > 10000 {
 			return fmt.Errorf("%w: hnsw ef_search must be between 1 and 10000", ErrInvalidArgument)
 		}
+	case IndexDiskANN:
+		if c.Index.M != 0 {
+			return fmt.Errorf("%w: diskann uses max_degree, not m", ErrInvalidArgument)
+		}
+		if c.Index.MaxDegree < 4 || c.Index.MaxDegree > 256 {
+			return fmt.Errorf("%w: diskann max_degree must be between 4 and 256", ErrInvalidArgument)
+		}
+		if !(c.Index.Alpha >= 1 && c.Index.Alpha <= 2) {
+			return fmt.Errorf("%w: diskann alpha must be between 1 and 2", ErrInvalidArgument)
+		}
+		if c.Index.EFConstruction < c.Index.MaxDegree || c.Index.EFConstruction > 10000 {
+			return fmt.Errorf("%w: diskann ef_construction must be between max_degree and 10000", ErrInvalidArgument)
+		}
+		if c.Index.EFSearch < 1 || c.Index.EFSearch > 10000 {
+			return fmt.Errorf("%w: diskann ef_search must be between 1 and 10000", ErrInvalidArgument)
+		}
 	default:
 		return fmt.Errorf("%w: unsupported index type %q", ErrInvalidArgument, c.Index.Type)
+	}
+	if c.Index.PQSubspaces != 0 && c.Index.Quantization != QuantizationPQ {
+		return fmt.Errorf("%w: pq_subspaces requires pq quantization", ErrInvalidArgument)
+	}
+	if c.Index.Type != IndexDiskANN && (c.Index.MaxDegree != 0 || c.Index.Alpha != 0) {
+		return fmt.Errorf("%w: max_degree and alpha require the diskann index", ErrInvalidArgument)
 	}
 	switch c.Index.Quantization {
 	case QuantizationNone:
@@ -175,10 +240,20 @@ func (c CollectionConfig) Validate() error {
 		if c.Index.Oversampling < 1 || c.Index.Oversampling > 100 {
 			return fmt.Errorf("%w: oversampling must be between 1 and 100", ErrInvalidArgument)
 		}
+	case QuantizationPQ:
+		if c.Index.Type != IndexFlat {
+			return fmt.Errorf("%w: pq quantization requires the flat index", ErrInvalidArgument)
+		}
+		if c.Index.Oversampling < 1 || c.Index.Oversampling > 100 {
+			return fmt.Errorf("%w: oversampling must be between 1 and 100", ErrInvalidArgument)
+		}
+		if c.Index.PQSubspaces < 1 || c.Index.PQSubspaces > c.Dimension || c.Dimension%c.Index.PQSubspaces != 0 {
+			return fmt.Errorf("%w: pq_subspaces must be positive and divide the dimension", ErrInvalidArgument)
+		}
 	default:
 		return fmt.Errorf("%w: unsupported quantization %q", ErrInvalidArgument, c.Index.Quantization)
 	}
-	return nil
+	return c.validateVectorFields()
 }
 
 // Record is the externally visible vector record. Metadata and payload use
@@ -194,6 +269,10 @@ type Record struct {
 	Namespace    string             `json:"namespace,omitempty"`
 	// Text is optional document text indexed for BM25 keyword retrieval.
 	Text string `json:"text,omitempty"`
+	// Vectors holds named dense vectors and MultiVectors holds named
+	// late-interaction vector lists, keyed by declared field name.
+	Vectors      map[string][]float32   `json:"vectors,omitempty"`
+	MultiVectors map[string][][]float32 `json:"multi_vectors,omitempty"`
 }
 
 // MaxTextBytes bounds per-record text so a single record cannot dominate a
@@ -270,4 +349,7 @@ type SearchResult struct {
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	Namespace string         `json:"namespace,omitempty"`
+	// Text carries record text between nodes only while a cross-encoder
+	// rerank needs it; it is cleared before results reach clients.
+	Text string `json:"text,omitempty"`
 }

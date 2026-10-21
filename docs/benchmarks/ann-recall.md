@@ -15,7 +15,8 @@ go run ./cmd/gideondb-bench -base sift_base.fvecs -queries sift_query.fvecs \
 ```
 
 Configurations: `flat`, `hnsw`, `hnsw-ef128`, `hnsw-ef256`, `binary`
-(oversampling 4), `binary-x10`, `binary-x20`. `-intrinsic 0` gives full-rank
+(oversampling 4), `binary-x10`, `binary-x20`, `pq` (oversampling 8), `pq-x10`,
+`pq-x20`. `-intrinsic 0` gives full-rank
 noise, and `-clusters 0` removes topic clusters.
 
 ## Results — 2026-10-16
@@ -50,6 +51,19 @@ cosine.
 |---|---:|---:|---:|---:|---:|
 | hnsw | 0.976 | 3235 | 0.299 | 0.392 | 8.39 |
 | hnsw-ef256 | 1.000 | 1065 | 0.928 | 1.115 | 8.39 |
+
+### Product quantization — 2026-10-21, 50,000 × 128, 100 clusters, intrinsic dimension 32
+
+Apple M3, Go 1.26.5. Default `pq_subspaces` = 16 (16 bytes per vector). The
+machine was heavily loaded by other jobs during this run, so only recall is
+reported; QPS and latency were not reproducible.
+
+| Config | Recall@10 (cosine) | Recall@10 (l2) |
+|---|---:|---:|
+| binary-x10 | 0.893 | — |
+| pq (×8) | 0.847 | 0.928 |
+| pq-x10 | 0.891 | 0.959 |
+| pq-x20 | 0.977 | 0.997 |
 
 ## Findings
 

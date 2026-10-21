@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Bharanipbk/gideondb/internal/embedding"
+	"github.com/Bharanipbk/gideondb/internal/rerank"
 	"log/slog"
 	"net"
 	"net/http"
@@ -49,6 +50,7 @@ func main() {
 	apiKeyFile := flag.String("api-key-file", "", "file containing the bearer API key (permissions must be 0600 or stricter)")
 	principalsFile := flag.String("principals-file", "", "reloadable JSON file containing API principals, roles, and collection prefixes")
 	embeddersFile := flag.String("embedders-file", os.Getenv("GIDEONDB_EMBEDDERS_FILE"), "JSON file of embedding models that collections can use as their vectorizer")
+	rerankersFile := flag.String("rerankers-file", os.Getenv("GIDEONDB_RERANKERS_FILE"), "JSON file of cross-encoder rerank endpoints that search requests can name")
 	allowUnauthenticated := flag.Bool("allow-unauthenticated", false, "allow an unauthenticated non-loopback HTTP listener")
 	allowInsecureHTTP := flag.Bool("allow-insecure-http", false, "allow bearer authentication over cleartext HTTP on a non-loopback listener")
 	enableStaticRouting := flag.Bool("enable-static-routing", false, "activate immutable static placement only while all peer views converge")
@@ -66,6 +68,7 @@ func main() {
 	validateConfig := flag.Bool("validate-config", false, "validate effective configuration, then exit")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	healthcheckURL := flag.String("healthcheck-url", "", "check an HTTP health URL and exit")
+	liteMode := flag.Bool("lite", strings.EqualFold(os.Getenv("GIDEONDB_LITE"), "true"), "zero-config single-node mode: loopback only, no authentication or TLS, dashboard off unless credentials are set, data in ~/.gideondb/lite by default")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -107,6 +110,9 @@ func main() {
 	}
 	flagValues := make(map[string]string)
 	flag.Visit(func(item *flag.Flag) { flagValues[item.Name] = item.Value.String() })
+	if _, explicit := flagValues["data-path"]; *liteMode && !explicit && settings.DataPath == defaults.DataPath {
+		flagValues["data-path"] = liteDefaultDataPath()
+	}
 	settings, configErr = appconfig.ApplyFlags(settings, flagValues)
 	if configErr != nil {
 		logger.Error("apply CLI configuration", "error", configErr)
@@ -151,6 +157,16 @@ func main() {
 	dashboardPasswordFile := os.Getenv("GIDEONDB_DASHBOARD_PASSWORD_FILE")
 	dashboardBootstrap := strings.EqualFold(os.Getenv("GIDEONDB_DASHBOARD_BOOTSTRAP"), "true")
 	offline := *backupTo != "" || *verifyData || *migrateData
+	dashboardEnabled := true
+	if *liteMode && !offline {
+		if err := checkLite(*address, *grpcAddress, settings.Peers, os.Getenv("GIDEONDB_API_KEY")+*apiKeyFile, *principalsFile); err != nil {
+			logger.Error("invalid lite configuration", "error", err)
+			os.Exit(2)
+		}
+		*tlsSelfSigned = false
+		_, statErr := os.Stat(filepath.Join(*dataPath, "admin.sqlite"))
+		dashboardEnabled = dashboardUsername != "" || dashboardPasswordFile != "" || statErr == nil
+	}
 	if !offline {
 		if *tlsSelfSigned && *tlsCertFile == "" && *tlsKeyFile == "" {
 			certPath, keyPath, certErr := ensureSelfSignedCertificate(filepath.Join(*dataPath, "tls"), *address, *advertiseAddress)
@@ -185,7 +201,7 @@ func main() {
 		if os.IsNotExist(dashboardCredentialErr) {
 			_, dashboardCredentialErr = os.Stat(filepath.Join(*dataPath, "dashboard-credentials.json"))
 		}
-		if dashboardUsername == "" && os.IsNotExist(dashboardCredentialErr) {
+		if dashboardEnabled && dashboardUsername == "" && os.IsNotExist(dashboardCredentialErr) {
 			logger.Error("new data directory requires GIDEONDB_DASHBOARD_USERNAME and a dashboard password source")
 			os.Exit(2)
 		}
@@ -295,7 +311,10 @@ func main() {
 		}
 	}()
 	dashboardCredentialsPath := filepath.Join(*dataPath, "admin.sqlite")
-	if !offline {
+	if !dashboardEnabled {
+		dashboardCredentialsPath = ""
+	}
+	if !offline && dashboardEnabled {
 		if err := rest.PrepareDashboardCredentials(dashboardCredentialsPath, dashboardUsername, dashboardPassword, dashboardBootstrap); err != nil {
 			logger.Error("prepare dashboard credentials", "error", err)
 			os.Exit(2)
@@ -372,7 +391,15 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath, Embedders: embedders})
+	var rerankers *rerank.Registry
+	if *rerankersFile != "" {
+		var rerankersErr error
+		if rerankers, rerankersErr = rerank.LoadFile(*rerankersFile); rerankersErr != nil {
+			logger.Error("load rerankers", "error", rerankersErr)
+			os.Exit(2)
+		}
+	}
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath, Embedders: embedders, Rerankers: rerankers})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
@@ -415,6 +442,7 @@ func main() {
 			RestoreDirectory:   *grpcRestorePath,
 			ClusterSnapshotter: apiServer,
 			ServerOptions:      grpcOptions,
+			Embedders:          embedders,
 		})
 		defer grpcServer.Stop()
 	}
@@ -458,6 +486,9 @@ func main() {
 		}()
 	}
 	logger.Info("server starting", "address", *address, "grpc_address", *grpcAddress, "advertise_address", *advertiseAddress, "node_id", identity.ID, "cluster_id", clusterMetadata.ClusterID, "metadata_epoch", metadataEpoch, "peers", len(settings.Peers), "static_routing", *enableStaticRouting, "replication_factor", *replicationFactor, "data_path", *dataPath)
+	if *liteMode {
+		printLiteBanner(os.Stderr, version, *address, *grpcAddress, *dataPath, dashboardEnabled)
+	}
 	var serveErr error
 	if *tlsCertFile != "" {
 		serveErr = server.ListenAndServeTLS("", "")

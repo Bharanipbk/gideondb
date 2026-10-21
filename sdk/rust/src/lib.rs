@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
-use std::{error::Error as StdError, fmt, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, error::Error as StdError, fmt, sync::Arc, time::Duration};
 
 const MAX_RESPONSE_BYTES: usize = 16 << 20;
 
@@ -284,17 +284,20 @@ impl Client {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct CollectionConfig {
     pub name: String,
     pub dimension: usize,
     pub metric: String,
     pub shard_count: usize,
+    /// Name of a server-side embedding model used for records and searches given only `text`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vectorizer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<IndexConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct IndexConfig {
     #[serde(rename = "type")]
     pub kind: String,
@@ -304,6 +307,12 @@ pub struct IndexConfig {
     pub ef_construction: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ef_search: Option<usize>,
+    /// `"binary"` enables binary quantization (flat index only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quantization: Option<String>,
+    /// Rescoring candidate multiplier, 1-100 (server default 4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oversampling: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -312,11 +321,18 @@ pub struct CollectionDescription {
     pub vector_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Record {
     pub id: String,
+    /// Optional when `text` is given and the collection has a vectorizer.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vector: Vec<f32>,
+    /// Indexed for BM25 and embedded server-side when no vector is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// Positive per-term weights for sparse retrieval.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub sparse_vector: BTreeMap<String, f32>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub metadata: Map<String, Value>,
     #[serde(default, skip_serializing_if = "Map::is_empty")]
@@ -359,13 +375,21 @@ pub struct RecordPage {
     pub authoritative_placement: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SearchOptions {
+    /// Dense query vector; may be empty for text-only or sparse-only searches.
     pub vector: Vec<f32>,
     pub top_k: usize,
     pub namespace: Option<String>,
     pub filter: Option<Value>,
     pub allow_partial: bool,
+    /// Query text for BM25 (and server-side embedding when no vector is given).
+    pub text: Option<String>,
+    pub sparse_vector: BTreeMap<String, f32>,
+    /// Dense weight from 0 to 1 for weighted fusion (server default 0.5).
+    pub alpha: Option<f32>,
+    /// `"weighted"` (server default) or `"rrf"`.
+    pub fusion: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -440,17 +464,52 @@ fn search_body(options: &SearchOptions, distributed: bool) -> Result<Vec<u8>, Er
     if options.top_k == 0 {
         return Err(Error::InvalidInput("top_k must be positive".into()));
     }
+    let text = options
+        .text
+        .as_ref()
+        .filter(|value| !value.trim().is_empty());
+    if let Some(alpha) = options.alpha {
+        if !(0.0..=1.0).contains(&alpha) {
+            return Err(Error::InvalidInput("alpha must be between 0 and 1".into()));
+        }
+    }
+    let fusion = options.fusion.as_ref().filter(|value| !value.is_empty());
+    if let Some(value) = fusion {
+        if value != "weighted" && value != "rrf" {
+            return Err(Error::InvalidInput(
+                "fusion must be \"weighted\" or \"rrf\"".into(),
+            ));
+        }
+    }
     let mut body = Map::new();
-    body.insert(
-        "vector".into(),
-        serde_json::to_value(&options.vector).map_err(json_error)?,
-    );
+    // Text-only and sparse-only searches omit the vector; otherwise it is always sent.
+    if !options.vector.is_empty() || (text.is_none() && options.sparse_vector.is_empty()) {
+        body.insert(
+            "vector".into(),
+            serde_json::to_value(&options.vector).map_err(json_error)?,
+        );
+    }
     body.insert("top_k".into(), Value::from(options.top_k));
     if let Some(namespace) = options.namespace.as_ref().filter(|value| !value.is_empty()) {
         body.insert("namespace".into(), Value::String(namespace.clone()));
     }
     if let Some(filter) = &options.filter {
         body.insert("filter".into(), filter.clone());
+    }
+    if let Some(text) = text {
+        body.insert("text".into(), Value::String(text.clone()));
+    }
+    if !options.sparse_vector.is_empty() {
+        body.insert(
+            "sparse_vector".into(),
+            serde_json::to_value(&options.sparse_vector).map_err(json_error)?,
+        );
+    }
+    if let Some(alpha) = options.alpha {
+        body.insert("alpha".into(), Value::from(alpha));
+    }
+    if let Some(fusion) = fusion {
+        body.insert("fusion".into(), Value::String(fusion.clone()));
     }
     if distributed && options.allow_partial {
         body.insert("allow_partial".into(), Value::Bool(true));
@@ -649,11 +708,7 @@ mod tests {
         let record = Record {
             id: "one".into(),
             vector: vec![1.0, 0.0],
-            metadata: Map::new(),
-            payload: Map::new(),
-            timestamp: None,
-            version: None,
-            namespace: None,
+            ..Default::default()
         };
         assert!(
             client
@@ -667,6 +722,112 @@ mod tests {
             } => assert_eq!(code, "not_found"),
             error => panic!("unexpected error: {error}"),
         }
+    }
+
+    #[test]
+    fn hybrid_search_text_records_and_quantization() {
+        let transport = Arc::new(QueueTransport::default());
+        transport.push(
+            201,
+            r#"{"name":"docs","dimension":2,"metric":"cosine","shard_count":1}"#,
+        );
+        transport.push(200, r#"{"id":"one"}"#);
+        transport.push(200, r#"{"results":[{"id":"one","score":0.5}]}"#);
+        transport.push(200, r#"{"results":[]}"#);
+        let client = client(transport.clone());
+        client
+            .create_collection(&CollectionConfig {
+                name: "docs".into(),
+                dimension: 2,
+                metric: "cosine".into(),
+                shard_count: 1,
+                vectorizer: Some("mini".into()),
+                index: Some(IndexConfig {
+                    kind: "flat".into(),
+                    quantization: Some("binary".into()),
+                    oversampling: Some(4),
+                    ..Default::default()
+                }),
+            })
+            .unwrap();
+        client
+            .upsert(
+                "docs",
+                &Record {
+                    id: "one".into(),
+                    text: Some("hello world".into()),
+                    sparse_vector: BTreeMap::from([("hello".into(), 1.5)]),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let hits = client
+            .search(
+                "docs",
+                &SearchOptions {
+                    top_k: 3,
+                    text: Some("hello".into()),
+                    sparse_vector: BTreeMap::from([("hello".into(), 2.0)]),
+                    alpha: Some(0.25),
+                    fusion: Some("rrf".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(hits[0].id, "one");
+        client
+            .search(
+                "docs",
+                &SearchOptions {
+                    vector: vec![1.0, 0.0],
+                    top_k: 1,
+                    text: Some("hello".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let requests = transport.requests.lock().unwrap();
+        let body = |index: usize| -> Value {
+            serde_json::from_slice(requests[index].body.as_ref().unwrap()).unwrap()
+        };
+        assert_eq!(
+            body(0),
+            json!({"name":"docs","dimension":2,"metric":"cosine","shard_count":1,"vectorizer":"mini",
+                   "index":{"type":"flat","quantization":"binary","oversampling":4}})
+        );
+        assert_eq!(
+            body(1),
+            json!({"id":"one","text":"hello world","sparse_vector":{"hello":1.5}})
+        );
+        assert_eq!(
+            body(2),
+            json!({"top_k":3,"text":"hello","sparse_vector":{"hello":2.0},"alpha":0.25,"fusion":"rrf"})
+        );
+        assert_eq!(
+            body(3),
+            json!({"vector":[1.0,0.0],"top_k":1,"text":"hello"})
+        );
+        drop(requests);
+        let invalid_alpha = SearchOptions {
+            top_k: 1,
+            text: Some("x".into()),
+            alpha: Some(1.5),
+            ..Default::default()
+        };
+        assert!(matches!(
+            client.search("docs", &invalid_alpha),
+            Err(Error::InvalidInput(_))
+        ));
+        let invalid_fusion = SearchOptions {
+            top_k: 1,
+            text: Some("x".into()),
+            fusion: Some("max".into()),
+            ..Default::default()
+        };
+        assert!(matches!(
+            client.search("docs", &invalid_fusion),
+            Err(Error::InvalidInput(_))
+        ));
     }
 
     #[test]

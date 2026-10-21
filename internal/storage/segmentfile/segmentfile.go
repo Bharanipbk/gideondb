@@ -24,12 +24,15 @@ var magic = [4]byte{'V', 'S', 'E', 'G'}
 var crcTable = crc32.MakeTable(crc32.Castagnoli)
 
 type Manifest struct {
-	Format      int          `json:"format"`
-	SegmentFile string       `json:"segment_file,omitempty"`
-	RecordsFile string       `json:"records_file,omitempty"`
-	VectorsFile string       `json:"vectors_file,omitempty"`
-	GraphFile   string       `json:"graph_file,omitempty"`
-	FilterFile  string       `json:"filter_file,omitempty"`
+	Format      int    `json:"format"`
+	SegmentFile string `json:"segment_file,omitempty"`
+	RecordsFile string `json:"records_file,omitempty"`
+	VectorsFile string `json:"vectors_file,omitempty"`
+	GraphFile   string `json:"graph_file,omitempty"`
+	FilterFile  string `json:"filter_file,omitempty"`
+	// PQFile holds product quantization codebooks and codes for the view in
+	// load order. It is optional: readers retrain when it is absent.
+	PQFile      string       `json:"pq_file,omitempty"`
 	Dimension   uint32       `json:"dimension,omitempty"`
 	MaxLSN      uint64       `json:"max_lsn"`
 	RecordCount uint64       `json:"record_count"`
@@ -151,14 +154,16 @@ func LoadManifest(path string) (Manifest, error) {
 		if manifest.RecordsFile == "" || manifest.VectorsFile == "" || manifest.Dimension == 0 ||
 			!safeBase(manifest.RecordsFile) || !safeBase(manifest.VectorsFile) ||
 			(manifest.GraphFile != "" && !safeBase(manifest.GraphFile)) ||
-			(manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) {
+			(manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) ||
+			(manifest.PQFile != "" && !safeBase(manifest.PQFile)) {
 			return Manifest{}, fmt.Errorf("invalid column segment manifest")
 		}
 	case 3:
 		if len(manifest.Segments) == 0 || len(manifest.Segments) > 16 || manifest.Dimension == 0 {
 			return Manifest{}, fmt.Errorf("invalid multi-segment manifest")
 		}
-		if (manifest.GraphFile != "" && !safeBase(manifest.GraphFile)) || (manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) {
+		if (manifest.GraphFile != "" && !safeBase(manifest.GraphFile)) || (manifest.FilterFile != "" && !safeBase(manifest.FilterFile)) ||
+			(manifest.PQFile != "" && !safeBase(manifest.PQFile)) {
 			return Manifest{}, fmt.Errorf("invalid multi-segment view index")
 		}
 		var previousLSN uint64
@@ -192,7 +197,7 @@ func CleanupOrphans(directory string, manifest Manifest) error {
 		return err
 	}
 	referenced := map[string]struct{}{"MANIFEST.json": {}}
-	for _, name := range []string{manifest.SegmentFile, manifest.RecordsFile, manifest.VectorsFile, manifest.GraphFile, manifest.FilterFile} {
+	for _, name := range []string{manifest.SegmentFile, manifest.RecordsFile, manifest.VectorsFile, manifest.GraphFile, manifest.FilterFile, manifest.PQFile} {
 		if name != "" {
 			referenced[name] = struct{}{}
 		}
@@ -226,6 +231,26 @@ func WriteGraph(directory, name string, data []byte) error {
 	return writeAtomic(filepath.Join(directory, name), data, 0o640)
 }
 
+func WritePQ(directory, name string, data []byte) error {
+	if !safeBase(name) || !strings.HasSuffix(name, ".pq") {
+		return fmt.Errorf("unsafe pq file name")
+	}
+	return writeAtomic(filepath.Join(directory, name), data, 0o640)
+}
+
+// ReadPQ returns the manifest's product quantization data, or nil when the
+// checkpoint predates it or the file cannot be read; callers then retrain.
+func ReadPQ(directory string, manifest Manifest) []byte {
+	if manifest.PQFile == "" || !safeBase(manifest.PQFile) {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(directory, manifest.PQFile))
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
 func ReadGraph(directory string, manifest Manifest) ([]byte, error) {
 	if manifest.GraphFile == "" || !safeBase(manifest.GraphFile) {
 		return nil, fmt.Errorf("manifest does not reference a valid graph file")
@@ -240,7 +265,7 @@ func orphanCandidate(name string) bool {
 	if !strings.HasPrefix(name, "segment-") {
 		return false
 	}
-	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".filter", ".tombstones"} {
+	for _, suffix := range []string{".records", ".vectors", ".vseg", ".graph", ".diskann", ".filter", ".tombstones", ".pq"} {
 		if strings.HasSuffix(name, suffix) {
 			return true
 		}

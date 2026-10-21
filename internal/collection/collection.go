@@ -163,6 +163,10 @@ func (c *Collection) PrepareUpsert(record core.Record) (core.Record, error) {
 	if record.ID == "" {
 		return core.Record{}, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
 	}
+	record, err := c.config.PrepareNamedVectors(record)
+	if err != nil {
+		return core.Record{}, err
+	}
 	record.Version = c.version.Add(1)
 	record.Timestamp = time.Now().UnixNano()
 	return record, nil
@@ -414,6 +418,12 @@ func (c *Collection) ReplaceShardRecords(shardID uint32, records []core.Record) 
 }
 
 func (c *Collection) InstallRecordsShardWithMetadata(shardID uint32, records []core.Record, metadataIndex *metadata.Index) error {
+	return c.InstallRecordsShardWithPQ(shardID, records, metadataIndex, nil)
+}
+
+// InstallRecordsShardWithPQ also reuses product quantization data built by
+// segment.BuildPQ for the same records, avoiding a second training pass.
+func (c *Collection) InstallRecordsShardWithPQ(shardID uint32, records []core.Record, metadataIndex *metadata.Index, pqData []byte) error {
 	if int(shardID) >= len(c.shards) {
 		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
 	}
@@ -428,7 +438,7 @@ func (c *Collection) InstallRecordsShardWithMetadata(shardID uint32, records []c
 			}
 		}
 	}
-	base, err := segment.NewImmutable(c.config, records, metadataIndex)
+	base, err := segment.NewImmutableWithPQ(c.config, records, metadataIndex, pqData)
 	if err != nil {
 		return err
 	}
@@ -440,6 +450,12 @@ func (c *Collection) InstallMappedShard(shardID uint32, records []core.Record, s
 }
 
 func (c *Collection) InstallMappedShardWithMetadata(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) error {
+	return c.InstallMappedShardWithPQ(shardID, records, source, closer, metadataIndex, nil)
+}
+
+// InstallMappedShardWithPQ also restores persisted product quantization data;
+// nil or stale data makes the segment retrain from its mapped vectors.
+func (c *Collection) InstallMappedShardWithPQ(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index, pqData []byte) error {
 	if c.config.Index.Type != core.IndexFlat {
 		return fmt.Errorf("%w: mapped checkpoints require a flat index", core.ErrInvalidArgument)
 	}
@@ -457,7 +473,7 @@ func (c *Collection) InstallMappedShardWithMetadata(shardID uint32, records []co
 			}
 		}
 	}
-	base, err := segment.NewMappedWithMetadata(c.config, records, source, closer, metadataIndex)
+	base, err := segment.NewMappedWithPQ(c.config, records, source, closer, metadataIndex, pqData)
 	if err != nil {
 		return err
 	}
@@ -491,6 +507,37 @@ func (c *Collection) InstallHNSWShardWithMetadata(shardID uint32, records []core
 		return err
 	}
 	return c.shards[shardID].InstallImmutable(base)
+}
+
+// InstallDiskANNShardWithMetadata serves a sealed shard from the DiskANN file
+// at path, built from records in this order by segment.BuildDiskANN.
+func (c *Collection) InstallDiskANNShardWithMetadata(shardID uint32, records []core.Record, path string, metadataIndex *metadata.Index) error {
+	if c.config.Index.Type != core.IndexDiskANN {
+		return fmt.Errorf("%w: diskann checkpoints require a diskann index", core.ErrInvalidArgument)
+	}
+	if int(shardID) >= len(c.shards) {
+		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
+	}
+	for _, record := range records {
+		if c.RouteShard(record.Namespace, record.ID) != shardID {
+			return fmt.Errorf("diskann segment record routed to wrong shard")
+		}
+		for {
+			current := c.version.Load()
+			if current >= record.Version || c.version.CompareAndSwap(current, record.Version) {
+				break
+			}
+		}
+	}
+	base, err := segment.NewDiskANNWithMetadata(c.config, records, path, metadataIndex)
+	if err != nil {
+		return err
+	}
+	if err := c.shards[shardID].InstallImmutable(base); err != nil {
+		_ = base.Close()
+		return err
+	}
+	return nil
 }
 
 func (c *Collection) Close() error {

@@ -7,6 +7,36 @@ describe unreleased experimental work.
 
 ### Added
 
+- Product quantization for flat collections
+  (`"index": {"type": "flat", "quantization": "pq", "pq_subspaces": M, "oversampling": N}`):
+  per-segment k-means codebooks (M subspaces × 256 centroids, deterministic
+  seed) trained when a segment of at least 1,024 vectors is sealed, one-byte
+  codes, asymmetric distance search with per-query lookup tables, and
+  full-precision rescoring of the top N × k. Codebooks and codes are persisted
+  as an optional `pq_file` beside checkpoint segments; checkpoints without one
+  retrain on load. `gideondb-bench` adds `pq`, `pq-x10` and `pq-x20`.
+- `"index": {"type": "diskann"}`: checkpointed segments are served from a
+  disk-resident Vamana graph (`max_degree`, `alpha`, `ef_construction`,
+  `ef_search`). Vectors and adjacency stay in a memory-mapped `.diskann`
+  file and only 8-bit navigation codes stay on the heap; the mutable segment
+  uses the flat index until checkpoint. Existing collections and checkpoints
+  are unchanged. `gideondb-bench` adds `diskann` and `diskann-ef200`.
+- Named vectors: collections may declare up to 16 named dense vector fields
+  (`vectors`), each with its own dimension, metric, flat/HNSW index and
+  storage `datatype`. Records carry `vectors`, and search selects a field with
+  `using` on single-node and cluster REST search. The default `vector` is
+  unchanged.
+- float16 and bfloat16 storage for named fields: values are rounded at write
+  time (before the WAL) and scored in float32, halving the field's stored
+  vector memory.
+- Multi-vector (late interaction) fields: records carry `multi_vectors` (up to
+  1024 vectors each, e.g. ColBERT tokens); search takes `multi_vector` and
+  rescores mean-pooled index candidates with MaxSim.
+- Search `rerank` stage: built-in `maxsim` over a multi-vector field, and
+  `cross_encoder` through Cohere/Jina/TEI-compatible `/rerank` endpoints
+  configured with `-rerankers-file`. Candidate counts are bounded, calls time
+  out, and failures return first-stage results with `rerank.applied=false`.
+  `GET /v1/rerankers` lists configured rerankers.
 - NEON assembly distance kernels on arm64 (dot and L2, 2.5–7× faster than
   the previous Go loops) and faster eight-lane portable kernels elsewhere.
   `-tags purego` forces the portable kernels, and equivalence and fuzz tests
@@ -23,6 +53,28 @@ describe unreleased experimental work.
 - SIFT1M and GloVe results:
   [standard datasets](docs/benchmarks/standard-datasets.md) and
   [distance kernels](docs/benchmarks/distance-kernels.md).
+
+### Changed
+
+- Checkpoint record columns that contain named or multi-vectors are written
+  as record column version 2; other columns stay version 1. See the
+  compatibility guide before downgrading.
+- Lite and embedded mode: `pkg/lite`, a stable Go library API that opens a
+  local data directory in-process (collections, upsert, get, delete, dense,
+  filtered, BM25 and hybrid search), and `gideondb -lite` (or
+  `GIDEONDB_LITE=true`), a zero-config loopback-only server with no
+  authentication or TLS, the dashboard off by default, data in
+  `~/.gideondb/lite`, and a startup banner. Python's `LiteServer` runs the
+  lite binary as a child process. Examples in `examples/lite-go` and
+  `examples/lite_python.py`.
+- Helm chart in `deployments/helm/gideondb` with single-node and three-node
+  values, generated credentials, private-CA TLS, probes, disruption budget,
+  anti-affinity and NetworkPolicy; `make validate-helm` and a CI job lint and
+  render it.
+- Agent framework adapters in `gideondb_integrations`: a LangGraph
+  `BaseStore`, a `MemoryStore` sharing the MCP server's memory layout, and
+  `memory_tools` for function-calling frameworks (OpenAI Agents, CrewAI,
+  LangChain), plus OpenAI Agents and Claude Agent SDK MCP examples.
 
 ## 0.1.0 — 2026-10-16
 

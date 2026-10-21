@@ -3,6 +3,7 @@ package segment
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sort"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/distance"
 	"github.com/Bharanipbk/gideondb/internal/index"
 	"github.com/Bharanipbk/gideondb/internal/index/binary"
+	"github.com/Bharanipbk/gideondb/internal/index/diskann"
 	"github.com/Bharanipbk/gideondb/internal/index/flat"
 	"github.com/Bharanipbk/gideondb/internal/index/hnsw"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
@@ -30,6 +32,7 @@ type Segment struct {
 	closer   interface{ Close() error }
 	metric   core.Metric
 	lexical  *lexicalIndex
+	named    map[string]*namedField
 }
 
 func NewMapped(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }) (*Segment, error) {
@@ -37,6 +40,12 @@ func NewMapped(config core.CollectionConfig, records []core.Record, source flat.
 }
 
 func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) (*Segment, error) {
+	return NewMappedWithPQ(config, records, source, closer, metadataIndex, nil)
+}
+
+// NewMappedWithPQ is NewMappedWithMetadata with optional persisted product
+// quantization data from BuildPQ for the same records.
+func NewMappedWithPQ(config core.CollectionConfig, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index, pqData []byte) (*Segment, error) {
 	if source == nil || source.Dimension() != config.Dimension {
 		return nil, fmt.Errorf("%w: mapped source dimension mismatch", core.ErrInvalidArgument)
 	}
@@ -65,6 +74,14 @@ func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, 
 			}
 		}
 		idx = quantized
+	} else if UsesPQ(config, len(records)) {
+		// Codes and codebooks live on the heap; full-precision vectors stay
+		// memory-mapped and are touched only for rescoring.
+		if idx, err = buildPQIndex(config, records, source.VectorCopy, func(query []float32, id uint64) (float32, error) {
+			return source.Score(config.Metric, query, int(id-1))
+		}, pqData); err != nil {
+			return nil, err
+		}
 	} else if idx, err = flat.NewMapped(source, config.Metric, ids); err != nil {
 		return nil, err
 	}
@@ -87,6 +104,9 @@ func NewMappedWithMetadata(config core.CollectionConfig, records []core.Record, 
 			s.metadata.Upsert(ordinal, record.Metadata)
 		}
 	}
+	if err := s.initNamed(config); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -108,7 +128,8 @@ func New(config core.CollectionConfig) (*Segment, error) {
 		idx, err = binary.New(config.Dimension, config.Index.Oversampling, func(query []float32, id uint64) (float32, error) {
 			return distance.Score(config.Metric, query, s.records[id].Vector)
 		})
-	case config.Index.Type == core.IndexFlat:
+	case config.Index.Type == core.IndexFlat || config.Index.Type == core.IndexDiskANN:
+		// DiskANN graphs are built only when a segment is sealed.
 		idx, err = flat.New(indexConfig)
 	case config.Index.Type == core.IndexHNSW:
 		idx, err = hnsw.New(indexConfig)
@@ -119,10 +140,19 @@ func New(config core.CollectionConfig) (*Segment, error) {
 		return nil, err
 	}
 	s.index = idx
+	if err := s.initNamed(config); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
 func NewImmutable(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index) (*Segment, error) {
+	return NewImmutableWithPQ(config, records, metadataIndex, nil)
+}
+
+// NewImmutableWithPQ is NewImmutable with optional persisted product
+// quantization data from BuildPQ for the same records.
+func NewImmutableWithPQ(config core.CollectionConfig, records []core.Record, metadataIndex *metadata.Index, pqData []byte) (*Segment, error) {
 	s, err := New(config)
 	if err != nil {
 		return nil, err
@@ -131,6 +161,18 @@ func NewImmutable(config core.CollectionConfig, records []core.Record, metadataI
 		if err := s.Upsert(record); err != nil {
 			return nil, err
 		}
+	}
+	if UsesPQ(config, len(records)) && len(s.records) == len(records) {
+		// Ordinals follow records order because the segment started empty.
+		quantized, err := buildPQIndex(config, records, func(position int) ([]float32, error) {
+			return records[position].Vector, nil
+		}, func(query []float32, id uint64) (float32, error) {
+			return distance.Score(config.Metric, query, s.records[id].Vector)
+		}, pqData)
+		if err != nil {
+			return nil, err
+		}
+		s.index = quantized
 	}
 	if metadataIndex != nil {
 		s.metadata = metadataIndex
@@ -181,6 +223,65 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 			s.metadata.Upsert(ordinal, record.Metadata)
 		}
 	}
+	if err := s.initNamed(config); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// DiskANNTag digests the record keys in order so a DiskANN file is only
+// ever served with the records whose ordinals it was built from.
+func DiskANNTag(records []core.Record) uint64 {
+	digest := fnv.New64a()
+	for _, record := range records {
+		_, _ = digest.Write([]byte(key(record.Namespace, record.ID)))
+		_, _ = digest.Write([]byte{0xff})
+	}
+	return digest.Sum64()
+}
+
+// BuildDiskANN builds a Vamana graph over records, which must carry their
+// vectors, and writes it with the vectors to path. Record order defines the
+// ordinals that NewDiskANNWithMetadata expects.
+func BuildDiskANN(config core.CollectionConfig, records []core.Record, path string) error {
+	vectors := make([][]float32, len(records))
+	for position, record := range records {
+		vectors[position] = record.Vector
+	}
+	params := diskann.Params{MaxDegree: config.Index.MaxDegree, BuildList: config.Index.EFConstruction, Alpha: config.Index.Alpha}
+	graph, err := diskann.BuildGraph(config.Metric, vectors, params, 0)
+	if err != nil {
+		return err
+	}
+	return diskann.WriteFile(path, config.Metric, vectors, graph, params.MaxDegree, DiskANNTag(records))
+}
+
+// NewDiskANNWithMetadata opens a sealed segment served from the DiskANN file
+// at path. Record vectors are not retained; reads come from the file.
+func NewDiskANNWithMetadata(config core.CollectionConfig, records []core.Record, path string, metadataIndex *metadata.Index) (*Segment, error) {
+	idx, err := diskann.Open(path, config.Metric, config.Dimension, len(records), DiskANNTag(records), config.Index.EFSearch)
+	if err != nil {
+		return nil, err
+	}
+	loadedMetadata := metadataIndex != nil
+	if metadataIndex == nil {
+		metadataIndex = metadata.NewIndex()
+	}
+	s := &Segment{
+		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
+		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
+		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(),
+	}
+	for position, record := range records {
+		ordinal := uint64(position + 1)
+		record.Vector = nil
+		s.records[ordinal] = cloneRecord(record)
+		s.lexical.add(ordinal, record)
+		s.ordinals[key(record.Namespace, record.ID)] = ordinal
+		if !loadedMetadata {
+			s.metadata.Upsert(ordinal, record.Metadata)
+		}
+	}
 	return s, nil
 }
 
@@ -211,8 +312,13 @@ func (s *Segment) Upsert(record core.Record) error {
 	if previous, exists := s.records[ordinal]; exists {
 		s.lexical.remove(ordinal, previous)
 	}
+	if err := s.putNamedLocked(ordinal, record); err != nil {
+		return err
+	}
 	s.ordinals[k] = ordinal
-	s.records[ordinal] = cloneRecord(record)
+	stored := cloneRecord(record)
+	stored.Vectors, stored.MultiVectors = nil, nil
+	s.records[ordinal] = stored
 	s.lexical.add(ordinal, record)
 	s.metadata.Upsert(ordinal, record.Metadata)
 	return nil
@@ -233,6 +339,7 @@ func (s *Segment) Get(namespace, id string) (core.Record, error) {
 		}
 		record.Vector = vector
 	}
+	s.attachNamedLocked(ordinal, &record)
 	return record, nil
 }
 
@@ -251,6 +358,7 @@ func (s *Segment) Delete(namespace, id string) error {
 		return err
 	}
 	s.lexical.remove(ordinal, s.records[ordinal])
+	s.removeNamedLocked(ordinal)
 	delete(s.ordinals, k)
 	delete(s.records, ordinal)
 	s.metadata.Delete(ordinal)
@@ -503,9 +611,11 @@ func (s *Segment) Records() []core.Record {
 	result := make([]core.Record, 0, len(s.records))
 	for _, record := range s.records {
 		cloned := cloneRecord(record)
+		ordinal := s.ordinals[key(record.Namespace, record.ID)]
 		if cloned.Vector == nil && s.vectorAt != nil {
-			cloned.Vector, _ = s.vectorAt(int(s.ordinals[key(record.Namespace, record.ID)] - 1))
+			cloned.Vector, _ = s.vectorAt(int(ordinal - 1))
 		}
+		s.attachNamedLocked(ordinal, &cloned)
 		result = append(result, cloned)
 	}
 	sort.Slice(result, func(i, j int) bool {
@@ -554,6 +664,22 @@ func cloneRecord(in core.Record) core.Record {
 	}
 	out.Metadata = cloneMap(in.Metadata)
 	out.Payload = cloneMap(in.Payload)
+	if in.Vectors != nil {
+		out.Vectors = make(map[string][]float32, len(in.Vectors))
+		for name, vector := range in.Vectors {
+			out.Vectors[name] = append([]float32(nil), vector...)
+		}
+	}
+	if in.MultiVectors != nil {
+		out.MultiVectors = make(map[string][][]float32, len(in.MultiVectors))
+		for name, list := range in.MultiVectors {
+			copied := make([][]float32, len(list))
+			for i, vector := range list {
+				copied[i] = append([]float32(nil), vector...)
+			}
+			out.MultiVectors[name] = copied
+		}
+	}
 	return out
 }
 

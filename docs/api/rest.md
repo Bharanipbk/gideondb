@@ -39,6 +39,7 @@ replication.
 | GET | `/collections/{name}/vectors/{id}` | Read a record |
 | DELETE | `/collections/{name}/vectors/{id}` | Delete a record |
 | POST | `/collections/{name}/search` | Dense, sparse, or hybrid search; `text` instead of `vector` with a vectorizer; `offset`, `group_by` ([filtering](../indexing/filtering.md#pagination-and-grouping)) |
+| GET | `/rerankers` | Configured cross-encoder rerankers and failed-call count ([reranking](../indexing/reranking.md)) |
 | GET | `/embedders` | Configured embedding models and cache counters ([server-side embedding](../indexing/server-side-embedding.md)) |
 | POST | `/internal/shards/{collection}/{shard}/search` | Fenced single-shard internal search |
 | POST | `/cluster/collections/{name}/search` | Experimental placement-aware distributed search |
@@ -115,6 +116,14 @@ retrieval](../indexing/sparse-hybrid.md).
 A flat collection may set `"index": {"type": "flat", "quantization": "binary",
 "oversampling": 10}` to search 1-bit codes and rescore candidates at full
 precision. See [Binary quantization](../indexing/binary-quantization.md).
+
+A collection may declare named vector fields (`vectors`), including
+float16/bfloat16 and multi-vector fields; records then send `vectors` and
+`multi_vectors`, and search selects a field with `using` (plus `multi_vector`
+for MaxSim). Any search may add a `rerank` stage (`maxsim` or a server-side
+`cross_encoder`); the response then includes a `rerank` status object. See
+[named vectors](../indexing/named-vectors.md), [multi-vector
+search](../indexing/multi-vector.md) and [reranking](../indexing/reranking.md).
 
 Batch requests validate every record before writing. Records are grouped by
 logical shard and encoded as one WAL record per shard. Each shard group is

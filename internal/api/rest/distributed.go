@@ -71,7 +71,16 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
-	if request.hybrid() {
+	if err := s.prepareRerank(config.Name, &request.searchRequest); err != nil {
+		writeError(w, err)
+		return
+	}
+	if request.named() {
+		if err := request.namedQuery().Validate(config); err != nil {
+			writeError(w, err)
+			return
+		}
+	} else if request.hybrid() {
 		if err := request.hybridQuery().Validate(config.Dimension); err != nil {
 			writeError(w, err)
 			return
@@ -118,11 +127,7 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 				var results []core.SearchResult
 				var searchErr error
 				if assignment.NodeID == s.nodeID {
-					if request.hybrid() {
-						results, searchErr = s.engine.SearchShardHybrid(config.Name, assignment.ShardID, request.Namespace, request.hybridQuery(), filter)
-					} else {
-						results, searchErr = s.engine.SearchShardFilteredWithEF(config.Name, assignment.ShardID, request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
-					}
+					results, searchErr = s.searchShardStage(config.Name, assignment.ShardID, request.searchRequest, filter)
 				} else {
 					peer, exists := peerByID[assignment.NodeID]
 					if !exists {
@@ -157,8 +162,23 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"code": "distributed_search_failed", "message": "one or more shard searches failed", "failures": failures, "metadata_epoch": epoch})
 		return
 	}
-	key, shaped := shape.apply(mergeDistributedTopK(allResults, request.TopK))
-	writeJSON(w, http.StatusOK, map[string]any{key: shaped, "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()})
+	merged := mergeDistributedTopK(allResults, request.TopK)
+	var status *rerankStatus
+	if rerankSpec := request.Rerank; rerankSpec != nil {
+		// Shards already rescored MaxSim on their own records; a
+		// cross-encoder runs once here over the merged candidates.
+		if rerankSpec.Type == core.RerankMaxSim {
+			status = &rerankStatus{Applied: true, Type: core.RerankMaxSim, Candidates: len(merged)}
+		} else {
+			merged, status = s.crossEncode(r.Context(), *rerankSpec, merged)
+		}
+	}
+	key, shaped := shape.apply(clearText(merged))
+	response := map[string]any{key: shaped, "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()}
+	if status != nil {
+		response["rerank"] = status
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, request searchRequest, traceparent string) ([]core.SearchResult, error) {

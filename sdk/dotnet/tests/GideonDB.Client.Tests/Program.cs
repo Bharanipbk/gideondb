@@ -5,6 +5,7 @@ using GideonDB.Client;
 await LifecycleAndEncoding();
 await DistributedAndErrors();
 await ValidationCancellationAndBounds();
+await HybridAndQuantization();
 Console.WriteLine(".NET SDK tests passed");
 
 static async Task LifecycleAndEncoding()
@@ -58,18 +59,46 @@ static async Task ValidationCancellationAndBounds()
     catch (OperationCanceledException) { }
 }
 
+static async Task HybridAndQuantization()
+{
+    var handler = new QueueHandler();
+    handler.Add(HttpStatusCode.Created, "{\"name\":\"docs\",\"dimension\":2}");
+    handler.Add(HttpStatusCode.OK, "{\"id\":\"one\"}");
+    handler.Add(HttpStatusCode.OK, "{\"results\":[{\"id\":\"one\",\"score\":0.5}]}");
+    handler.Add(HttpStatusCode.OK, "{\"results\":[]}");
+    using var client = new GideonDBClient("https://db.example", new HttpClient(handler));
+    await client.CreateCollectionAsync(new CollectionConfig
+    {
+        Name = "docs", Dimension = 2, Metric = "cosine", ShardCount = 1, Vectorizer = "mini",
+        Index = new IndexConfig { Type = "flat", Quantization = "binary", Oversampling = 4 }
+    });
+    Check(handler.Bodies[0] == "{\"name\":\"docs\",\"dimension\":2,\"metric\":\"cosine\",\"shard_count\":1,\"vectorizer\":\"mini\",\"index\":{\"type\":\"flat\",\"quantization\":\"binary\",\"oversampling\":4}}", "collection body: " + handler.Bodies[0]);
+    await client.UpsertAsync("docs", new VectorRecord { Id = "one", Text = "hello world", SparseVector = new Dictionary<string, float> { ["hello"] = 1.5f } });
+    Check(handler.Bodies[1] == "{\"id\":\"one\",\"text\":\"hello world\",\"sparse_vector\":{\"hello\":1.5}}", "record body: " + handler.Bodies[1]);
+    await client.SearchAsync("docs", new SearchOptions { TopK = 3, Text = "hello", SparseVector = new Dictionary<string, float> { ["hello"] = 2f }, Alpha = 0.25, Fusion = "rrf" });
+    Check(handler.Bodies[2] == "{\"top_k\":3,\"text\":\"hello\",\"sparse_vector\":{\"hello\":2},\"alpha\":0.25,\"fusion\":\"rrf\"}", "hybrid search body: " + handler.Bodies[2]);
+    await client.SearchAsync("docs", new SearchOptions { TopK = 1, Vector = new[] { 1f, 0f }, Text = "hello" });
+    Check(handler.Bodies[3].StartsWith("{\"vector\":[1,0],\"top_k\":1,\"text\":\"hello\"", StringComparison.Ordinal), "dense plus text body");
+    try { await client.SearchAsync("docs", new SearchOptions { TopK = 1, Text = "x", Alpha = 1.5 }); throw new Exception("Expected alpha error"); }
+    catch (ArgumentOutOfRangeException) { }
+    try { await client.SearchAsync("docs", new SearchOptions { TopK = 1, Text = "x", Fusion = "max" }); throw new Exception("Expected fusion error"); }
+    catch (ArgumentOutOfRangeException) { }
+}
+
 static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
 
 sealed class QueueHandler : HttpMessageHandler
 {
     private readonly Queue<HttpResponseMessage> responses = new();
     public List<HttpRequestMessage> Requests { get; } = new();
+    public List<string> Bodies { get; } = new();
     public void Add(HttpStatusCode status, string body) => Add(status, Encoding.UTF8.GetBytes(body));
     public void Add(HttpStatusCode status, byte[] body) => responses.Enqueue(new HttpResponseMessage(status) { Content = new ByteArrayContent(body) });
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Requests.Add(Clone(request));
+        Bodies.Add(request.Content is null ? string.Empty : request.Content.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult());
         return Task.FromResult(responses.Dequeue());
     }
     private static HttpRequestMessage Clone(HttpRequestMessage request)

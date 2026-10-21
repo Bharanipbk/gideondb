@@ -161,13 +161,24 @@ public sealed class GideonDBClient : IDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
         if (options.TopK <= 0) throw new ArgumentOutOfRangeException(nameof(options), "TopK must be positive.");
-        var body = new JsonObject
-        {
-            ["vector"] = JsonSerializer.SerializeToNode(options.Vector, JsonOptions),
-            ["top_k"] = options.TopK
-        };
+        var hasText = !string.IsNullOrWhiteSpace(options.Text);
+        var hasSparse = options.SparseVector is { Count: > 0 };
+        var hasVector = options.Vector is { Count: > 0 };
+        if (options.Alpha is { } alpha && !(alpha >= 0 && alpha <= 1))
+            throw new ArgumentOutOfRangeException(nameof(options), "Alpha must be between 0 and 1.");
+        if (!string.IsNullOrEmpty(options.Fusion) && options.Fusion is not ("weighted" or "rrf"))
+            throw new ArgumentOutOfRangeException(nameof(options), "Fusion must be \"weighted\" or \"rrf\".");
+        var body = new JsonObject();
+        // Text-only and sparse-only searches omit the vector; otherwise keep sending it as before.
+        if (hasVector || (!hasText && !hasSparse))
+            body["vector"] = JsonSerializer.SerializeToNode(options.Vector ?? Array.Empty<float>(), JsonOptions);
+        body["top_k"] = options.TopK;
         if (!string.IsNullOrEmpty(options.Namespace)) body["namespace"] = options.Namespace;
         if (options.Filter is not null) body["filter"] = options.Filter.DeepClone();
+        if (hasText) body["text"] = options.Text;
+        if (hasSparse) body["sparse_vector"] = JsonSerializer.SerializeToNode(options.SparseVector, JsonOptions);
+        if (options.Alpha is { } weight) body["alpha"] = weight;
+        if (!string.IsNullOrEmpty(options.Fusion)) body["fusion"] = options.Fusion;
         if (distributed && options.AllowPartial) body["allow_partial"] = true;
         return body;
     }
@@ -233,6 +244,10 @@ public sealed record IndexConfig
     [JsonPropertyName("m")] public int? M { get; init; }
     [JsonPropertyName("ef_construction")] public int? EfConstruction { get; init; }
     [JsonPropertyName("ef_search")] public int? EfSearch { get; init; }
+    /// <summary>"binary" enables binary quantization (flat index only).</summary>
+    [JsonPropertyName("quantization")] public string? Quantization { get; init; }
+    /// <summary>Rescoring candidate multiplier, 1-100 (server default 4).</summary>
+    [JsonPropertyName("oversampling")] public int? Oversampling { get; init; }
 }
 
 public sealed record CollectionConfig
@@ -241,6 +256,7 @@ public sealed record CollectionConfig
     [JsonPropertyName("dimension")] public int Dimension { get; init; }
     [JsonPropertyName("metric")] public string Metric { get; init; } = string.Empty;
     [JsonPropertyName("shard_count")] public int ShardCount { get; init; }
+    [JsonPropertyName("vectorizer")] public string? Vectorizer { get; init; }
     [JsonPropertyName("index")] public IndexConfig? Index { get; init; }
 }
 
@@ -252,6 +268,8 @@ public sealed record VectorRecord
 {
     [JsonPropertyName("id")] public string Id { get; init; } = string.Empty;
     [JsonPropertyName("vector")] public IReadOnlyList<float>? Vector { get; init; }
+    [JsonPropertyName("text")] public string? Text { get; init; }
+    [JsonPropertyName("sparse_vector")] public IReadOnlyDictionary<string, float>? SparseVector { get; init; }
     [JsonPropertyName("metadata")] public IReadOnlyDictionary<string, JsonElement>? Metadata { get; init; }
     [JsonPropertyName("payload")] public IReadOnlyDictionary<string, JsonElement>? Payload { get; init; }
     [JsonPropertyName("timestamp")] public long? Timestamp { get; init; }
@@ -281,6 +299,13 @@ public sealed record SearchOptions
     public string? Namespace { get; init; }
     public JsonNode? Filter { get; init; }
     public bool AllowPartial { get; init; }
+    /// <summary>Query text for BM25 (and server-side embedding when no vector is given).</summary>
+    public string? Text { get; init; }
+    public IReadOnlyDictionary<string, float>? SparseVector { get; init; }
+    /// <summary>Dense weight from 0 to 1 for weighted fusion (server default 0.5).</summary>
+    public double? Alpha { get; init; }
+    /// <summary>"weighted" (server default) or "rrf".</summary>
+    public string? Fusion { get; init; }
 }
 
 public sealed record SearchResult

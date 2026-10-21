@@ -19,15 +19,15 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 
 | # | Gap | Track | Priority | Status |
 |---|-----|-------|----------|--------|
-| 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine + REST; 🟡 gRPC/SDK/dashboard |
-| 2 | Binary and product quantization | Open source | P0 | ✅ binary; ⬜ PQ |
+| 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine, REST, gRPC, SDKs, dashboard |
+| 2 | Binary and product quantization | Open source | P0 | ✅ binary; ✅ PQ (flat) |
 | 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
-| 4 | Disk-resident ANN index | Open source / Cloud | P1 | ⬜ |
-| 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST + Go client; ⬜ gRPC, other SDKs |
-| 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ⬜ |
-| 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory; ⬜ agent SDK adapters |
-| 8 | Embedded / single-binary "lite" mode | Open source | P2 | ⬜ |
-| 9 | Richer data model (multiple named vectors, payload indexes, geo, full-text filters) | Open source | P1 | 🟡 geo, text filters, group-by, offset; ⬜ named vectors, float16 |
+| 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
+| 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST, gRPC, all SDKs; ⬜ Cohere/ONNX providers |
+| 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ✅ REST (MaxSim, cross-encoder); ⬜ gRPC/SDKs |
+| 7 | Agent integrations (MCP server, memory API) | Open source | P1 | ✅ MCP + memory + agent SDK adapters; ⬜ MCP HTTP transport |
+| 8 | Embedded / single-binary "lite" mode | Open source | P2 | ✅ Go library + `-lite`; Python via subprocess |
+| 9 | Richer data model (multiple named vectors, payload indexes, geo, full-text filters) | Open source | P1 | ✅ named vectors, float16/bfloat16, geo, text filters, group-by, offset (REST); ⬜ payload index types, gRPC/SDKs |
 | 10 | Multi-tenancy, scoped API keys, RBAC | Cloud | P0 | ⬜ |
 | 11 | Quotas, rate limits, usage metering, billing | Cloud | P0 | ⬜ |
 | 12 | Managed control plane (provision, autoscale, upgrade) | Cloud | P0 | ⬜ |
@@ -35,7 +35,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 14 | Serverless / scale-to-zero tier | Cloud | P2 | ⬜ |
 | 15 | Enterprise security and compliance | Cloud | P1 | ⬜ |
 | 16 | Query analytics and observability for customers | Cloud | P2 | ⬜ |
-| 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, docs search, release pipeline; ⬜ Helm |
+| 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, Helm chart, docs search, release pipeline; ⬜ repo settings |
 | 18 | HNSW graph connectivity on clustered data (found by gap 3) | Open source | P0 | ✅ |
 | 19 | HNSW build throughput | Open source | P1 | 🟡 parallel batch build; ⬜ live inserts, SIMD |
 
@@ -43,7 +43,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 
 ## Open-source engine gaps
 
-### 1. Indexed sparse / hybrid search and BM25 — P0 · ✅ engine, 🟡 clients
+### 1. Indexed sparse / hybrid search and BM25 — P0 · ✅ engine and clients
 
 - **Done (2026-10-16):**
   - Per-segment inverted indexes for `sparse_vector` (term-at-a-time cosine)
@@ -62,16 +62,12 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Behaviour change:** sparse-only search returns only records sharing a
   query term (see CHANGELOG).
 - **Remaining:**
-  - Expose `text`, `fusion` and `sparse_vector` in the gRPC contract and all
-    six SDKs.
-  - Add a text query box and fusion selector to the dashboard search
-    playground.
   - Use collection-level BM25 statistics instead of per-segment ones.
   - Persist the inverted indexes in checkpoints instead of rebuilding them at
     load.
   - Optional stemming or language analyzers.
 
-### 2. Binary and product quantization — P0 · ✅ binary, ⬜ PQ
+### 2. Binary and product quantization — P0 · ✅ binary, ✅ PQ (flat)
 
 - **Done (2026-10-16):** `"index": {"type": "flat", "quantization":
   "binary", "oversampling": N}` (default N = 4).
@@ -83,11 +79,21 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
     ×10 and 1.000 at ×20, at about 3× the QPS of exact flat search and roughly
     half the segment heap. See
     [binary quantization](../indexing/binary-quantization.md).
+- **Done (2026-10-21):** `"index": {"type": "flat", "quantization": "pq",
+  "pq_subspaces": M, "oversampling": N}` (defaults M = dimension / 8, N = 8).
+  - Per-segment k-means codebooks (M × 256 centroids, fixed seed) are trained
+    when a segment of at least 1,024 vectors is sealed; the mutable segment
+    stays exact.
+  - Search scores one-byte codes with per-query lookup tables (asymmetric
+    distance), then rescores the top `N × k` at full precision.
+  - Codebooks and codes are persisted as an optional `pq_file` in the
+    checkpoint manifest; older checkpoints retrain on load.
+  - Results on 50,000 × 128 clustered data (16 bytes per vector): recall@10
+    0.847 at ×8, 0.891 at ×10 and 0.977 at ×20 (cosine); 0.997 at ×20 for L2. See
+    [product quantization](../indexing/product-quantization.md).
 - **Remaining:**
-  - Product quantization (PQ/OPQ) trained per segment at checkpoint.
+  - OPQ rotation (not needed for recall on the benchmark data so far).
   - Binary or PQ codes inside HNSW, which needs gap 18 first.
-  - Expose `quantization` in gRPC `CreateCollection` and the dashboard create
-    dialog.
 
 ### 3. Public benchmarks — P0 · 🟡 harness done
 
@@ -103,16 +109,22 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   - Publish comparisons with Qdrant, Milvus and pgvector, but only after gap
     19 is fixed.
 
-### 4. Disk-resident ANN index — P1
+### 4. Disk-resident ANN index — P1 · ✅
 
-- **Current state:** HNSW graphs live in memory; segments are mmap-oriented
-  but the graph is not designed for SSD access patterns.
-- **Why it matters:** RAM-bound indexes cap dataset size per node and make
-  cloud pricing uncompetitive at 100M+ vectors.
-- **Direction:** DiskANN/Vamana-style graph with compressed vectors in RAM and
-  full vectors on SSD; select per collection.
+- **Done (2026-10-21):** `"index": {"type": "diskann"}` serves checkpointed
+  segments from a Vamana graph (`max_degree` R, `alpha` 1.2, `ef_construction`
+  and `ef_search` L, medoid entry). Vectors and adjacency live in fixed-size
+  records in a memory-mapped, versioned `.diskann` file; the heap keeps 8-bit
+  navigation codes. Beam search scores expanded nodes exactly from disk;
+  filters fall back to exact scans when selective. The mutable segment stays
+  flat until checkpoint; older checkpoints and other index types are
+  unchanged. See [DiskANN index](../indexing/diskann.md).
+- **Results (50,000 × 128 clustered):** recall@10 1.000 at 1,462 QPS with
+  17 MiB segment heap, against 82 MiB for HNSW at the same recall.
+- **Remaining:** graph construction is in memory per shard and rebuilt each
+  checkpoint; no PQ codes, direct I/O or gRPC index type yet.
 
-### 5. Server-side embedding — P1 · ✅ REST
+### 5. Server-side embedding — P1 · ✅ REST, gRPC, SDKs
 
 - **Done (2026-10-16):** collections can name a `vectorizer` from the
   server's `-embedders-file` (OpenAI-compatible APIs: OpenAI, Azure, Ollama,
@@ -121,8 +133,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   timeouts, key files and a per-node LRU cache keyed by content hash;
   `GET /v1/embedders` reports cache counters. Guide:
   [server-side embedding](../indexing/server-side-embedding.md).
-- **Remaining:** `text` on gRPC and in the non-Go SDKs; native Cohere and
-  local ONNX providers.
+- **Remaining:** native Cohere and local ONNX providers.
 
 - **Current state:** Embeddings are generated client-side via the Python
   integrations and examples.
@@ -132,7 +143,21 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   Ollama, Cohere, local ONNX); `text` field accepted on upsert and search;
   cache embeddings by content hash.
 
-### 6. Reranking and multi-vector — P1
+### 6. Reranking and multi-vector — P1 · ✅ REST
+
+- **Done (2026-10-21):** multi-vector named fields (`"multi_vector": true`,
+  up to 1024 vectors per record) searched with MaxSim: mean-pooled vectors
+  are indexed (flat or HNSW) for candidate generation and candidates are
+  rescored exactly. Search accepts `rerank` with a built-in `maxsim` stage
+  (per shard on the cluster route) or a `cross_encoder` stage calling
+  Cohere/Jina/TEI-compatible `/rerank` endpoints from `-rerankers-file`, with
+  bounded candidates, per-reranker timeouts, and fallback to first-stage
+  results flagged by `rerank.applied=false`. Single-node and `/v1/cluster`
+  REST, OpenAPI. Guides: [multi-vector](../indexing/multi-vector.md),
+  [reranking](../indexing/reranking.md).
+- **Remaining:** gRPC and SDK exposure; token-level candidate generation
+  (PLAID-style centroids) instead of mean pooling; an in-process ONNX
+  cross-encoder.
 
 - **Current state:** Single dense vector per record; no rerank stage.
 - **Why it matters:** Cross-encoder reranking and late-interaction models
@@ -141,7 +166,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   stage; pluggable rerank step (local model or external API) in the query
   pipeline.
 
-### 7. Agent integrations — P1 · ✅ MCP server and memory
+### 7. Agent integrations — P1 · ✅ MCP server, memory and agent SDK adapters
 
 - **Done (2026-10-16):** `cmd/gideondb-mcp`, a dependency-free MCP server over
   stdio. Read tools by default; write and admin tools behind `-allow-writes`
@@ -150,8 +175,15 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   recall by similarity blended with recency. Text is embedded through any
   OpenAI-compatible endpoint until gap 5 lands. Guide:
   [MCP server](../integrations/mcp.md).
-- **Remaining:** Streamable HTTP transport; adapters for agent SDKs
-  (OpenAI Agents, LangGraph, CrewAI).
+- **Done (2026-10-21):** Python adapters in `gideondb_integrations` sharing
+  the MCP memory layout: a LangGraph `BaseStore` (semantic search with
+  namespace prefixes, value filters, TTL, namespace listing; checked against
+  LangGraph 1.2), a framework-neutral `MemoryStore`, and `memory_tools` for
+  function-calling frameworks (OpenAI Agents, CrewAI, LangChain). OpenAI
+  Agents SDK and Claude Agent SDK examples connect through `gideondb-mcp`.
+  Guide: [agent frameworks](../integrations/agents.md).
+- **Remaining:** Streamable HTTP transport for the MCP server; TypeScript
+  adapters (for example the Vercel AI SDK and LangGraph.js).
 
 - **Current state:** LangChain and LlamaIndex adapters only.
 - **Why it matters:** Agent frameworks are the fastest-growing source of new
@@ -160,22 +192,42 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   tools); simple "memory" API with TTL, recency weighting and per-user
   namespaces; adapters for popular agent SDKs.
 
-### 8. Embedded / lite mode — P2
+### 8. Embedded / lite mode — P2 · ✅
 
-- **Current state:** Runs as a server; no documented in-process use.
+- **Done (2026-10-21):** `pkg/lite`, a stable Go library that wraps the
+  engine without exposing internal types (open a directory, collections,
+  upsert, get, delete, dense/filtered/BM25/hybrid search, close);
+  `gideondb -lite`, a zero-config loopback-only server with no auth or TLS,
+  the dashboard off by default, data in `~/.gideondb/lite` and a startup
+  banner; Python `LiteServer`, which runs the lite binary as a child process.
+  An in-process Python wheel was not built: it would mean cgo bindings and a
+  native wheel per platform for little gain over a local subprocess. Guide:
+  [lite and embedded mode](../getting-started/lite.md).
+- **Remaining:** none planned; revisit a native Python wheel only if
+  subprocess startup becomes a measured problem.
+
+- **Original state:** Runs as a server; no documented in-process use.
 - **Why it matters:** SQLite-style embedding drives adoption in notebooks,
   desktop apps and tests.
 - **Direction:** Stable Go library API in `pkg/`, a Python wheel wrapping a
   local engine, and a zero-config single-binary mode.
 
-### 9. Richer data model — P1 · 🟡
+### 9. Richer data model — P1 · ✅ named vectors and float16; 🟡 payload indexes
 
 - **Done (2026-10-16):** `$text` (whole-word) and `$geo_radius` filters,
   `offset` score pagination and `group_by`/`group_size` grouping on single-node
   and cluster search, with Go client support. No persisted format changed.
-- **Remaining (each changes the record or segment format and needs a design
-  note first):** named vectors per record; float16/bfloat16 storage; explicit
-  payload index types with a token index for `$text`.
+- **Done (2026-10-21):** named vectors — up to 16 fields per collection, each
+  with its own dimension, metric, flat/HNSW index and `datatype`; records carry
+  `vectors` beside the unchanged default `vector`, and search picks a field
+  with `using` (single-node and cluster REST, OpenAPI). `float16`/`bfloat16`
+  fields are rounded at write time and scored in float32, halving stored
+  vector memory. Persisted as record column version 2 only when used, so
+  existing data and the API, WAL, backup and replication formats are
+  unchanged. Guide: [named vectors](../indexing/named-vectors.md).
+- **Remaining:** explicit payload index types with a token index for `$text`;
+  named vectors over gRPC and in the SDKs; persisted HNSW graphs for named
+  fields (rebuilt on open today); half precision for the default vector.
 
 - **Current state:** One float32 vector per record, metadata filters,
   namespaces.
@@ -185,7 +237,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   explicit payload index types (keyword, integer range, geo, full-text);
   float16/bfloat16 storage; group-by and pagination by score.
 
-### 17. Community and launch readiness — P0 · ✅ (Helm pending)
+### 17. Community and launch readiness — P0 · ✅ (repository settings pending)
 
 - **Done (2026-10-16):** a verified five-minute quickstart (the old one
   failed with 401 because the API now always needs a key); full-text search
@@ -196,7 +248,9 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 - **Remaining:**
   - ~~Docker one-liner~~ done: the image serves HTTPS with a self-signed
     certificate (`-tls-self-signed`) and reads `GIDEONDB_API_KEY`.
-  - Helm chart (Kustomize manifests exist in `deployments/kubernetes`).
+  - ~~Helm chart~~ done (2026-10-21): `deployments/helm/gideondb` with
+    single-node and three-node values, linted and rendered in CI
+    (`make validate-helm`). Guide: [Helm chart](../operations/helm.md).
   - Enable GitHub Discussions, create the labels, make the GHCR package
     public after the first release.
 

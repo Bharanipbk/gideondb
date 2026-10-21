@@ -148,7 +148,16 @@ function recordPath(collection, id, namespace) {
 }
 
 function searchBody(search, distributed) {
-  const body = { vector: search.vector, top_k: search.topK };
+  const hasSparse = search.sparseVector && Object.keys(search.sparseVector).length > 0;
+  if (search.vector === undefined && !search.text && !hasSparse) throw new TypeError("search requires a vector, text, or sparseVector");
+  if (search.alpha !== undefined && !(Number.isFinite(search.alpha) && search.alpha >= 0 && search.alpha <= 1)) throw new TypeError("alpha must be between 0 and 1");
+  if (search.fusion && !["weighted", "rrf"].includes(search.fusion)) throw new TypeError('fusion must be "weighted" or "rrf"');
+  const body = { top_k: search.topK };
+  if (search.vector !== undefined) body.vector = search.vector;
+  if (search.text) body.text = search.text;
+  if (hasSparse) body.sparse_vector = search.sparseVector;
+  if (search.alpha !== undefined) body.alpha = search.alpha;
+  if (search.fusion) body.fusion = search.fusion;
   if (search.namespace) body.namespace = search.namespace;
   if (search.filter !== undefined) body.filter = search.filter;
   if (distributed && search.allowPartial) body.allow_partial = true;
