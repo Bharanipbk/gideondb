@@ -154,3 +154,33 @@ func benchmarkLiveBatch(b *testing.B, workers int) {
 
 func BenchmarkLiveInsertSerial(b *testing.B)   { benchmarkLiveBatch(b, 1) }
 func BenchmarkLiveInsertParallel(b *testing.B) { benchmarkLiveBatch(b, 0) }
+
+// A node can gain reverse links from other workers before it appends its own
+// selected neighbours, so its list must be pruned afterwards too. Otherwise
+// it overflows the layer limit and LoadGraph rejects the persisted graph.
+func TestParallelBuildRespectsNeighbourLimits(t *testing.T) {
+	const dimension, count = 16, 20000
+	cfg := index.Config{Dimension: dimension, Metric: core.MetricCosine, M: 4, EFConstruction: 16, EFSearch: 16}
+	vectors := clusteredVectors(31, count, dimension, 5, 4)
+	ids := make([]uint64, count)
+	for i := range ids {
+		ids[i] = uint64(i + 1)
+	}
+	for round := range 3 {
+		built, err := Build(cfg, ids, vectors, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for ordinal, n := range built.nodes {
+			for layer, neighbors := range n.neighbors {
+				if len(neighbors) > built.maxNeighbors(layer) {
+					t.Fatalf("round %d: node %d layer %d has %d links, limit %d", round, ordinal, layer, len(neighbors), built.maxNeighbors(layer))
+				}
+			}
+		}
+		data, _ := built.MarshalGraph()
+		if _, err := LoadGraph(cfg, ids, vectors, data); err != nil {
+			t.Fatalf("round %d: %v", round, err)
+		}
+	}
+}

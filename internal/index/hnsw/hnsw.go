@@ -109,6 +109,9 @@ func (h *Index) connectLocked(ordinal, entry, maxLevel int, scratch *constructio
 		selected := h.selectNeighborsLocked(candidates, h.m)
 		h.lockNode(ordinal)
 		h.nodes[ordinal].neighbors[layer] = append(h.nodes[ordinal].neighbors[layer], selected...)
+		// In a parallel build other workers may already have linked to this
+		// node, so its list can overflow; serially this is a no-op.
+		h.pruneLocked(ordinal, layer)
 		h.unlockNode(ordinal)
 		for _, neighbor := range selected {
 			h.lockNode(neighbor)
