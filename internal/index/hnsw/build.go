@@ -62,27 +62,50 @@ func (h *Index) buildLocked(ids []uint64, vectors [][]float32, workers int) {
 	// Store every vector and level first so workers only ever write
 	// neighbour lists, which nodeLocks guard.
 	h.vectors = make([]float32, 0, count*h.dimension)
-	h.squaredNorms = make([]float32, count)
-	h.nodes = make([]node, count)
+	h.squaredNorms = make([]float32, 0, count)
+	h.nodes = make([]node, 0, count)
 	h.ordinals = make(map[uint64]int, count)
+	h.construction = constructionScratch{}
+	h.entry, h.maxLevel, h.live = -1, -1, 0
 	for i, id := range ids {
-		level := deterministicLevel(id, h.m)
-		h.vectors = append(h.vectors, vectors[i]...)
-		h.squaredNorms[i] = h.querySquaredNorm(vectors[i])
-		h.nodes[i] = node{id: id, level: level, neighbors: make([][]int, level+1)}
-		h.ordinals[id] = i
+		h.appendNodeLocked(id, vectors[i])
 	}
-	h.live = count
-	h.construction = constructionScratch{visited: make([]uint32, count)}
-	h.entry, h.maxLevel = 0, h.nodes[0].level
+	h.connectParallelLocked(0, workers)
+}
+
+// appendNodeLocked stores a vector and its level without linking it.
+func (h *Index) appendNodeLocked(id uint64, vector []float32) int {
+	level := deterministicLevel(id, h.m)
+	ordinal := len(h.nodes)
+	h.vectors = append(h.vectors, vector...)
+	h.squaredNorms = append(h.squaredNorms, h.querySquaredNorm(vector))
+	h.nodes = append(h.nodes, node{id: id, level: level, neighbors: make([][]int, level+1)})
+	h.construction.visited = append(h.construction.visited, 0)
+	h.ordinals[id] = ordinal
+	h.live++
+	return ordinal
+}
+
+// connectParallelLocked links the stored but unlinked nodes from first
+// onwards into the graph using workers goroutines and per-node locks. The
+// caller holds mu for writing, so searches wait until the batch is linked.
+func (h *Index) connectParallelLocked(first, workers int) {
+	count := len(h.nodes)
+	if first >= count {
+		return
+	}
+	if h.entry < 0 {
+		h.entry, h.maxLevel = first, h.nodes[first].level
+		first++
+	}
 	h.nodeLocks = make([]sync.Mutex, count)
 	defer func() { h.nodeLocks = nil }()
 
 	var entryMu sync.Mutex
 	var next atomic.Int64
-	next.Store(1)
+	next.Store(int64(first))
 	var wg sync.WaitGroup
-	for range min(workers, count-1) {
+	for range min(workers, count-first) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -111,4 +134,63 @@ func (h *Index) buildLocked(ids []uint64, vectors [][]float32, workers int) {
 		}()
 	}
 	wg.Wait()
+}
+
+// UpsertBatch inserts or updates many vectors under one write lock. New
+// vectors in a batch of at least parallelBuildThreshold are linked into the
+// existing graph concurrently with per-node locks, the same scheme as a
+// parallel Build, so bulk writes to a live segment use every core instead of
+// one. Smaller batches, or workers == 1, insert serially and produce exactly
+// the graph that the same sequence of Upsert calls would. As with Upsert,
+// replacing an existing vector rebuilds the graph, once per batch. The graph
+// layout and persisted format are unchanged. workers <= 0 uses GOMAXPROCS.
+func (h *Index) UpsertBatch(ids []uint64, vectors [][]float32, workers int) error {
+	if len(ids) != len(vectors) {
+		return fmt.Errorf("%w: ids and vectors differ in length", core.ErrInvalidArgument)
+	}
+	for _, vector := range vectors {
+		if len(vector) != h.dimension {
+			return core.ErrDimensionMismatch
+		}
+	}
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.immutableGraph {
+		return fmt.Errorf("%w: persisted hnsw graph is immutable", core.ErrInvalidArgument)
+	}
+	if workers <= 1 || len(ids) < parallelBuildThreshold {
+		updated := false
+		for i, id := range ids {
+			if ordinal, ok := h.ordinals[id]; ok {
+				copy(h.vectorAt(ordinal), vectors[i])
+				updated = true
+				continue
+			}
+			_ = h.insertLocked(id, vectors[i])
+		}
+		if updated {
+			h.rebuildLocked()
+		}
+		return nil
+	}
+	first := len(h.nodes)
+	updated := false
+	for i, id := range ids {
+		if ordinal, ok := h.ordinals[id]; ok {
+			copy(h.vectorAt(ordinal), vectors[i])
+			updated = true
+			continue
+		}
+		h.appendNodeLocked(id, vectors[i])
+	}
+	if updated {
+		// rebuildLocked recomputes every norm and relinks every node.
+		h.rebuildLocked()
+		return nil
+	}
+	h.connectParallelLocked(first, workers)
+	return nil
 }

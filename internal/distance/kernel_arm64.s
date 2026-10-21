@@ -1,0 +1,65 @@
+//go:build !purego
+
+#include "textflag.h"
+
+// The Go assembler has no mnemonics for the vector FADD, FSUB and FADDP
+// forms, so they are emitted as raw encodings with the instruction in the
+// comment.
+
+// func dotNEON(a, b *float32, n int) float32
+// n must be a positive multiple of 16.
+TEXT ·dotNEON(SB), NOSPLIT, $0-28
+	MOVD	a+0(FP), R0
+	MOVD	b+8(FP), R1
+	MOVD	n+16(FP), R2
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+	VEOR	V2.B16, V2.B16, V2.B16
+	VEOR	V3.B16, V3.B16, V3.B16
+dotloop:
+	VLD1.P	64(R0), [V4.S4, V5.S4, V6.S4, V7.S4]
+	VLD1.P	64(R1), [V8.S4, V9.S4, V10.S4, V11.S4]
+	VFMLA	V4.S4, V8.S4, V0.S4
+	VFMLA	V5.S4, V9.S4, V1.S4
+	VFMLA	V6.S4, V10.S4, V2.S4
+	VFMLA	V7.S4, V11.S4, V3.S4
+	SUBS	$16, R2, R2
+	BNE	dotloop
+	WORD	$0x4E21D400 // FADD V0.4S, V0.4S, V1.4S
+	WORD	$0x4E23D442 // FADD V2.4S, V2.4S, V3.4S
+	WORD	$0x4E22D400 // FADD V0.4S, V0.4S, V2.4S
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+	FMOVS	F0, ret+24(FP)
+	RET
+
+// func l2SquaredNEON(a, b *float32, n int) float32
+// n must be a positive multiple of 16.
+TEXT ·l2SquaredNEON(SB), NOSPLIT, $0-28
+	MOVD	a+0(FP), R0
+	MOVD	b+8(FP), R1
+	MOVD	n+16(FP), R2
+	VEOR	V0.B16, V0.B16, V0.B16
+	VEOR	V1.B16, V1.B16, V1.B16
+	VEOR	V2.B16, V2.B16, V2.B16
+	VEOR	V3.B16, V3.B16, V3.B16
+l2loop:
+	VLD1.P	64(R0), [V4.S4, V5.S4, V6.S4, V7.S4]
+	VLD1.P	64(R1), [V8.S4, V9.S4, V10.S4, V11.S4]
+	WORD	$0x4EA8D48C // FSUB V12.4S, V4.4S, V8.4S
+	WORD	$0x4EA9D4AD // FSUB V13.4S, V5.4S, V9.4S
+	WORD	$0x4EAAD4CE // FSUB V14.4S, V6.4S, V10.4S
+	WORD	$0x4EABD4EF // FSUB V15.4S, V7.4S, V11.4S
+	VFMLA	V12.S4, V12.S4, V0.S4
+	VFMLA	V13.S4, V13.S4, V1.S4
+	VFMLA	V14.S4, V14.S4, V2.S4
+	VFMLA	V15.S4, V15.S4, V3.S4
+	SUBS	$16, R2, R2
+	BNE	l2loop
+	WORD	$0x4E21D400 // FADD V0.4S, V0.4S, V1.4S
+	WORD	$0x4E23D442 // FADD V2.4S, V2.4S, V3.4S
+	WORD	$0x4E22D400 // FADD V0.4S, V0.4S, V2.4S
+	WORD	$0x6E20D400 // FADDP V0.4S, V0.4S, V0.4S
+	WORD	$0x7E30D800 // FADDP S0, V0.2S
+	FMOVS	F0, ret+24(FP)
+	RET

@@ -39,8 +39,8 @@ type Index struct {
 	maxLevel        int
 	live            int
 	construction    constructionScratch
-	// nodeLocks is set only while Build inserts in parallel; each guards one
-	// node's neighbour lists. Every other path relies on mu.
+	// nodeLocks is set only while Build or UpsertBatch links nodes in
+	// parallel; each guards one node's neighbour lists. Every other path relies on mu.
 	nodeLocks   []sync.Mutex
 	visitedPool sync.Pool
 }
@@ -81,14 +81,8 @@ func (h *Index) Upsert(id uint64, vector []float32) error {
 }
 
 func (h *Index) insertLocked(id uint64, vector []float32) error {
-	level := deterministicLevel(id, h.m)
-	ordinal := len(h.nodes)
-	h.vectors = append(h.vectors, vector...)
-	h.squaredNorms = append(h.squaredNorms, h.querySquaredNorm(vector))
-	h.nodes = append(h.nodes, node{id: id, level: level, neighbors: make([][]int, level+1)})
-	h.construction.visited = append(h.construction.visited, 0)
-	h.ordinals[id] = ordinal
-	h.live++
+	ordinal := h.appendNodeLocked(id, vector)
+	level := h.nodes[ordinal].level
 	if h.entry < 0 {
 		h.entry, h.maxLevel = ordinal, level
 		return nil

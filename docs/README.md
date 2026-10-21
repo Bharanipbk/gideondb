@@ -53,6 +53,8 @@ with the quickstart, then choose the SDK or integration for your application.
 ## Benchmarks and product planning
 
 - [ANN recall and latency benchmark](benchmarks/ann-recall.md)
+- [Standard datasets: SIFT1M and GloVe](benchmarks/standard-datasets.md)
+- [Distance kernels and HNSW insert throughput](benchmarks/distance-kernels.md)
 - [Gap analysis: open-source and cloud](product/gap-analysis.md)
 
 ## Develop and release
