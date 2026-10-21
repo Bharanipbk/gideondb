@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
+	"github.com/Bharanipbk/gideondb/internal/segment"
 	"github.com/Bharanipbk/gideondb/internal/storage/compaction"
 	"github.com/Bharanipbk/gideondb/internal/storage/segmentfile"
 )
@@ -173,4 +174,25 @@ func compactSegmentRefs(directory string, refs []segmentfile.SegmentRef, dimensi
 	copy(remaining[insertAt+1:], remaining[insertAt:])
 	remaining[insertAt] = merged
 	return remaining, nil
+}
+
+// buildViewPQ trains product quantization for a multi-segment view in the
+// record order resolveMappedSegments loads it in.
+func buildViewPQ(config core.CollectionConfig, directory string, refs []segmentfile.SegmentRef, records []core.Record) ([]byte, error) {
+	ordered, _, err := resolveMappedSegments(directory, refs)
+	if err != nil {
+		return nil, err
+	}
+	vectors := make(map[string][]float32, len(records))
+	for _, record := range records {
+		vectors[record.Namespace+"\x00"+record.ID] = record.Vector
+	}
+	for position := range ordered {
+		vector, ok := vectors[ordered[position].Namespace+"\x00"+ordered[position].ID]
+		if !ok {
+			return nil, fmt.Errorf("multi-segment view record missing from live records")
+		}
+		ordered[position].Vector = vector
+	}
+	return segment.BuildPQ(config, ordered)
 }

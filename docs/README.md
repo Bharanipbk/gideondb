@@ -16,6 +16,7 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Metadata filtering](indexing/filtering.md)
 - [Sparse, keyword (BM25) and hybrid retrieval](indexing/sparse-hybrid.md)
 - [Binary quantization](indexing/binary-quantization.md)
+- [Product quantization](indexing/product-quantization.md)
 
 ## Client SDKs
 

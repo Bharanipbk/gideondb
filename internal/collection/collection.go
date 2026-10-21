@@ -414,6 +414,12 @@ func (c *Collection) ReplaceShardRecords(shardID uint32, records []core.Record) 
 }
 
 func (c *Collection) InstallRecordsShardWithMetadata(shardID uint32, records []core.Record, metadataIndex *metadata.Index) error {
+	return c.InstallRecordsShardWithPQ(shardID, records, metadataIndex, nil)
+}
+
+// InstallRecordsShardWithPQ also reuses product quantization data built by
+// segment.BuildPQ for the same records, avoiding a second training pass.
+func (c *Collection) InstallRecordsShardWithPQ(shardID uint32, records []core.Record, metadataIndex *metadata.Index, pqData []byte) error {
 	if int(shardID) >= len(c.shards) {
 		return fmt.Errorf("%w: shard %d out of range", core.ErrInvalidArgument, shardID)
 	}
@@ -428,7 +434,7 @@ func (c *Collection) InstallRecordsShardWithMetadata(shardID uint32, records []c
 			}
 		}
 	}
-	base, err := segment.NewImmutable(c.config, records, metadataIndex)
+	base, err := segment.NewImmutableWithPQ(c.config, records, metadataIndex, pqData)
 	if err != nil {
 		return err
 	}
@@ -440,6 +446,12 @@ func (c *Collection) InstallMappedShard(shardID uint32, records []core.Record, s
 }
 
 func (c *Collection) InstallMappedShardWithMetadata(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index) error {
+	return c.InstallMappedShardWithPQ(shardID, records, source, closer, metadataIndex, nil)
+}
+
+// InstallMappedShardWithPQ also restores persisted product quantization data;
+// nil or stale data makes the segment retrain from its mapped vectors.
+func (c *Collection) InstallMappedShardWithPQ(shardID uint32, records []core.Record, source flat.MappedSource, closer interface{ Close() error }, metadataIndex *metadata.Index, pqData []byte) error {
 	if c.config.Index.Type != core.IndexFlat {
 		return fmt.Errorf("%w: mapped checkpoints require a flat index", core.ErrInvalidArgument)
 	}
@@ -457,7 +469,7 @@ func (c *Collection) InstallMappedShardWithMetadata(shardID uint32, records []co
 			}
 		}
 	}
-	base, err := segment.NewMappedWithMetadata(c.config, records, source, closer, metadataIndex)
+	base, err := segment.NewMappedWithPQ(c.config, records, source, closer, metadataIndex, pqData)
 	if err != nil {
 		return err
 	}

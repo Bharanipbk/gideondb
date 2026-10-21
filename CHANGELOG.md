@@ -5,6 +5,17 @@ describe unreleased experimental work.
 
 ## Unreleased
 
+### Added
+
+- Product quantization for flat collections
+  (`"index": {"type": "flat", "quantization": "pq", "pq_subspaces": M, "oversampling": N}`):
+  per-segment k-means codebooks (M subspaces × 256 centroids, deterministic
+  seed) trained when a segment of at least 1,024 vectors is sealed, one-byte
+  codes, asymmetric distance search with per-query lookup tables, and
+  full-precision rescoring of the top N × k. Codebooks and codes are persisted
+  as an optional `pq_file` beside checkpoint segments; checkpoints without one
+  retrain on load. `gideondb-bench` adds `pq`, `pq-x10` and `pq-x20`.
+
 ## 0.1.0 — 2026-10-16
 
 First public open-source release. Pre-alpha: minor releases may contain

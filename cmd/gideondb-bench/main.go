@@ -62,7 +62,7 @@ func main() {
 	metricName := flag.String("metric", "cosine", "cosine, dot or l2")
 	basePath := flag.String("base", "", ".fvecs base vectors")
 	queriesPath := flag.String("queries", "", ".fvecs query vectors")
-	configsFlag := flag.String("configs", "flat,hnsw,hnsw-ef128,binary,binary-x10", "comma-separated configurations")
+	configsFlag := flag.String("configs", "flat,hnsw,hnsw-ef128,binary,binary-x10,pq,pq-x10", "comma-separated configurations")
 	jsonPath := flag.String("json", "", "write results as JSON to this path")
 	seed := flag.Int64("seed", 42, "synthetic data seed")
 	flag.Parse()
@@ -100,6 +100,9 @@ func main() {
 		"binary":     {Type: core.IndexFlat, Quantization: core.QuantizationBinary},
 		"binary-x10": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 10},
 		"binary-x20": {Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 20},
+		"pq":         {Type: core.IndexFlat, Quantization: core.QuantizationPQ},
+		"pq-x10":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 10},
+		"pq-x20":     {Type: core.IndexFlat, Quantization: core.QuantizationPQ, Oversampling: 20},
 	}
 	var configs []benchConfig
 	for _, name := range strings.Split(*configsFlag, ",") {
@@ -136,14 +139,27 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 	settle()
 	before := heapAlloc()
 	started := time.Now()
-	seg, err := segment.New(collection)
+	var seg *segment.Segment
+	var err error
+	if collection.Index.Quantization == core.QuantizationPQ {
+		// PQ codebooks are trained when a segment is sealed, so build time
+		// includes k-means training and encoding.
+		records := make([]core.Record, len(base))
+		for i, vector := range base {
+			records[i] = core.Record{ID: id(i), Vector: vector}
+		}
+		seg, err = segment.NewImmutable(collection, records, nil)
+	} else {
+		seg, err = segment.New(collection)
+		for i, vector := range base {
+			if err != nil {
+				break
+			}
+			err = seg.Upsert(core.Record{ID: id(i), Vector: vector})
+		}
+	}
 	if err != nil {
 		fail(err)
-	}
-	for i, vector := range base {
-		if err := seg.Upsert(core.Record{ID: id(i), Vector: vector}); err != nil {
-			fail(err)
-		}
 	}
 	build := time.Since(started)
 	settle()

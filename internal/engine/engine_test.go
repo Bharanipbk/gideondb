@@ -939,7 +939,7 @@ func TestBinaryQuantizedCollectionSearchesAcrossCheckpoint(t *testing.T) {
 	check(reopened, "reopened")
 	for _, invalid := range []core.IndexConfig{
 		{Type: core.IndexHNSW, Quantization: core.QuantizationBinary},
-		{Type: core.IndexFlat, Quantization: "pq"},
+		{Type: core.IndexFlat, Quantization: "opq"},
 		{Type: core.IndexFlat, Oversampling: 3},
 		{Type: core.IndexFlat, Quantization: core.QuantizationBinary, Oversampling: 101},
 	} {

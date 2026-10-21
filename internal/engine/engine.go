@@ -647,13 +647,23 @@ func (e *Engine) InstallReplicaSnapshot(name string, shardID uint32, sequence ui
 			return err
 		}
 	}
+	pqData, err := segment.BuildPQ(c.Config(), records)
+	if err != nil {
+		return err
+	}
+	if pqData != nil {
+		manifest.PQFile = segmentBase + ".pq"
+		if err := segmentfile.WritePQ(directory, manifest.PQFile, pqData); err != nil {
+			return err
+		}
+	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
 	}
 	if err := e.logs[name][shardID].Reset(sequence + 1); err != nil {
 		return err
 	}
-	if err := c.ReplaceShardRecords(shardID, records); err != nil {
+	if err := c.InstallRecordsShardWithPQ(shardID, records, nil, pqData); err != nil {
 		return err
 	}
 	e.checkpointLSN[name][shardID] = sequence
@@ -1030,7 +1040,7 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 				if mapErr != nil {
 					return fmt.Errorf("map multi-segment vectors: %w", mapErr)
 				}
-				if err := c.InstallMappedShardWithMetadata(uint32(shardID), records, mapped, mapped, metadataIndex); err != nil {
+				if err := c.InstallMappedShardWithPQ(uint32(shardID), records, mapped, mapped, metadataIndex, segmentfile.ReadPQ(directory, manifest)); err != nil {
 					_ = mapped.Close()
 					return err
 				}
@@ -1077,7 +1087,7 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 			if err != nil {
 				return fmt.Errorf("map vector segment for %s shard %d: %w", config.Name, shardID, err)
 			}
-			if err := c.InstallMappedShardWithMetadata(uint32(shardID), records, mapped, mapped, metadataIndex); err != nil {
+			if err := c.InstallMappedShardWithPQ(uint32(shardID), records, mapped, mapped, metadataIndex, segmentfile.ReadPQ(directory, manifest)); err != nil {
 				_ = mapped.Close()
 				return err
 			}
@@ -1247,6 +1257,18 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 			return err
 		}
 	}
+	var pqData []byte
+	if segment.UsesPQ(c.Config(), len(records)) {
+		// Codes must follow the order the mapped view is loaded in.
+		pqData, err = buildViewPQ(c.Config(), directory, manifest.Segments, records)
+		if err != nil {
+			return err
+		}
+		manifest.PQFile = fmt.Sprintf("view-%020d.pq", maxLSN)
+		if err := segmentfile.WritePQ(directory, manifest.PQFile, pqData); err != nil {
+			return err
+		}
+	}
 	if err := segmentfile.SaveManifest(manifestPath, manifest); err != nil {
 		return err
 	}
@@ -1271,7 +1293,7 @@ func (e *Engine) checkpointShardLocked(name string, c *collection.Collection, sh
 		if err != nil {
 			return err
 		}
-		if err := c.InstallMappedShardWithMetadata(shardID, baseRecords, mapped, mapped, metadataIndex); err != nil {
+		if err := c.InstallMappedShardWithPQ(shardID, baseRecords, mapped, mapped, metadataIndex, pqData); err != nil {
 			_ = mapped.Close()
 			return err
 		}
