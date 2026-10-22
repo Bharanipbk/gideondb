@@ -37,6 +37,22 @@ describe unreleased experimental work.
   configured with `-rerankers-file`. Candidate counts are bounded, calls time
   out, and failures return first-stage results with `rerank.applied=false`.
   `GET /v1/rerankers` lists configured rerankers.
+- NEON assembly distance kernels on arm64 (dot and L2, 2.5–7× faster than
+  the previous Go loops) and faster eight-lane portable kernels elsewhere.
+  `-tags purego` forces the portable kernels, and equivalence and fuzz tests
+  check that both agree. HNSW builds and searches are about 2–3× faster.
+- `hnsw.(*Index).UpsertBatch` links large batches into a live graph
+  concurrently with per-node locks (5.8× faster for 8,000 inserts on 8 cores).
+  The persisted format is unchanged.
+- `gideondb-loadtest server` runs an end-to-end REST workload against a
+  running server: concurrent ingest, then unfiltered and filtered search,
+  with recall checked against exact search.
+- `gideondb-bench` builds HNSW the way sealed segments are built (parallel;
+  `-build live` keeps one-at-a-time inserts), computes ground truth in
+  parallel, and adds `hnsw-ef16`/`hnsw-ef32`.
+- GloVe results (SIFT1M pending its download):
+  [standard datasets](docs/benchmarks/standard-datasets.md) and
+  [distance kernels](docs/benchmarks/distance-kernels.md).
 
 ### Changed
 
@@ -59,6 +75,12 @@ describe unreleased experimental work.
   `BaseStore`, a `MemoryStore` sharing the MCP server's memory layout, and
   `memory_tools` for function-calling frameworks (OpenAI Agents, CrewAI,
   LangChain), plus OpenAI Agents and Claude Agent SDK MCP examples.
+
+### Fixed
+
+- Parallel HNSW builds could leave a node with more links than its layer
+  allows, so a sealed segment's graph failed to load and large REST ingests
+  returned HTTP 500 at checkpoint. Insertion now prunes the node's own list.
 
 ## 0.1.0 — 2026-10-16
 

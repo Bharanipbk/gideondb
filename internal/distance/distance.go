@@ -25,8 +25,8 @@ func Score(metric core.Metric, a, b []float32) (float32, error) {
 	}
 }
 
-// SquaredNorm returns the squared L2 norm using the same four-lane reduction
-// as the search kernels.
+// SquaredNorm returns the squared L2 norm using the same kernel as the search
+// paths, so cached norms match freshly computed ones exactly.
 func SquaredNorm(vector []float32) float32 { return dot(vector, vector) }
 
 // ScoreWithQuerySquaredNorm avoids recomputing the query norm for every
@@ -55,51 +55,55 @@ func CosineWithSquaredNorms(query []float32, querySquaredNorm float32, vector []
 	return dot(query, vector) / float32(math.Sqrt(float64(querySquaredNorm*vectorSquaredNorm)))
 }
 
+// cosineProductAndVectorNorm is built from dot so its results match
+// SquaredNorm and CosineWithSquaredNorms bit for bit.
 func cosineProductAndVectorNorm(query, vector []float32) (float32, float32) {
-	var p0, p1, p2, p3, n0, n1, n2, n3 float32
-	i := 0
-	for ; i+3 < len(query); i += 4 {
-		q0, q1, q2, q3 := query[i], query[i+1], query[i+2], query[i+3]
-		v0, v1, v2, v3 := vector[i], vector[i+1], vector[i+2], vector[i+3]
-		p0, p1, p2, p3 = p0+q0*v0, p1+q1*v1, p2+q2*v2, p3+q3*v3
-		n0, n1, n2, n3 = n0+v0*v0, n1+v1*v1, n2+v2*v2, n3+v3*v3
-	}
-	product, norm := (p0+p1)+(p2+p3), (n0+n1)+(n2+n3)
-	for ; i < len(query); i++ {
-		product += query[i] * vector[i]
-		norm += vector[i] * vector[i]
-	}
-	return product, norm
+	return dot(query, vector), dot(vector, vector)
 }
 
-func dot(a, b []float32) float32 {
-	var sum0, sum1, sum2, sum3 float32
+// dotGeneric is the portable kernel. Eight independent accumulators hide
+// floating-point add latency, and reslicing to a fixed eight-element window
+// lets the compiler drop bounds checks inside the loop.
+func dotGeneric(a, b []float32) float32 {
+	b = b[:len(a)]
+	var s0, s1, s2, s3, s4, s5, s6, s7 float32
 	i := 0
-	for ; i+3 < len(a); i += 4 {
-		sum0 += a[i] * b[i]
-		sum1 += a[i+1] * b[i+1]
-		sum2 += a[i+2] * b[i+2]
-		sum3 += a[i+3] * b[i+3]
+	for ; i+8 <= len(a); i += 8 {
+		x, y := a[i:i+8:i+8], b[i:i+8:i+8]
+		s0 += x[0] * y[0]
+		s1 += x[1] * y[1]
+		s2 += x[2] * y[2]
+		s3 += x[3] * y[3]
+		s4 += x[4] * y[4]
+		s5 += x[5] * y[5]
+		s6 += x[6] * y[6]
+		s7 += x[7] * y[7]
 	}
-	sum := (sum0 + sum1) + (sum2 + sum3)
+	sum := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
 	for ; i < len(a); i++ {
 		sum += a[i] * b[i]
 	}
 	return sum
 }
 
-func l2Squared(a, b []float32) float32 {
-	var sum0, sum1, sum2, sum3 float32
+func l2SquaredGeneric(a, b []float32) float32 {
+	b = b[:len(a)]
+	var s0, s1, s2, s3, s4, s5, s6, s7 float32
 	i := 0
-	for ; i+3 < len(a); i += 4 {
-		d0, d1 := a[i]-b[i], a[i+1]-b[i+1]
-		d2, d3 := a[i+2]-b[i+2], a[i+3]-b[i+3]
-		sum0 += d0 * d0
-		sum1 += d1 * d1
-		sum2 += d2 * d2
-		sum3 += d3 * d3
+	for ; i+8 <= len(a); i += 8 {
+		x, y := a[i:i+8:i+8], b[i:i+8:i+8]
+		d0, d1, d2, d3 := x[0]-y[0], x[1]-y[1], x[2]-y[2], x[3]-y[3]
+		d4, d5, d6, d7 := x[4]-y[4], x[5]-y[5], x[6]-y[6], x[7]-y[7]
+		s0 += d0 * d0
+		s1 += d1 * d1
+		s2 += d2 * d2
+		s3 += d3 * d3
+		s4 += d4 * d4
+		s5 += d5 * d5
+		s6 += d6 * d6
+		s7 += d7 * d7
 	}
-	sum := (sum0 + sum1) + (sum2 + sum3)
+	sum := ((s0 + s1) + (s2 + s3)) + ((s4 + s5) + (s6 + s7))
 	for ; i < len(a); i++ {
 		d := a[i] - b[i]
 		sum += d * d
@@ -108,23 +112,7 @@ func l2Squared(a, b []float32) float32 {
 }
 
 func cosine(a, b []float32) float32 {
-	var p0, p1, p2, p3 float32
-	var aa0, aa1, aa2, aa3 float32
-	var bb0, bb1, bb2, bb3 float32
-	i := 0
-	for ; i+3 < len(a); i += 4 {
-		a0, a1, a2, a3 := a[i], a[i+1], a[i+2], a[i+3]
-		b0, b1, b2, b3 := b[i], b[i+1], b[i+2], b[i+3]
-		p0, p1, p2, p3 = p0+a0*b0, p1+a1*b1, p2+a2*b2, p3+a3*b3
-		aa0, aa1, aa2, aa3 = aa0+a0*a0, aa1+a1*a1, aa2+a2*a2, aa3+a3*a3
-		bb0, bb1, bb2, bb3 = bb0+b0*b0, bb1+b1*b1, bb2+b2*b2, bb3+b3*b3
-	}
-	product, aa, bb := (p0+p1)+(p2+p3), (aa0+aa1)+(aa2+aa3), (bb0+bb1)+(bb2+bb3)
-	for ; i < len(a); i++ {
-		product += a[i] * b[i]
-		aa += a[i] * a[i]
-		bb += b[i] * b[i]
-	}
+	product, aa, bb := dot(a, b), dot(a, a), dot(b, b)
 	if aa == 0 || bb == 0 {
 		return 0
 	}

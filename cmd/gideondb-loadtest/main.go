@@ -1,4 +1,7 @@
-// Command gideondb-loadtest runs a reproducible single-node validation workload.
+// Command gideondb-loadtest runs a reproducible single-node validation
+// workload against an embedded engine, or, as "gideondb-loadtest server
+// -base ... -queries ...", an end-to-end workload against a running server
+// over its REST API with concurrent unfiltered and filtered queries.
 package main
 
 import (
@@ -43,6 +46,10 @@ type report struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "server" {
+		runServer(os.Args[2:])
+		return
+	}
 	vectors := flag.Int("vectors", 1_000_000, "number of vectors")
 	dimension := flag.Int("dimension", 128, "vector dimension")
 	shards := flag.Int("shards", 8, "logical shards")

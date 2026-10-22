@@ -21,7 +21,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 |---|-----|-------|----------|--------|
 | 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine, REST, gRPC, SDKs, dashboard |
 | 2 | Binary and product quantization | Open source | P0 | ✅ binary; ✅ PQ (flat) |
-| 3 | Public benchmarks | Open source | P0 | 🟡 harness + synthetic results; ⬜ standard datasets |
+| 3 | Public benchmarks | Open source | P0 | 🟡 GloVe + end-to-end server run; ⬜ SIFT1M (download stalled), VectorDBBench |
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST, gRPC, all SDKs; ⬜ Cohere/ONNX providers |
 | 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ✅ REST (MaxSim, cross-encoder); ⬜ gRPC/SDKs |
@@ -37,7 +37,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 | 16 | Query analytics and observability for customers | Cloud | P2 | ⬜ |
 | 17 | Community and launch readiness | Open source | P0 | ✅ quickstart, Docker one-liner, Helm chart, docs search, release pipeline; ⬜ repo settings |
 | 18 | HNSW graph connectivity on clustered data (found by gap 3) | Open source | P0 | ✅ |
-| 19 | HNSW build throughput | Open source | P1 | 🟡 parallel batch build; ⬜ live inserts, SIMD |
+| 19 | HNSW build throughput | Open source | P1 | ✅ parallel build, NEON kernels, parallel live batches; ⬜ segment wiring, AVX2 |
 
 ---
 
@@ -95,19 +95,34 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   - OPQ rotation (not needed for recall on the benchmark data so far).
   - Binary or PQ codes inside HNSW, which needs gap 18 first.
 
-### 3. Public benchmarks — P0 · 🟡 harness done
+### 3. Public benchmarks — P0 · 🟡 GloVe done, SIFT1M pending
 
 - **Done (2026-10-16):** `cmd/gideondb-bench` and `make bench-ann` report
   recall@k against exact ground truth, QPS, p50/p99, build time and segment
-  heap for `flat`, `hnsw`, `hnsw-ef128/256` and `binary(-x10/-x20)`. Input is
-  synthetic clustered data or `.fvecs` files (SIFT1M, GIST1M). First results
+  heap. Input is synthetic clustered data or `.fvecs` files. First results
   are in [ANN recall and latency](../benchmarks/ann-recall.md).
+- **Done (2026-10-21):** [standard datasets](../benchmarks/standard-datasets.md).
+  - **GloVe 6B 100d (cosine)** ran on flat, HNSW (`ef_search` 16–256),
+    binary, PQ and DiskANN, with full commands, hardware and versions.
+  - **Results.** On GloVe, HNSW reaches recall@10 0.980 at `ef_search` 64
+    and 0.996 at 256. Binary is a poor fit (0.61–0.74).
+  - **End-to-end server mode.** `gideondb-loadtest server` runs a REST
+    workload: concurrent ingest, 16 concurrent clients, unfiltered and 10%
+    filtered queries, with recall checked locally.
+  - **Bug fixed.** The run found that sealed HNSW graphs from a parallel
+    build could fail to load, which surfaced as HTTP 500 during large
+    ingests.
 - **Remaining:**
-  - Run SIFT1M, GIST1M, GloVe and Cohere 1M.
-  - Run VectorDBBench end to end through the server API, with concurrency and
-    filtered queries.
-  - Publish comparisons with Qdrant, Milvus and pgvector, but only after gap
-    19 is fixed.
+  - Run SIFT1M. Its official FTP download stalled at about half; the
+    commands are ready in the doc.
+  - Default checkpoints seal synchronously in the write path and stall
+    large ingests past the 30 s write timeout. The benchmarks ran with
+    `-checkpoint-every 0`.
+  - Run VectorDBBench (Cohere 1M, OpenAI 500K, filtered cases) through a
+    GideonDB client. The steps are in the doc.
+  - GIST1M and Cohere 1M were not downloaded in this round.
+  - Publish comparisons with Qdrant, Milvus and pgvector only after
+    VectorDBBench runs on matched hardware.
 
 ### 4. Disk-resident ANN index — P1 · ✅
 
@@ -285,19 +300,29 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   - Add a clustered-data recall test to `internal/index/hnsw` that must pass
     before closing this gap.
 
-### 19. HNSW build throughput — P1 · 🟡 batch build done
+### 19. HNSW build throughput — P1 · ✅ engine, ⬜ segment wiring
 
 - **Done (2026-10-16):** `hnsw.Build` inserts nodes in parallel with per-node
-  locks (hnswlib style) and is used for checkpoint graph builds and for full
-  rebuilds after a vector update. Cosine scoring uses cached vector norms.
-  50,000 × 384 builds in 11.1 s on 8 cores, down from about 42 s on one
-  thread, with unchanged recall. Graphs under 2,048 vectors still build
-  serially and deterministically.
+  locks (hnswlib style) for checkpoint graph builds and full rebuilds. Cosine
+  scoring uses cached vector norms. 50,000 × 384 builds in 11.1 s on 8 cores,
+  down from about 42 s.
+- **Done (2026-10-21):** see
+  [distance kernels and HNSW inserts](../benchmarks/distance-kernels.md).
+  - **NEON kernels.** arm64 runs dot and L2 kernels in NEON assembly, 2.5–7×
+    faster than the old Go loops. Other platforms use an eight-lane portable
+    kernel, about 2× faster; `-tags purego` forces it. Equivalence and fuzz
+    tests check both against a float64 reference and against each other.
+    HNSW builds and searches got about 2–3× faster.
+  - **Parallel live batches.** `(*hnsw.Index).UpsertBatch` links large
+    batches into a live mutable graph in parallel, 5.8× faster for 8,000
+    inserts on 8 cores. Small batches produce exactly the graph that serial
+    `Upsert` would. The persisted format is unchanged.
+  - **Bug fixed.** A parallel insert now prunes the node's own neighbour
+    list, so sealed graphs always reload.
 - **Remaining:**
-  - Live inserts into a mutable segment are still one at a time under the
-    index lock (about 40 s for 50,000 × 384).
-  - SIMD distance kernels (Go has no auto-vectorisation; needs assembly or
-    a Go SIMD package).
+  - Call `UpsertBatch` from the segment batch-upsert path. Until then, REST
+    and gRPC batch writes to a mutable HNSW segment stay serial per shard.
+  - AVX2 kernels for amd64, which need an amd64 host to measure and verify.
 
 ## Cloud (paid) gaps
 
@@ -359,7 +384,7 @@ service layer around it.
 
 ## Suggested sequencing
 
-1. **Open-source launch:** gaps 1 ✅, 2 ✅ (binary), 3 🟡, 18 ✅, 19 🟡 (batch build)
+1. **Open-source launch:** gaps 1 ✅, 2 ✅ (binary), 3 🟡 (GloVe; SIFT1M pending), 18 ✅, 19 ✅
    before publishing benchmarks, then 17 🟡.
 2. **Adoption growth:** gaps 5 ✅, 7 ✅, 9 🟡, then 6 and 8.
 3. **Cloud beta:** gaps 10, 11, 12.

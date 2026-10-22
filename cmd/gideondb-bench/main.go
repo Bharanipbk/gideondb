@@ -7,6 +7,8 @@
 //
 //	go run ./cmd/gideondb-bench -n 100000 -dimension 384
 //	go run ./cmd/gideondb-bench -base sift_base.fvecs -queries sift_query.fvecs -metric l2
+//
+// docs/benchmarks/standard-datasets.md records SIFT1M and GloVe runs.
 package main
 
 import (
@@ -22,6 +24,8 @@ import (
 	"runtime/debug"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
@@ -42,6 +46,7 @@ type result struct {
 	K              int     `json:"k"`
 	Metric         string  `json:"metric"`
 	Dataset        string  `json:"dataset"`
+	Build          string  `json:"build"`
 	GoVersion      string  `json:"go_version"`
 	Architecture   string  `json:"architecture"`
 	CPUs           int     `json:"cpus"`
@@ -65,7 +70,11 @@ func main() {
 	configsFlag := flag.String("configs", "flat,hnsw,hnsw-ef128,binary,binary-x10,pq,pq-x10", "comma-separated configurations")
 	jsonPath := flag.String("json", "", "write results as JSON to this path")
 	seed := flag.Int64("seed", 42, "synthetic data seed")
+	buildMode := flag.String("build", "sealed", "hnsw build: sealed (parallel batch build, as when a segment is sealed) or live (one Upsert per vector)")
 	flag.Parse()
+	if *buildMode != "sealed" && *buildMode != "live" {
+		fail(fmt.Errorf("-build must be sealed or live"))
+	}
 
 	metric := core.Metric(*metricName)
 	if !metric.Valid() {
@@ -94,6 +103,8 @@ func main() {
 
 	available := map[string]core.IndexConfig{
 		"flat":       {Type: core.IndexFlat},
+		"hnsw-ef16":  {Type: core.IndexHNSW, EFSearch: 16},
+		"hnsw-ef32":  {Type: core.IndexHNSW, EFSearch: 32},
 		"hnsw":       {Type: core.IndexHNSW},
 		"hnsw-ef128": {Type: core.IndexHNSW, EFSearch: 128},
 		"hnsw-ef256": {Type: core.IndexHNSW, EFSearch: 256},
@@ -122,8 +133,8 @@ func main() {
 	var results []result
 	for _, config := range configs {
 		fmt.Fprintf(os.Stderr, "running %s…\n", config.name)
-		r := run(config, base, queries, truth, metric, *k)
-		r.Dataset = dataset
+		r := run(config, base, queries, truth, metric, *k, *buildMode)
+		r.Dataset, r.Build = dataset, *buildMode
 		results = append(results, r)
 	}
 	printMarkdown(results)
@@ -135,7 +146,7 @@ func main() {
 	}
 }
 
-func run(config benchConfig, base, queries [][]float32, truth [][]string, metric core.Metric, k int) result {
+func run(config benchConfig, base, queries [][]float32, truth [][]string, metric core.Metric, k int, buildMode string) result {
 	collection := core.CollectionConfig{Name: "bench", Dimension: len(base[0]), Metric: metric, ShardCount: 1, Index: config.index}.Normalized()
 	if err := collection.Validate(); err != nil {
 		fail(err)
@@ -143,31 +154,7 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 	settle()
 	before := heapAlloc()
 	started := time.Now()
-	var seg *segment.Segment
-	var err error
-	switch {
-	case collection.Index.Type == core.IndexDiskANN:
-		seg = sealedDiskANN(collection, base)
-	case collection.Index.Quantization == core.QuantizationPQ:
-		// PQ codebooks are trained when a segment is sealed, so build time
-		// includes k-means training and encoding.
-		records := make([]core.Record, len(base))
-		for i, vector := range base {
-			records[i] = core.Record{ID: id(i), Vector: vector}
-		}
-		seg, err = segment.NewImmutable(collection, records, nil)
-	default:
-		seg, err = segment.New(collection)
-		for i, vector := range base {
-			if err != nil {
-				break
-			}
-			err = seg.Upsert(core.Record{ID: id(i), Vector: vector})
-		}
-	}
-	if err != nil {
-		fail(err)
-	}
+	seg := buildSegment(collection, base, buildMode)
 	build := time.Since(started)
 	settle()
 	after := heapAlloc()
@@ -205,6 +192,52 @@ func run(config benchConfig, base, queries [][]float32, truth [][]string, metric
 	}
 }
 
+// buildSegment loads base into a segment. HNSW in sealed mode takes the
+// path a sealed segment takes: a parallel batch build of the graph, then an
+// immutable segment over it. Everything else inserts one record at a time.
+func buildSegment(collection core.CollectionConfig, base [][]float32, buildMode string) *segment.Segment {
+	switch {
+	case collection.Index.Type == core.IndexDiskANN:
+		return sealedDiskANN(collection, base)
+	case collection.Index.Quantization == core.QuantizationPQ:
+		// PQ codebooks are trained when a segment is sealed, so build time
+		// includes k-means training and encoding.
+		records := make([]core.Record, len(base))
+		for i, vector := range base {
+			records[i] = core.Record{ID: id(i), Vector: vector}
+		}
+		seg, err := segment.NewImmutable(collection, records, nil)
+		if err != nil {
+			fail(err)
+		}
+		return seg
+	case collection.Index.Type == core.IndexHNSW && buildMode == "sealed":
+		records := make([]core.Record, len(base))
+		for i, vector := range base {
+			records[i] = core.Record{ID: id(i), Vector: vector}
+		}
+		graph, err := segment.BuildHNSWGraph(collection, records)
+		if err != nil {
+			fail(err)
+		}
+		seg, err := segment.NewHNSWFromGraph(collection, records, graph)
+		if err != nil {
+			fail(err)
+		}
+		return seg
+	}
+	seg, err := segment.New(collection)
+	if err != nil {
+		fail(err)
+	}
+	for i, vector := range base {
+		if err := seg.Upsert(core.Record{ID: id(i), Vector: vector}); err != nil {
+			fail(err)
+		}
+	}
+	return seg
+}
+
 func sealedDiskANN(collection core.CollectionConfig, base [][]float32) *segment.Segment {
 	directory, err := os.MkdirTemp("", "gideondb-bench-diskann-")
 	if err != nil {
@@ -226,6 +259,7 @@ func sealedDiskANN(collection core.CollectionConfig, base [][]float32) *segment.
 	return seg
 }
 
+// groundTruth runs exact flat search for every query, spread over all CPUs.
 func groundTruth(base, queries [][]float32, metric core.Metric, k int) [][]string {
 	exact, err := segment.New(core.CollectionConfig{Name: "truth", Dimension: len(base[0]), Metric: metric, ShardCount: 1}.Normalized())
 	if err != nil {
@@ -237,15 +271,28 @@ func groundTruth(base, queries [][]float32, metric core.Metric, k int) [][]strin
 		}
 	}
 	truth := make([][]string, len(queries))
-	for i, query := range queries {
-		found, err := exact.Search("", query, k)
-		if err != nil {
-			fail(err)
-		}
-		for _, item := range found {
-			truth[i] = append(truth[i], item.ID)
-		}
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= len(queries) {
+					return
+				}
+				found, err := exact.Search("", queries[i], k)
+				if err != nil {
+					fail(err)
+				}
+				for _, item := range found {
+					truth[i] = append(truth[i], item.ID)
+				}
+			}
+		}()
 	}
+	wg.Wait()
 	return truth
 }
 
