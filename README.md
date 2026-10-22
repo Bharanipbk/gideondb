@@ -9,7 +9,8 @@
 
 GideonDB is an experimental open-source, shard-aware vector database written
 primarily in Go. It includes single-node storage and recovery, flat and HNSW
-search, metadata filtering, static distributed placement, Raft metadata
+and DiskANN search, quantization, hybrid and multi-vector retrieval, metadata
+filtering, static distributed placement, Raft metadata
 coordination, replication and repair, capacity-aware rebalancing, operational
 hardening, multi-language SDKs, and an embedded administration dashboard.
 It remains pre-alpha: minor releases may contain documented breaking changes,
@@ -51,13 +52,35 @@ helm install gideondb deployments/helm/gideondb
 
 ## Project status
 
-Pre-alpha. The core supports float32 vectors; cosine, dot-product and L2
-scoring; exact flat and experimental HNSW indexes; logical shards; checksummed
-WAL recovery; immutable mmap-oriented checkpoints; tombstones; indexed
-metadata filters; bounded parallel search; replication; repair; Raft-backed
-cluster metadata; deterministic placement and rebalancing; backup/restore;
-Prometheus metrics; structured tracing; REST APIs; Go, Python, TypeScript, Java,
-Rust, and .NET SDKs; Python embedding/framework integrations; and a web dashboard.
+Pre-alpha. The core supports float32 and float16 vectors; cosine, dot-product
+and L2 scoring with ARM NEON distance kernels (portable Go elsewhere); logical shards;
+checksummed WAL recovery; immutable mmap-oriented checkpoints; tombstones;
+replication; repair; Raft-backed cluster metadata; deterministic placement and
+rebalancing; backup/restore; Prometheus metrics; structured tracing; REST and
+gRPC APIs; Go, Python, TypeScript, Java, Rust, and .NET SDKs; and a web dashboard.
+
+Search and indexing:
+
+- **Indexes:** exact flat, parallel-built
+  [HNSW](docs/indexing/hnsw.md), and a disk-resident
+  [DiskANN](docs/indexing/diskann.md) graph for checkpointed segments
+  (deterministic builds, 8-bit navigation codes held in memory).
+- **Quantization:** [binary](docs/indexing/binary-quantization.md) and
+  [product quantization](docs/indexing/product-quantization.md) with exact
+  rescoring.
+- **Retrieval:** [BM25 and sparse hybrid search](docs/indexing/sparse-hybrid.md)
+  with fusion, [named vectors](docs/indexing/named-vectors.md),
+  [multi-vector MaxSim](docs/indexing/multi-vector.md), and
+  [reranking](docs/indexing/reranking.md).
+- **Filtering:** indexed metadata, text and geo filters, score pagination and
+  grouping.
+- **Embedding:** [server-side vectorizers](docs/indexing/server-side-embedding.md)
+  (OpenAI-compatible, Cohere, Hugging Face, Ollama).
+- **Agents:** an [MCP server](docs/integrations/mcp.md) with agent memory and
+  framework adapters.
+
+Recall, latency and memory measurements, including standard ANN datasets, are
+in [benchmarks](docs/benchmarks/standard-datasets.md).
 
 Known release gaps include the external Kubernetes gate, remaining distributed
 and administrative gRPC RPCs, and final open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
@@ -135,7 +158,8 @@ make build
 ```
 
 Run the Go and SDK test suites with `make test`, or the benchmarks with
-`make benchmark`.
+`make benchmark`. To compare index configurations on synthetic or `.fvecs`
+data, run `go run ./cmd/gideondb-bench -configs flat,hnsw,diskann,pq`.
 
 ## Run with Docker
 
