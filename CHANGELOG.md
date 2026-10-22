@@ -50,7 +50,7 @@ describe unreleased experimental work.
 - `gideondb-bench` builds HNSW the way sealed segments are built (parallel;
   `-build live` keeps one-at-a-time inserts), computes ground truth in
   parallel, and adds `hnsw-ef16`/`hnsw-ef32`.
-- SIFT1M and GloVe results:
+- GloVe results (SIFT1M pending its download):
   [standard datasets](docs/benchmarks/standard-datasets.md) and
   [distance kernels](docs/benchmarks/distance-kernels.md).
 

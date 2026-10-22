@@ -21,7 +21,7 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
 |---|-----|-------|----------|--------|
 | 1 | Indexed sparse / hybrid search and BM25 | Open source | P0 | ✅ engine, REST, gRPC, SDKs, dashboard |
 | 2 | Binary and product quantization | Open source | P0 | ✅ binary; ✅ PQ (flat) |
-| 3 | Public benchmarks | Open source | P0 | ✅ SIFT1M, GloVe, end-to-end server run; ⬜ VectorDBBench and comparisons |
+| 3 | Public benchmarks | Open source | P0 | 🟡 GloVe + end-to-end server run; ⬜ SIFT1M (download stalled), VectorDBBench |
 | 4 | Disk-resident ANN index | Open source / Cloud | P1 | ✅ |
 | 5 | Server-side embedding (text in, results out) | Open source | P1 | ✅ REST, gRPC, all SDKs; ⬜ Cohere/ONNX providers |
 | 6 | Reranking and multi-vector (late interaction) | Open source | P1 | ✅ REST (MaxSim, cross-encoder); ⬜ gRPC/SDKs |
@@ -95,19 +95,17 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
   - OPQ rotation (not needed for recall on the benchmark data so far).
   - Binary or PQ codes inside HNSW, which needs gap 18 first.
 
-### 3. Public benchmarks — P0 · ✅ standard datasets, ⬜ VectorDBBench
+### 3. Public benchmarks — P0 · 🟡 GloVe done, SIFT1M pending
 
 - **Done (2026-10-16):** `cmd/gideondb-bench` and `make bench-ann` report
   recall@k against exact ground truth, QPS, p50/p99, build time and segment
   heap. Input is synthetic clustered data or `.fvecs` files. First results
   are in [ANN recall and latency](../benchmarks/ann-recall.md).
 - **Done (2026-10-21):** [standard datasets](../benchmarks/standard-datasets.md).
-  - **SIFT1M (L2) and GloVe 6B 100d (cosine)** ran on flat, HNSW
-    (`ef_search` 16–256), binary, PQ and DiskANN, with full commands,
-    hardware and versions.
+  - **GloVe 6B 100d (cosine)** ran on flat, HNSW (`ef_search` 16–256),
+    binary, PQ and DiskANN, with full commands, hardware and versions.
   - **Results.** On GloVe, HNSW reaches recall@10 0.980 at `ef_search` 64
-    and 0.996 at 256. Binary is a poor fit for both sets, which the doc
-    explains.
+    and 0.996 at 256. Binary is a poor fit (0.61–0.74).
   - **End-to-end server mode.** `gideondb-loadtest server` runs a REST
     workload: concurrent ingest, 16 concurrent clients, unfiltered and 10%
     filtered queries, with recall checked locally.
@@ -115,6 +113,8 @@ Status key: ✅ done · 🟡 partly done · ⬜ not started.
     build could fail to load, which surfaced as HTTP 500 during large
     ingests.
 - **Remaining:**
+  - Run SIFT1M. Its official FTP download stalled at about half; the
+    commands are ready in the doc.
   - Default checkpoints seal synchronously in the write path and stall
     large ingests past the 30 s write timeout. The benchmarks ran with
     `-checkpoint-every 0`.
@@ -384,7 +384,7 @@ service layer around it.
 
 ## Suggested sequencing
 
-1. **Open-source launch:** gaps 1 ✅, 2 ✅ (binary), 3 ✅ (standard datasets), 18 ✅, 19 ✅
+1. **Open-source launch:** gaps 1 ✅, 2 ✅ (binary), 3 🟡 (GloVe; SIFT1M pending), 18 ✅, 19 ✅
    before publishing benchmarks, then 17 🟡.
 2. **Adoption growth:** gaps 5 ✅, 7 ✅, 9 🟡, then 6 and 8.
 3. **Cloud beta:** gaps 10, 11, 12.

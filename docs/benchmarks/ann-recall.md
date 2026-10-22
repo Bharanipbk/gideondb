@@ -87,7 +87,7 @@ reported; QPS and latency were not reproducible.
   `ef_search` 64 and 256). The `Build s` column above still measures live
   one-at-a-time inserts into a mutable segment, which stay serial.
 
-These are synthetic results. For SIFT1M and GloVe, including an end-to-end
+These are synthetic results. For GloVe (SIFT1M pending), including an end-to-end
 run through the HTTP server with concurrent and filtered queries, see
 [standard datasets](standard-datasets.md). For kernel and insert throughput,
 see [distance kernels](distance-kernels.md). Comparisons with other systems

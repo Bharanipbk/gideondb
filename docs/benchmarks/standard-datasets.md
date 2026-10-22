@@ -28,7 +28,7 @@ are not used.
 
 | Dataset | Source | Base | Queries | Dim | Metric |
 |---|---|---:|---:|---:|---|
-| SIFT1M | `ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz` (corpus-texmex.irisa.fr), `sift_base.fvecs` / `sift_query.fvecs` | 1,000,000 | 1,000 of 10,000 | 128 | L2 |
+| SIFT1M (pending download) | `ftp://ftp.irisa.fr/local/texmex/corpus/sift.tar.gz` (corpus-texmex.irisa.fr), `sift_base.fvecs` / `sift_query.fvecs` | 1,000,000 | 1,000 of 10,000 | 128 | L2 |
 | GloVe 6B 100d | `https://nlp.stanford.edu/data/glove.6B.zip` (Stanford NLP), `glove.6B.100d.txt` | 390,000 | 1,000 of 10,000 held out | 100 | cosine |
 
 - **GloVe** has no official query split.
@@ -69,7 +69,13 @@ Load average 2–19 during the run; it took 31 minutes, with peak RSS 1.8 GB.
 | diskann | 0.996 | 1028 | 0.971 | 1.685 | 427.9 | 131.5 |
 | diskann-ef200 | 0.998 | 592 | 1.639 | 3.140 | 382.0 | 131.5 |
 
-SIFT1M_RESULTS
+### SIFT1M, L2
+
+**Not run yet.** The only approved source, the IRISA FTP server (its HTTP
+mirror timed out), delivered under 20 KB/s and then stalled. After a day of
+resumed transfers, only 83 of about 168 MB had arrived. The commands under
+[Reproduce](#reproduce) are ready. Expect `binary` to do badly on SIFT (see
+[findings](#findings)).
 
 ## End-to-end through the HTTP server
 
@@ -99,21 +105,22 @@ Load average 10–16.
 | Unfiltered | 16 | 1,168 | 12.0 | 27.1 | 35.7 | 0.997 |
 | Filtered (10%) | 16 | 157 | 82.6 | 225.9 | 406.4 | 0.9997 |
 
-SIFT1M_SERVER
+SIFT1M through the server is pending the same download.
 
 ## Findings
 
 - **HNSW recall/QPS on real data.**
-  - GloVe is the harder set: recall@10 is 0.980 at the default `ef_search`
+  - On GloVe, recall@10 is 0.980 at the default `ef_search`
     64 and 0.996 at 256.
   - Recall rises steadily with `ef_search`, so the graph stays connected
     (the gap 18 fix holds on real data).
 - **Binary quantization is a poor fit for both sets.**
   - GloVe (0.61–0.74) has a few dominant dimensions that sign bits
     summarize badly.
-  - SIFT is L2 over non-negative, uncentred histogram values, so almost
-    every sign bit is the same and the codes carry little information. Use
-    it only for centred embedding models (most modern text embedders).
+  - SIFT (not yet measured) is L2 over non-negative, uncentred histogram
+    values. Sign bits taken against zero are then almost all the same, so
+    expect binary codes to carry little information. Use binary only with
+    centred embedding models (most modern text embedders).
 - **PQ** reaches 0.99 on GloVe at about a third less heap than flat. Its
   scan is still exhaustive, so QPS matches flat. Pair it with a graph index
   for speed.
