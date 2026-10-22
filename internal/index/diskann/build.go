@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"slices"
 	"sort"
 	"sync"
 
@@ -39,17 +40,21 @@ type scored struct {
 	distance float32
 }
 
+// maxBatch caps an insertion batch so late inserts see recent edges.
+const maxBatch = 1024
+
 type builder struct {
 	metric  core.Metric
 	vectors [][]float32
 	params  Params
-	locks   []sync.Mutex
 	graph   [][]uint32
 	medoid  uint32
 }
 
 // BuildGraph runs two Vamana passes (alpha 1, then params.Alpha) over a
-// random insertion order. Workers <= 0 uses GOMAXPROCS.
+// fixed random insertion order, then repairs reachability from the
+// medoid. The result is deterministic for a given input; workers <= 0 uses
+// GOMAXPROCS.
 func BuildGraph(metric core.Metric, vectors [][]float32, params Params, workers int) (*Graph, error) {
 	if !metric.Valid() || len(vectors) == 0 || len(vectors) > 1<<32-1 || params.MaxDegree < 1 || params.BuildList < 1 || params.Alpha < 1 {
 		return nil, fmt.Errorf("%w: invalid diskann build configuration", core.ErrInvalidArgument)
@@ -60,31 +65,44 @@ func BuildGraph(metric core.Metric, vectors [][]float32, params Params, workers 
 			return nil, core.ErrDimensionMismatch
 		}
 	}
-	b := &builder{metric: metric, vectors: vectors, params: params, locks: make([]sync.Mutex, len(vectors)), graph: make([][]uint32, len(vectors))}
+	b := &builder{metric: metric, vectors: vectors, params: params, graph: make([][]uint32, len(vectors))}
 	b.medoid = b.findMedoid()
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
 	}
 	order := rand.New(rand.NewSource(int64(len(vectors)))).Perm(len(vectors))
 	for _, alpha := range []float32{1, params.Alpha} {
-		next := make(chan int, workers)
-		var wait sync.WaitGroup
-		for range workers {
-			wait.Add(1)
-			go func() {
-				defer wait.Done()
-				visited := newVisitSet(len(vectors))
-				for position := range next {
-					b.insert(uint32(position), alpha, visited)
-				}
-			}()
+		// Insert in prefix-doubling batches: each batch searches and prunes
+		// in parallel against the graph as it stood before the batch, then
+		// its edges are applied serially in order, so the graph depends
+		// only on the input and never on scheduling or the worker count.
+		for start := 0; start < len(order); {
+			batch := order[start:min(len(order), start+min(max(start, 1), maxBatch))]
+			pruned := make([][]uint32, len(batch))
+			next := make(chan int, len(batch))
+			for i := range batch {
+				next <- i
+			}
+			close(next)
+			var wait sync.WaitGroup
+			for range min(workers, len(batch)) {
+				wait.Add(1)
+				go func() {
+					defer wait.Done()
+					visited := newVisitSet(len(vectors))
+					for i := range next {
+						pruned[i] = b.prunedNeighbors(uint32(batch[i]), alpha, visited)
+					}
+				}()
+			}
+			wait.Wait()
+			for i, node := range batch {
+				b.link(uint32(node), pruned[i], alpha)
+			}
+			start += len(batch)
 		}
-		for _, position := range order {
-			next <- position
-		}
-		close(next)
-		wait.Wait()
 	}
+	b.connect()
 	return &Graph{Neighbors: b.graph, Medoid: b.medoid}, nil
 }
 
@@ -119,12 +137,6 @@ func (b *builder) findMedoid() uint32 {
 	return best
 }
 
-func (b *builder) neighbors(node uint32) []uint32 {
-	b.locks[node].Lock()
-	defer b.locks[node].Unlock()
-	return append([]uint32(nil), b.graph[node]...)
-}
-
 // greedySearch returns every node expanded while searching for target with
 // a list of size BuildList, which is the candidate set Vamana prunes.
 func (b *builder) greedySearch(target []float32, visited *visitSet) []scored {
@@ -146,7 +158,7 @@ func (b *builder) greedySearch(target []float32, visited *visitSet) []scored {
 		pool[next].expanded = true
 		node := pool[next].node
 		expanded = append(expanded, scored{node, pool[next].distance})
-		for _, neighbor := range b.neighbors(node) {
+		for _, neighbor := range b.graph[node] {
 			if !visited.add(neighbor) {
 				continue
 			}
@@ -155,38 +167,92 @@ func (b *builder) greedySearch(target []float32, visited *visitSet) []scored {
 	}
 }
 
-func (b *builder) insert(node uint32, alpha float32, visited *visitSet) {
+func (b *builder) prunedNeighbors(node uint32, alpha float32, visited *visitSet) []uint32 {
 	candidates := b.greedySearch(b.vectors[node], visited)
-	for _, neighbor := range b.neighbors(node) {
+	for _, neighbor := range b.graph[node] {
 		candidates = append(candidates, scored{neighbor, b.distance(b.vectors[node], b.vectors[neighbor])})
 	}
-	pruned := b.robustPrune(node, candidates, alpha)
-	b.locks[node].Lock()
+	return b.robustPrune(node, candidates, alpha)
+}
+
+// link installs node's pruned out-edges and the matching back edges.
+func (b *builder) link(node uint32, pruned []uint32, alpha float32) {
 	b.graph[node] = pruned
-	b.locks[node].Unlock()
 	for _, neighbor := range pruned {
-		b.locks[neighbor].Lock()
-		current := b.graph[neighbor]
-		present := false
-		for _, existing := range current {
-			if existing == node {
-				present = true
+		if slices.Contains(b.graph[neighbor], node) {
+			continue
+		}
+		b.addEdge(neighbor, node, alpha)
+	}
+}
+
+func (b *builder) addEdge(from, to uint32, alpha float32) {
+	current := b.graph[from]
+	if len(current) < b.params.MaxDegree {
+		b.graph[from] = append(current, to)
+		return
+	}
+	back := make([]scored, 0, len(current)+1)
+	for _, existing := range append(current, to) {
+		back = append(back, scored{existing, b.distance(b.vectors[from], b.vectors[existing])})
+	}
+	b.graph[from] = b.robustPrune(from, back, alpha)
+}
+
+// connect makes every node reachable from the medoid. Robust pruning can
+// strip all in-edges from a far outlier (its neighbours keep it only as a
+// back edge, then prune it as their farthest candidate), and search could
+// then never return it. Each unreachable node gets an edge from its
+// nearest reachable node, replacing that node's farthest neighbour when it
+// is full; the loop repeats until a traversal reaches everything.
+func (b *builder) connect() {
+	for range len(b.vectors) {
+		reached := b.reachable()
+		missing := -1
+		for node, ok := range reached {
+			if !ok {
+				missing = node
 				break
 			}
 		}
-		if !present {
-			if len(current) < b.params.MaxDegree {
-				b.graph[neighbor] = append(current, node)
-			} else {
-				back := make([]scored, 0, len(current)+1)
-				for _, existing := range append(current, node) {
-					back = append(back, scored{existing, b.distance(b.vectors[neighbor], b.vectors[existing])})
-				}
-				b.graph[neighbor] = b.robustPrune(neighbor, back, alpha)
+		if missing < 0 {
+			return
+		}
+		from, best := -1, float32(0)
+		for node, ok := range reached {
+			if d := b.distance(b.vectors[missing], b.vectors[node]); ok && (from < 0 || d < best) {
+				from, best = node, d
 			}
 		}
-		b.locks[neighbor].Unlock()
+		if neighbors := b.graph[from]; len(neighbors) < b.params.MaxDegree {
+			b.graph[from] = append(neighbors, uint32(missing))
+		} else {
+			farthest := 0
+			for i, neighbor := range neighbors {
+				if b.distance(b.vectors[from], b.vectors[neighbor]) > b.distance(b.vectors[from], b.vectors[neighbors[farthest]]) {
+					farthest = i
+				}
+			}
+			neighbors[farthest] = uint32(missing)
+		}
 	}
+}
+
+func (b *builder) reachable() []bool {
+	reached := make([]bool, len(b.vectors))
+	reached[b.medoid] = true
+	queue := []uint32{b.medoid}
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for _, neighbor := range b.graph[node] {
+			if !reached[neighbor] {
+				reached[neighbor] = true
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+	return reached
 }
 
 // robustPrune keeps the closest candidate and drops every remaining one

@@ -44,6 +44,12 @@ the collection default for that query, as with HNSW.
 Construction is in memory: it needs the shard's vectors plus the graph
 (about `4 × max_degree` bytes per vector) while it runs. Serving does not.
 
+The build is deterministic: nodes are inserted in a fixed order in
+prefix-doubling batches (searched in parallel, linked serially), so the same
+vectors give the same graph on any number of cores. A final pass makes every
+node reachable from the medoid; without it, robust pruning can strip all
+in-edges from a far outlier and search would never return it.
+
 ## Search
 
 1. The query is compared with 8-bit scalar codes on the heap. A best-first

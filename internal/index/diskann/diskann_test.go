@@ -1,6 +1,7 @@
 package diskann
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"os"
@@ -291,4 +292,56 @@ func mustGraph(t *testing.T) *Graph {
 		t.Fatal(err)
 	}
 	return graph
+}
+
+func unreachable(graph *Graph) int {
+	seen := make([]bool, len(graph.Neighbors))
+	seen[graph.Medoid] = true
+	queue, count := []uint32{graph.Medoid}, 1
+	for len(queue) > 0 {
+		node := queue[0]
+		queue = queue[1:]
+		for _, neighbor := range graph.Neighbors[node] {
+			if !seen[neighbor] {
+				seen[neighbor] = true
+				count++
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+	return len(seen) - count
+}
+
+// TestOutlierStaysReachable reproduces a far outlier losing every in-edge:
+// its neighbours accept it as a back edge, then robust-prune it away again
+// as their farthest candidate, leaving it unreachable from the medoid.
+func TestOutlierStaysReachable(t *testing.T) {
+	params := Params{MaxDegree: 8, BuildList: 32, Alpha: 1.2}
+	for seed := range int64(20) {
+		random := rand.New(rand.NewSource(seed))
+		vectors := make([][]float32, 200)
+		for i := range vectors {
+			vectors[i] = make([]float32, 8)
+			for j := range vectors[i] {
+				vectors[i][j] = float32(random.NormFloat64())
+			}
+		}
+		vectors = append(vectors, []float32{9, 9, 9, 9, 9, 9, 9, 9})
+		first, err := BuildGraph(core.MetricL2, vectors, params, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lost := unreachable(first); lost != 0 {
+			t.Fatalf("seed %d: %d nodes unreachable from the medoid", seed, lost)
+		}
+		second, err := BuildGraph(core.MetricL2, vectors, params, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for node := range first.Neighbors {
+			if fmt.Sprint(first.Neighbors[node]) != fmt.Sprint(second.Neighbors[node]) {
+				t.Fatalf("seed %d: build depends on worker count at node %d", seed, node)
+			}
+		}
+	}
 }
