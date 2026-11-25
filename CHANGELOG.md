@@ -55,7 +55,10 @@ describe unreleased experimental work.
   Each also gains a full-response search method (`search_response`,
   `searchDetailed`, `searchResponse`, `search_response`,
   `SearchWithResponseAsync`), plus suggest and multipart document upload.
-  Existing methods are unchanged. **Rust:** new fields on `CollectionConfig`,
+  Existing methods are unchanged. gRPC gains `SearchRequest.aggregations`,
+  `sort` and `sort_candidates`, `SearchResponse.aggregations`, and the
+  `Suggest` and `IngestDocument` RPCs. `IngestDocument` runs the REST
+  pipeline, needs the writer role, and is limited to 16 MiB. **Rust:** new fields on `CollectionConfig`,
   `SearchOptions`, `SearchResult`, `DistributedSearchResponse` and the
   transport `Request` mean struct literals that list every field must add
   `..Default::default()`.

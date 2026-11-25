@@ -164,3 +164,7 @@ func (s *Server) storeDocument(w http.ResponseWriter, r *http.Request, collectio
 // chunkID is the record ID of a document chunk; the fixed-width index keeps
 // chunks in order when scrolled.
 func chunkID(document string, index int) string { return fmt.Sprintf("%s#%05d", document, index) }
+
+// DocumentIngestHandler exposes the document upload handler for the gRPC
+// transport, which authenticates before calling it.
+func (s *Server) DocumentIngestHandler() http.Handler { return http.HandlerFunc(s.ingestDocument) }

@@ -15,6 +15,8 @@ REQUIRED_RPCS = {
     "PlanRebalance", "PrepareRebalance", "ApplyRebalance", "AbortRebalance",
     "AdvanceMetadataEpoch", "CreateRecoveryPoint", "RecentLogs", "ClusterLogs",
     "ListEmbedders", "ListRerankers",
+    # Search helpers.
+    "Suggest", "IngestDocument",
 }
 
 

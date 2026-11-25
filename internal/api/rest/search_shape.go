@@ -2,8 +2,6 @@ package rest
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
 )
@@ -27,11 +25,7 @@ type searchShape struct {
 }
 
 // sortField orders results by a metadata field, or by "_score".
-type sortField struct {
-	Field string `json:"field"`
-	// Order is "asc" (default for fields) or "desc" (default for _score).
-	Order string `json:"order,omitempty"`
-}
+type sortField = core.SortField
 
 const (
 	maxSortFields     = 4
@@ -112,7 +106,7 @@ func (r *searchRequest) takeShape() (searchShape, error) {
 // apply returns the response key and value for results ordered best first.
 func (s searchShape) apply(results []core.SearchResult) (string, any) {
 	if len(s.sort) > 0 {
-		sortResults(results, s.sort)
+		core.SortResults(results, s.sort)
 	}
 	if s.groupBy == "" {
 		start := min(s.offset, len(results))
@@ -147,84 +141,4 @@ func (s searchShape) apply(results []core.SearchResult) (string, any) {
 		}
 	}
 	return "groups", groups
-}
-
-// sortResults orders results by the sort fields, stably, so score order
-// breaks remaining ties. Missing values sort last in either order; numbers
-// sort before strings, and booleans after both.
-func sortResults(results []core.SearchResult, fields []sortField) {
-	sort.SliceStable(results, func(i, j int) bool {
-		for _, field := range fields {
-			a, aok := sortValue(results[i], field.Field)
-			b, bok := sortValue(results[j], field.Field)
-			if !aok || !bok {
-				if aok != bok {
-					return aok
-				}
-				continue
-			}
-			c := compareSortValues(a, b)
-			if c == 0 {
-				continue
-			}
-			if field.Order == "desc" {
-				return c > 0
-			}
-			return c < 0
-		}
-		return false
-	})
-}
-
-func sortValue(result core.SearchResult, field string) (any, bool) {
-	if field == scoreSortField {
-		return float64(result.Score), true
-	}
-	value, ok := result.Metadata[field]
-	if !ok || value == nil {
-		return nil, false
-	}
-	switch value.(type) {
-	case float64, string, bool:
-		return value, true
-	}
-	return nil, false
-}
-
-func sortRank(value any) int {
-	switch value.(type) {
-	case float64:
-		return 0
-	case string:
-		return 1
-	}
-	return 2
-}
-
-func compareSortValues(a, b any) int {
-	if ra, rb := sortRank(a), sortRank(b); ra != rb {
-		return ra - rb
-	}
-	switch x := a.(type) {
-	case float64:
-		y := b.(float64)
-		switch {
-		case x < y:
-			return -1
-		case x > y:
-			return 1
-		}
-	case string:
-		return strings.Compare(x, b.(string))
-	case bool:
-		y := b.(bool)
-		if x == y {
-			return 0
-		}
-		if !x {
-			return -1
-		}
-		return 1
-	}
-	return 0
 }

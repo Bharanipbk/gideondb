@@ -52,3 +52,5 @@ queries:
   "sneaker". Multi-word synonyms are ignored.
 - Synonyms are fixed when the collection is created. To change them,
   create a new collection.
+
+This is also available over [gRPC](../api/grpc.md#search-features).

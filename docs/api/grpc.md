@@ -4,8 +4,9 @@ Maturity: **data-plane, distributed and administrative RPCs implemented**.
 
 The versioned public protobuf contract is
 [`gideondb.v1.GideonDBService`](../../api/proto/gideondb/v1/gideondb.proto).
-It covers the 18 operations required by the technical design, plus 15
-administrative and cluster RPCs:
+It covers the 18 operations required by the technical design, 15
+administrative and cluster RPCs, and the `Suggest` and `IngestDocument`
+search helpers:
 
 - collection creation, deletion, listing, and description;
 - record upsert, bounded batch upsert, deletion, and exact lookup;
@@ -81,8 +82,29 @@ same. HTTP errors map to gRPC codes: 400 → `INVALID_ARGUMENT`, 401 →
 Embedding the engine without the REST server leaves these RPCs
 `UNIMPLEMENTED`.
 
-Search also accepts `facets` and `highlight`, and `Collection` accepts
-`text_analyzer`; see [full-text](../indexing/full-text.md).
+## Search features
+
+`Collection` accepts `text_analyzer` and `synonyms`. `SearchRequest` accepts
+the same search features as REST, on local search and on the distributed
+search used when static routing is on:
+
+| Field | Response | Guide |
+|---|---|---|
+| `syntax` | | [Query syntax](../indexing/query-syntax.md) |
+| `highlight` | `SearchResult.highlights` | [Full-text](../indexing/full-text.md#highlighting) |
+| `facets` | `SearchResponse.facets` | [Full-text](../indexing/full-text.md#facets) |
+| `aggregations` | `SearchResponse.aggregations` | [Aggregations](../indexing/aggregations-and-sorting.md) |
+| `sort`, `sort_candidates` | Results reordered | [Sorting](../indexing/aggregations-and-sorting.md#sorting) |
+
+- **`Suggest`** returns completions and `did_you_mean`, like
+  `GET /v1/collections/{name}/suggest`. Any role can call it.
+- **`IngestDocument`** takes the whole file in `content`, so it is limited to
+  the 16 MiB gRPC message size. Larger files go through the REST upload, which
+  accepts up to 32 MiB. It runs the REST document pipeline, so extraction,
+  chunking, embedding and replacement behave identically. It needs the writer
+  role.
+- **Errors:** unsupported formats and files with no extractable text return
+  `INVALID_ARGUMENT` with the REST message.
 
 The listener uses the configured bearer API key, reloadable principals file,
 and TLS identity. The legacy API key has administrator authority. Principals

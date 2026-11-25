@@ -462,6 +462,7 @@ func main() {
 			DistributedUpsert:  apiServer.DistributedBatchUpsertHandler(),
 			DistributedDelete:  apiServer.DistributedDeleteHandler(),
 			AdminRoutes:        grpcAdminRoutes(apiServer),
+			DocumentIngest:     apiServer.DocumentIngestHandler(),
 			RestoreDirectory:   *grpcRestorePath,
 			ClusterSnapshotter: apiServer,
 			ServerOptions:      grpcOptions,

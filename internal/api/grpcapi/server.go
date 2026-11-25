@@ -75,6 +75,9 @@ type Options struct {
 	DistributedScroll   http.Handler
 	DistributedUpsert   http.Handler
 	DistributedDelete   http.Handler
+	// DocumentIngest is the REST document upload handler that
+	// IngestDocument delegates to (rest.Server.DocumentIngestHandler).
+	DocumentIngest http.Handler
 	// AdminRoutes bridges administrative RPCs to REST handlers by route
 	// name (see rest.Server.AdminRoutes). Missing routes are Unimplemented.
 	AdminRoutes        map[string]AdminRoute
@@ -262,6 +265,16 @@ func (s *Server) Search(ctx context.Context, request *v1.SearchRequest) (*v1.Sea
 	if err != nil {
 		return nil, err
 	}
+	sortFields, err := fromProtoSort(request.GetSort())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	topK := int(request.GetTopK())
+	fetch := topK
+	if len(sortFields) > 0 && topK > 0 {
+		// Sorting reorders a pool of relevance candidates.
+		fetch = max(topK, core.SortPool(int(request.GetSortCandidates()), 0, topK))
+	}
 	var results []core.SearchResult
 	if request.GetSparseVector() != nil || request.GetText() != "" {
 		fusion, err := fromProtoFusion(request.GetFusion())
@@ -271,13 +284,17 @@ func (s *Server) Search(ctx context.Context, request *v1.SearchRequest) (*v1.Sea
 		if alpha := searchAlpha(request); alpha < 0 || alpha > 1 {
 			return nil, status.Error(codes.InvalidArgument, "alpha must be between 0 and 1")
 		}
-		query := core.HybridQuery{Dense: vector, Sparse: request.GetSparseVector(), Text: request.GetText(), Syntax: request.GetSyntax(), Alpha: searchAlpha(request), Fusion: fusion, TopK: int(request.GetTopK())}
+		query := core.HybridQuery{Dense: vector, Sparse: request.GetSparseVector(), Text: request.GetText(), Syntax: request.GetSyntax(), Alpha: searchAlpha(request), Fusion: fusion, TopK: fetch}
 		results, err = s.engine.SearchHybrid(request.GetCollection(), request.GetNamespace(), query, filter)
 	} else {
-		results, err = s.engine.SearchFiltered(request.GetCollection(), request.GetNamespace(), vector, int(request.GetTopK()), filter)
+		results, err = s.engine.SearchFiltered(request.GetCollection(), request.GetNamespace(), vector, fetch, filter)
 	}
 	if err != nil {
 		return nil, mapError(err)
+	}
+	if len(sortFields) > 0 {
+		core.SortResults(results, sortFields)
+		results = results[:min(len(results), topK)]
 	}
 	converted, err := toProtoResults(results)
 	if err != nil {
@@ -979,7 +996,8 @@ func authorize(principal *Principal, method string, request any) error {
 		return status.Error(codes.PermissionDenied, "principal is not authorized for this operation")
 	case v1.GideonDBService_Upsert_FullMethodName,
 		v1.GideonDBService_BatchUpsert_FullMethodName,
-		v1.GideonDBService_Delete_FullMethodName:
+		v1.GideonDBService_Delete_FullMethodName,
+		v1.GideonDBService_IngestDocument_FullMethodName:
 		if !writeAllowed {
 			return status.Error(codes.PermissionDenied, "principal is not authorized for this operation")
 		}
@@ -1005,6 +1023,10 @@ func requestCollections(request any) []string {
 	case *v1.GetRequest:
 		return []string{value.GetCollection()}
 	case *v1.SearchRequest:
+		return []string{value.GetCollection()}
+	case *v1.SuggestRequest:
+		return []string{value.GetCollection()}
+	case *v1.IngestDocumentRequest:
 		return []string{value.GetCollection()}
 	case *v1.BatchSearchRequest:
 		result := make([]string, 0, len(value.GetSearches()))

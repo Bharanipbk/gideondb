@@ -59,6 +59,8 @@ const (
 	GideonDBService_ClusterLogs_FullMethodName          = "/gideondb.v1.GideonDBService/ClusterLogs"
 	GideonDBService_ListEmbedders_FullMethodName        = "/gideondb.v1.GideonDBService/ListEmbedders"
 	GideonDBService_ListRerankers_FullMethodName        = "/gideondb.v1.GideonDBService/ListRerankers"
+	GideonDBService_Suggest_FullMethodName              = "/gideondb.v1.GideonDBService/Suggest"
+	GideonDBService_IngestDocument_FullMethodName       = "/gideondb.v1.GideonDBService/IngestDocument"
 )
 
 // GideonDBServiceClient is the client API for GideonDBService service.
@@ -138,6 +140,11 @@ type GideonDBServiceClient interface {
 	ListEmbedders(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 	// Lists server-configured rerankers.
 	ListRerankers(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Completes the last word of a typed query and proposes a spelling fix.
+	Suggest(ctx context.Context, in *SuggestRequest, opts ...grpc.CallOption) (*SuggestResponse, error)
+	// Extracts, chunks and embeds a text, Markdown, HTML, PDF or DOCX file and
+	// stores one record per chunk; requires the writer role.
+	IngestDocument(ctx context.Context, in *IngestDocumentRequest, opts ...grpc.CallOption) (*IngestDocumentResponse, error)
 }
 
 type gideonDBServiceClient struct {
@@ -490,6 +497,26 @@ func (c *gideonDBServiceClient) ListRerankers(ctx context.Context, in *AdminRequ
 	return out, nil
 }
 
+func (c *gideonDBServiceClient) Suggest(ctx context.Context, in *SuggestRequest, opts ...grpc.CallOption) (*SuggestResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SuggestResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_Suggest_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) IngestDocument(ctx context.Context, in *IngestDocumentRequest, opts ...grpc.CallOption) (*IngestDocumentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IngestDocumentResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_IngestDocument_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GideonDBServiceServer is the server API for GideonDBService service.
 // All implementations must embed UnimplementedGideonDBServiceServer
 // for forward compatibility.
@@ -567,6 +594,11 @@ type GideonDBServiceServer interface {
 	ListEmbedders(context.Context, *AdminRequest) (*AdminResponse, error)
 	// Lists server-configured rerankers.
 	ListRerankers(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Completes the last word of a typed query and proposes a spelling fix.
+	Suggest(context.Context, *SuggestRequest) (*SuggestResponse, error)
+	// Extracts, chunks and embeds a text, Markdown, HTML, PDF or DOCX file and
+	// stores one record per chunk; requires the writer role.
+	IngestDocument(context.Context, *IngestDocumentRequest) (*IngestDocumentResponse, error)
 	mustEmbedUnimplementedGideonDBServiceServer()
 }
 
@@ -675,6 +707,12 @@ func (UnimplementedGideonDBServiceServer) ListEmbedders(context.Context, *AdminR
 }
 func (UnimplementedGideonDBServiceServer) ListRerankers(context.Context, *AdminRequest) (*AdminResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListRerankers not implemented")
+}
+func (UnimplementedGideonDBServiceServer) Suggest(context.Context, *SuggestRequest) (*SuggestResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Suggest not implemented")
+}
+func (UnimplementedGideonDBServiceServer) IngestDocument(context.Context, *IngestDocumentRequest) (*IngestDocumentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IngestDocument not implemented")
 }
 func (UnimplementedGideonDBServiceServer) mustEmbedUnimplementedGideonDBServiceServer() {}
 func (UnimplementedGideonDBServiceServer) testEmbeddedByValue()                         {}
@@ -1273,6 +1311,42 @@ func _GideonDBService_ListRerankers_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GideonDBService_Suggest_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SuggestRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).Suggest(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_Suggest_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).Suggest(ctx, req.(*SuggestRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_IngestDocument_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IngestDocumentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).IngestDocument(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_IngestDocument_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).IngestDocument(ctx, req.(*IngestDocumentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GideonDBService_ServiceDesc is the grpc.ServiceDesc for GideonDBService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1403,6 +1477,14 @@ var GideonDBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListRerankers",
 			Handler:    _GideonDBService_ListRerankers_Handler,
+		},
+		{
+			MethodName: "Suggest",
+			Handler:    _GideonDBService_Suggest_Handler,
+		},
+		{
+			MethodName: "IngestDocument",
+			Handler:    _GideonDBService_IngestDocument_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -60,3 +60,5 @@ alongside [facets](full-text.md#facets). Name each aggregation and pick a type:
   Records without the field come last in either order, and remaining ties keep
   relevance order.
 - **Paging and groups:** `offset` and `group_by` apply after sorting.
+
+This is also available over [gRPC](../api/grpc.md#search-features).

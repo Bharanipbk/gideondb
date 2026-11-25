@@ -94,6 +94,12 @@ service GideonDBService {
   rpc ListEmbedders(AdminRequest) returns (AdminResponse);
   // Lists server-configured rerankers.
   rpc ListRerankers(AdminRequest) returns (AdminResponse);
+
+  // Completes the last word of a typed query and proposes a spelling fix.
+  rpc Suggest(SuggestRequest) returns (SuggestResponse);
+  // Extracts, chunks and embeds a text, Markdown, HTML, PDF or DOCX file and
+  // stores one record per chunk; requires the writer role.
+  rpc IngestDocument(IngestDocumentRequest) returns (IngestDocumentResponse);
 }
 
 // DistanceMetric selects vector similarity semantics for a collection.
@@ -377,6 +383,140 @@ message SearchRequest {
   // Syntax "simple" enables "phrases", +must, -must_not, fuzzy~, prefix*
   // and ^boosts in text.
   string syntax = 13;
+  // Aggregations compute stats, histograms, ranges or terms over every
+  // matching record, keyed by a caller-chosen name.
+  map<string, AggregationRequest> aggregations = 14;
+  // Sort orders relevance candidates by metadata fields or "_score".
+  repeated SortField sort = 15;
+  // SortCandidates is the relevance pool that sort reorders (default
+  // max(100, 10 * top_k)).
+  uint32 sort_candidates = 16;
+}
+
+// AggregationRequest is one stats, histogram, range or terms aggregation.
+message AggregationRequest {
+  // Type is stats, histogram, range or terms.
+  string type = 1;
+  // Field is the metadata field aggregated.
+  string field = 2;
+  // Interval is the histogram bucket width.
+  double interval = 3;
+  // Ranges are the range buckets, in order.
+  repeated AggregationRange ranges = 4;
+  // Size is the number of terms buckets (default 10).
+  uint32 size = 5;
+}
+
+// AggregationRange is a half-open [from, to) range; unset bounds are open.
+message AggregationRange {
+  // Key names the bucket; default "from-to".
+  string key = 1;
+  // From is the inclusive lower bound.
+  optional double from = 2;
+  // To is the exclusive upper bound.
+  optional double to = 3;
+}
+
+// SortField orders results by one field.
+message SortField {
+  // Field is a metadata field or "_score".
+  string field = 1;
+  // Order is "asc" or "desc" (default asc, desc for _score).
+  string order = 2;
+}
+
+// AggregationResult holds stats values or buckets.
+message AggregationResult {
+  // Count is the number of numeric values seen (stats).
+  optional uint64 count = 1;
+  // Min is the smallest value (stats).
+  optional double min = 2;
+  // Max is the largest value (stats).
+  optional double max = 3;
+  // Sum is the total (stats).
+  optional double sum = 4;
+  // Avg is sum / count (stats).
+  optional double avg = 5;
+  // Buckets are histogram, range or terms buckets.
+  repeated AggregationBucket buckets = 6;
+}
+
+// AggregationBucket is one bucket of an aggregation.
+message AggregationBucket {
+  // Key is the bucket's lower bound, range key or term value.
+  google.protobuf.Value key = 1;
+  // From is a range bucket's lower bound.
+  optional double from = 2;
+  // To is a range bucket's upper bound.
+  optional double to = 3;
+  // Count is the number of records in the bucket.
+  uint64 count = 4;
+}
+
+// SuggestRequest asks for completions and a spelling fix.
+message SuggestRequest {
+  // Collection is the target collection name.
+  string collection = 1;
+  // Text is the typed query; its last word is completed unless it ends in a space.
+  string text = 2;
+  // Size is the number of completions (1-50, default 5).
+  uint32 size = 3;
+}
+
+// SuggestCompletion is one completion of the last word.
+message SuggestCompletion {
+  // Text is the input with the last word completed.
+  string text = 1;
+  // Word is the completed word.
+  string word = 2;
+  // Count is the number of documents containing the word.
+  uint64 count = 3;
+}
+
+// SuggestResponse holds completions and an optional corrected query.
+message SuggestResponse {
+  // Completions are ordered by document frequency.
+  repeated SuggestCompletion completions = 1;
+  // DidYouMean is the corrected query when some word was not indexed.
+  string did_you_mean = 2;
+}
+
+// IngestDocumentRequest uploads one document (at most 16 MiB per message).
+message IngestDocumentRequest {
+  // Collection is the target collection; it needs a vectorizer.
+  string collection = 1;
+  // Content is the file's bytes.
+  bytes content = 2;
+  // Filename helps detect the format and becomes chunk metadata "source".
+  string filename = 3;
+  // ContentType is an optional MIME type such as application/pdf.
+  string content_type = 4;
+  // Id is the document ID (default: filename without extension).
+  string id = 5;
+  // Namespace is the record namespace for every chunk.
+  string namespace = 6;
+  // Metadata is copied onto every chunk.
+  google.protobuf.Struct metadata = 7;
+  // ChunkSize is the maximum chunk length in characters (default 1000).
+  uint32 chunk_size = 8;
+  // ChunkOverlap is the characters repeated between chunks (default 150).
+  uint32 chunk_overlap = 9;
+}
+
+// IngestDocumentResponse summarizes the stored document.
+message IngestDocumentResponse {
+  // DocumentId is the stored document ID.
+  string document_id = 1;
+  // Title is the extracted title, when found.
+  string title = 2;
+  // Format is text, markdown, html, pdf or docx.
+  string format = 3;
+  // Chunks is the number of chunk records stored.
+  uint32 chunks = 4;
+  // Characters is the length of the extracted text.
+  uint64 characters = 5;
+  // ReplacedChunksRemoved counts chunks deleted from a longer earlier version.
+  uint32 replaced_chunks_removed = 6;
 }
 
 // FacetRequest asks for the most common values of one metadata field.
@@ -431,6 +571,8 @@ message SearchResponse {
   bool authoritative_placement = 5;
   // Facets maps each requested field to its buckets.
   map<string, FacetBuckets> facets = 6;
+  // Aggregations maps each requested aggregation name to its result.
+  map<string, AggregationResult> aggregations = 7;
 }
 
 // BatchSearchRequest contains a bounded list of independent searches.

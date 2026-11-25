@@ -48,3 +48,5 @@ curl -fsS -H "Authorization: Bearer $KEY" \
   leaves the chunks stored so far. Re-upload to finish.
 - **Cluster:** the endpoint stores through the local engine. With static routing
   enabled it returns 409, like the other single-node data endpoints.
+
+This is also available over [gRPC](../api/grpc.md#search-features).

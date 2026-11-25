@@ -35,3 +35,5 @@ curl -fsS -H "Authorization: Bearer $KEY" "http://127.0.0.1:6333/v1/collections/
 - **Scope:** counts are per node and include all namespaces. Records that were
   overwritten but are not yet checkpointed may still add to counts. Treat
   suggestions as hints.
+
+This is also available over [gRPC](../api/grpc.md#search-features).
