@@ -1,7 +1,8 @@
 # Standard datasets: SIFT1M and GloVe
 
-Gap 3 results, 2026-10-21. GideonDB only; comparisons with other databases
-are not published yet (see [next step](#next-step-vectordbbench)).
+Gap 3 results, 2026-10-21. GideonDB only. A first comparison with Qdrant and
+OpenSearch is in [engine comparison](engine-comparison.md); comparisons were not
+published at the time of this run (see [next step](#next-step-vectordbbench)).
 
 ## Environment
 

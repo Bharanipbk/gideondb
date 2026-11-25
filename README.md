@@ -79,7 +79,8 @@ Search and indexing:
 - **Agents:** an [MCP server](docs/integrations/mcp.md) with agent memory and
   framework adapters.
 
-Recall, latency and memory measurements, including standard ANN datasets, are
+Recall, latency and memory measurements, including standard ANN datasets and a
+first [comparison with Qdrant and OpenSearch](docs/benchmarks/engine-comparison.md), are
 in [benchmarks](docs/benchmarks/standard-datasets.md).
 
 Known release gaps include the external Kubernetes gate and final open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
