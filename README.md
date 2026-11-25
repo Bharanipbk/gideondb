@@ -69,7 +69,7 @@ Search and indexing:
   [product quantization](docs/indexing/product-quantization.md) with exact
   rescoring.
 - **Retrieval:** [BM25 and sparse hybrid search](docs/indexing/sparse-hybrid.md)
-  with fusion, [named vectors](docs/indexing/named-vectors.md),
+  with fusion, [language analyzers, highlighting and facets](docs/indexing/full-text.md), [named vectors](docs/indexing/named-vectors.md),
   [multi-vector MaxSim](docs/indexing/multi-vector.md), and
   [reranking](docs/indexing/reranking.md).
 - **Filtering:** indexed metadata, text and geo filters, score pagination and
@@ -82,8 +82,7 @@ Search and indexing:
 Recall, latency and memory measurements, including standard ANN datasets, are
 in [benchmarks](docs/benchmarks/standard-datasets.md).
 
-Known release gaps include the external Kubernetes gate, remaining distributed
-and administrative gRPC RPCs, and final open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
+Known release gaps include the external Kubernetes gate and final open-source governance/release artifacts. See the [roadmap](docs/roadmap.md)
 for phase status and [pending development](PENDING_DEVELOPMENT.md) for the
 maintained implementation checklist.
 

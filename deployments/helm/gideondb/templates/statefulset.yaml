@@ -89,6 +89,21 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.podIP
+            {{- with .Values.observability.tracing }}
+            {{- if .otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .otlpEndpoint | quote }}
+            - name: GIDEONDB_TRACE_SAMPLE_RATIO
+              value: {{ .sampleRatio | quote }}
+            {{- if .headersSecret.name }}
+            - name: OTEL_EXPORTER_OTLP_HEADERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .headersSecret.name }}
+                  key: {{ .headersSecret.key }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             - name: GIDEONDB_HTTP_ADDRESS
               value: "0.0.0.0:{{ $port }}"
             - name: GIDEONDB_DATA_PATH

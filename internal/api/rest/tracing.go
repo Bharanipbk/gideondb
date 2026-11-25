@@ -4,12 +4,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"github.com/Bharanipbk/gideondb/internal/otlp"
 	"net/http"
 	"strings"
 	"time"
 )
 
-type traceContext struct{ traceID, spanID, flags string }
+type traceContext struct{ traceID, spanID, parentSpanID, flags string }
 type traceContextKey struct{}
 
 func parseTraceparent(value string) (traceContext, bool) {
@@ -25,7 +26,7 @@ func parseTraceparent(value string) (traceContext, bool) {
 	if parts[1] == strings.Repeat("0", 32) || parts[2] == strings.Repeat("0", 16) {
 		return traceContext{}, false
 	}
-	return traceContext{traceID: strings.ToLower(parts[1]), flags: strings.ToLower(parts[3])}, true
+	return traceContext{traceID: strings.ToLower(parts[1]), parentSpanID: strings.ToLower(parts[2]), flags: strings.ToLower(parts[3])}, true
 }
 
 func randomHex(bytes int) string {
@@ -36,13 +37,22 @@ func randomHex(bytes int) string {
 	return hex.EncodeToString(value)
 }
 
-func newServerTrace(r *http.Request) traceContext {
+func (s *Server) newServerTrace(r *http.Request) traceContext {
 	trace, ok := parseTraceparent(r.Header.Get("traceparent"))
 	if !ok {
 		trace = traceContext{traceID: randomHex(16), flags: "01"}
+		if s.spanExporter != nil && !otlp.Sampled(trace.traceID, s.traceSampleRatio) {
+			trace.flags = "00"
+		}
 	}
 	trace.spanID = randomHex(8)
 	return trace
+}
+
+// sampled reports the W3C sampled flag.
+func (t traceContext) sampled() bool {
+	flags, err := hex.DecodeString(t.flags)
+	return err == nil && len(flags) == 1 && flags[0]&1 == 1
 }
 
 func (t traceContext) header() string { return "00-" + t.traceID + "-" + t.spanID + "-" + t.flags }
@@ -54,7 +64,7 @@ func TraceFromContext(ctx context.Context) (traceID, spanID string, ok bool) {
 
 func (s *Server) traceMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		trace := newServerTrace(r)
+		trace := s.newServerTrace(r)
 		w.Header().Set("traceparent", trace.header())
 		tracked := &statusWriter{ResponseWriter: w, status: http.StatusOK}
 		started := time.Now()
@@ -69,6 +79,24 @@ func (s *Server) traceMiddleware(next http.Handler) http.Handler {
 			"method", r.Method, "route", route, "status", tracked.status,
 			"duration_ms", float64(time.Since(started).Microseconds())/1000,
 		)
+		if s.spanExporter != nil && trace.sampled() {
+			s.spanExporter.Export(otlp.Span{
+				TraceID: trace.traceID, SpanID: trace.spanID, ParentSpanID: trace.parentSpanID,
+				Name: spanName(r.Method, route), Start: started, End: time.Now(),
+				Attributes: map[string]any{"http.request.method": r.Method, "http.route": routePath(route), "http.response.status_code": tracked.status},
+				Error:      tracked.status >= 500,
+			})
+		}
 		s.events.add(httpEvent{Timestamp: time.Now().UTC(), Method: r.Method, Route: route, Status: tracked.status, DurationMS: float64(time.Since(started).Microseconds()) / 1000, TraceID: trace.traceID, SpanID: trace.spanID})
 	})
 }
+
+// routePath strips the method from a ServeMux pattern ("GET /v1/x" → "/v1/x").
+func routePath(pattern string) string {
+	if _, path, ok := strings.Cut(pattern, " "); ok {
+		return path
+	}
+	return pattern
+}
+
+func spanName(method, pattern string) string { return method + " " + routePath(pattern) }

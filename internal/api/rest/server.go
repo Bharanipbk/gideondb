@@ -63,6 +63,8 @@ type Server struct {
 	dashboardAuth       *dashboardAuthenticator
 	embedders           *embedding.Registry
 	rerankers           *rerank.Registry
+	spanExporter        SpanExporter
+	traceSampleRatio    float64
 	rerankFailures      atomic.Uint64
 }
 
@@ -85,6 +87,8 @@ func NewWithOptions(e *engine.Engine, logger *slog.Logger, options Options) *Ser
 	s := &Server{engine: e, logger: logger, mux: http.NewServeMux(), metrics: newMetricsRegistry(), events: events, nodeID: options.NodeID, clusterID: options.ClusterID, advertiseAddress: options.AdvertiseAddress, startedAt: time.Now().UTC(), metadataEpoch: options.MetadataEpoch, peerProvider: options.PeerProvider, peerAPIKey: options.APIKey, internalClient: options.InternalHTTPClient, staticRouting: options.EnableStaticRouting, replicationFactor: options.ReplicationFactor, placementCapacity: options.PlacementCapacity, raftStore: options.RaftStore, raftProtocol: options.RaftProtocol, rebalanceBarriers: options.RebalanceBarriers, rebalanceExecutor: options.RebalanceExecutor, requireInternalMTLS: options.RequireInternalMTLS}
 	s.embedders = options.Embedders
 	s.rerankers = options.Rerankers
+	s.spanExporter = options.SpanExporter
+	s.traceSampleRatio = options.TraceSampleRatio
 	if options.DashboardCredentialsFile != "" {
 		var authErr error
 		s.dashboardAuth, authErr = loadDashboardAuthenticator(options.DashboardCredentialsFile)
@@ -786,6 +790,10 @@ type searchRequest struct {
 	Candidates  int         `json:"candidates,omitempty"`
 	// Rerank is an optional second stage over the first-stage candidates.
 	Rerank *core.RerankSpec `json:"rerank,omitempty"`
+	// Facets counts metadata values over every matching record.
+	Facets []core.FacetRequest `json:"facets,omitempty"`
+	// Highlight adds snippets of record text with query terms marked.
+	Highlight *highlightRequest `json:"highlight,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {
@@ -823,12 +831,25 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := request.validateFullText(); err != nil {
+		writeError(w, err)
+		return
+	}
 	results, err := s.searchShardStage(r.PathValue("collection"), uint32(shardID), request, filter)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"results": results, "shard_id": shardID, "metadata_epoch": s.currentMetadataEpoch()})
+	body := map[string]any{"results": results, "shard_id": shardID, "metadata_epoch": s.currentMetadataEpoch()}
+	if len(request.Facets) > 0 {
+		counts, err := s.engine.FacetCounts(r.PathValue("collection"), request.Namespace, filter, request.Text, request.Facets, []uint32{uint32(shardID)})
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		body["facet_counts"] = counts
+	}
+	writeJSON(w, http.StatusOK, body)
 }
 
 func (s *Server) validateInternalFence(w http.ResponseWriter, r *http.Request) bool {
@@ -875,6 +896,10 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err)
 		return
 	}
+	if err := request.validateFullText(); err != nil {
+		writeError(w, err)
+		return
+	}
 	var results []core.SearchResult
 	switch {
 	case request.named():
@@ -895,10 +920,30 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if request.needsText() {
+		if err := s.engine.AttachText(r.PathValue("name"), results); err != nil {
+			writeError(w, err)
+			return
+		}
+		config, err := s.engine.CollectionConfig(r.PathValue("name"))
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		applyHighlights(config, request, results)
+	}
+	facets, err := s.localFacets(r.PathValue("name"), request, filter)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
 	key, shaped := shape.apply(clearText(results))
 	response := map[string]any{key: shaped}
 	if status != nil {
 		response["rerank"] = status
+	}
+	if facets != nil {
+		response["facets"] = facets
 	}
 	writeJSON(w, http.StatusOK, response)
 }

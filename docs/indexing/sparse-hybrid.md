@@ -97,6 +97,10 @@ or digit. A short list of English stopwords (`the`, `and`, `of`, …) is
 removed. There is no stemming, so `index` and `indexes` are different tokens.
 The same tokenizer applies to records and queries.
 
+This is the default `standard` analyzer. Set a collection's `text_analyzer`
+to get stemming, accent folding or CJK bigrams. See
+[full-text analyzers, highlighting and facets](full-text.md).
+
 ## Behaviour changes and limits
 
 - Sparse-only and text-only searches return only records that share at least

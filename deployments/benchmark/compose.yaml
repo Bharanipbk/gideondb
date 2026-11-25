@@ -1,0 +1,49 @@
+# Side-by-side engines for `gideondb-loadtest compare`.
+# Every engine gets the same CPU and memory limits and listens on loopback.
+#   scripts/benchmark-compare.sh runs the whole comparison.
+name: gideondb-compare
+
+x-limits: &limits
+  cpus: "${BENCH_CPUS:-4}"
+  mem_limit: "${BENCH_MEMORY:-4g}"
+
+services:
+  gideondb:
+    <<: *limits
+    container_name: bench-gideondb
+    build: { context: ../.. }
+    image: gideondb:bench
+    ports: ["127.0.0.1:16333:6333"]
+    environment:
+      GIDEONDB_DASHBOARD_USERNAME: bench
+      GIDEONDB_DASHBOARD_PASSWORD_FILE: /run/secrets/dashboard-password
+    volumes:
+      - "${BENCH_PASSWORD_FILE:?set by scripts/benchmark-compare.sh}:/run/secrets/dashboard-password:ro"
+      - "${BENCH_API_KEY_FILE:?set by scripts/benchmark-compare.sh}:/run/secrets/api-key:ro"
+    command:
+      - -data-path=/var/lib/gideondb
+      - -http-address=0.0.0.0:6333
+      - -tls-self-signed
+      - -grpc-address=
+      - -api-key-file=/run/secrets/api-key
+      - -wal-sync=async
+      - -checkpoint-every=0
+      - -rate-limit-per-second=1000000
+      - -rate-limit-burst=1000000
+
+  qdrant:
+    <<: *limits
+    container_name: bench-qdrant
+    image: qdrant/qdrant:v1.12.4
+    ports: ["127.0.0.1:16334:6333"]
+
+  opensearch:
+    <<: *limits
+    container_name: bench-opensearch
+    image: opensearchproject/opensearch:2.18.0
+    ports: ["127.0.0.1:19201:9200"]
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms1g -Xmx1g"

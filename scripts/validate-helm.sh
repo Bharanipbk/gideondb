@@ -19,6 +19,25 @@ for values in "" values-single-node.yaml values-cluster.yaml; do
 done
 
 grep -q '^kind: PodDisruptionBudget$' "$out/rendered.yaml"
+
+# Observability integrations render only when enabled.
+"$helm" template gideondb "$chart" --namespace gideondb \
+  --set observability.serviceMonitor.enabled=true --set observability.prometheusRule.enabled=true \
+  --set observability.tracing.otlpEndpoint=http://otel:4318 --set observability.tracing.headersSecret.name=otlp > "$out/observability.yaml"
+grep -q '^kind: ServiceMonitor$' "$out/observability.yaml"
+grep -q 'type: Bearer' "$out/observability.yaml"
+grep -q '^kind: PrometheusRule$' "$out/observability.yaml"
+grep -q 'alert: GideonDBReplicationLag' "$out/observability.yaml"
+grep -q 'OTEL_EXPORTER_OTLP_ENDPOINT' "$out/observability.yaml"
+grep -q 'OTEL_EXPORTER_OTLP_HEADERS' "$out/observability.yaml"
+if grep -q 'OTEL_EXPORTER_OTLP' "$out/rendered.yaml"; then
+  echo "tracing env must be absent by default" >&2
+  exit 1
+fi
+cmp -s "$chart/files/prometheus-rules.yaml" deployments/observability/prometheus-rules.yaml || {
+  echo "deployments/observability/prometheus-rules.yaml and the chart copy differ" >&2
+  exit 1
+}
 grep -q 'GIDEONDB_PEERS' "$out/rendered.yaml"
 
 expect_failure() {

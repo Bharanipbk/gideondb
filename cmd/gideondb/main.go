@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Bharanipbk/gideondb/internal/embedding"
+	"github.com/Bharanipbk/gideondb/internal/otlp"
 	"github.com/Bharanipbk/gideondb/internal/rerank"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -68,6 +70,9 @@ func main() {
 	validateConfig := flag.Bool("validate-config", false, "validate effective configuration, then exit")
 	showVersion := flag.Bool("version", false, "print version information and exit")
 	healthcheckURL := flag.String("healthcheck-url", "", "check an HTTP health URL and exit")
+	otlpEndpoint := flag.String("otlp-endpoint", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"), "OpenTelemetry collector base URL for OTLP/HTTP JSON span export (e.g. http://otel-collector:4318); empty disables export")
+	otlpHeaders := flag.String("otlp-headers", os.Getenv("OTEL_EXPORTER_OTLP_HEADERS"), "comma-separated key=value headers sent with span exports")
+	traceSampleRatio := flag.Float64("trace-sample-ratio", envFloat("GIDEONDB_TRACE_SAMPLE_RATIO", 1), "fraction of new root traces exported (0-1); requests with a traceparent follow its sampled flag")
 	liteMode := flag.Bool("lite", strings.EqualFold(os.Getenv("GIDEONDB_LITE"), "true"), "zero-config single-node mode: loopback only, no authentication or TLS, dashboard off unless credentials are set, data in ~/.gideondb/lite by default")
 	flag.Parse()
 
@@ -399,7 +404,24 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath, Embedders: embedders, Rerankers: rerankers})
+	if *traceSampleRatio < 0 || *traceSampleRatio > 1 {
+		logger.Error("trace-sample-ratio must be between 0 and 1")
+		os.Exit(2)
+	}
+	var spanExporter *otlp.Exporter
+	if *otlpEndpoint != "" {
+		headers, err := otlp.ParseHeaders(*otlpHeaders)
+		if err != nil {
+			logger.Error("invalid otlp-headers", "error", err)
+			os.Exit(2)
+		}
+		if spanExporter, err = otlp.New(otlp.Config{Endpoint: *otlpEndpoint, Headers: headers, InstanceID: identity.ID, Version: version, Logger: logger}); err != nil {
+			logger.Error("invalid otlp-endpoint", "error", err)
+			os.Exit(2)
+		}
+		logger.Info("otlp span export enabled", "sample_ratio", *traceSampleRatio)
+	}
+	apiServer := rest.NewWithOptions(db, logger, rest.Options{APIKey: apiKey, PrincipalsFile: *principalsFile, NodeID: identity.ID, ClusterID: clusterMetadata.ClusterID, AdvertiseAddress: *advertiseAddress, EventLogPath: filepath.Join(*dataPath, "operational-events.jsonl"), EventLogRetention: *auditRetention, MetadataEpoch: metadataEpoch, ReplicationFactor: *replicationFactor, PlacementCapacity: uint32(*placementCapacity), PeerProvider: discovery, InternalHTTPClient: internalClient, EnableStaticRouting: *enableStaticRouting, RaftStore: raftStore, RaftProtocol: raftRuntime, RebalanceBarriers: rebalanceBarriers, RebalanceExecutor: rebalanceExecutor, RequireInternalMTLS: *tlsCAFile != "", RateLimitPerSecond: *rateLimitPerSecond, RateLimitBurst: *rateLimitBurst, DashboardCredentialsFile: dashboardCredentialsPath, Embedders: embedders, Rerankers: rerankers, SpanExporter: optionalSpanExporter(spanExporter), TraceSampleRatio: *traceSampleRatio})
 	server := &http.Server{
 		Addr: *address, Handler: apiServer.Handler(),
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second,
@@ -439,6 +461,7 @@ func main() {
 			DistributedScroll:  apiServer.DistributedScrollHandler(),
 			DistributedUpsert:  apiServer.DistributedBatchUpsertHandler(),
 			DistributedDelete:  apiServer.DistributedDeleteHandler(),
+			AdminRoutes:        grpcAdminRoutes(apiServer),
 			RestoreDirectory:   *grpcRestorePath,
 			ClusterSnapshotter: apiServer,
 			ServerOptions:      grpcOptions,
@@ -466,6 +489,9 @@ func main() {
 		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancelShutdown()
 		_ = server.Shutdown(shutdownContext)
+		if spanExporter != nil {
+			_ = spanExporter.Close(shutdownContext)
+		}
 		if grpcServer != nil {
 			grpcStopped := make(chan struct{})
 			go func() { grpcServer.GracefulStop(); close(grpcStopped) }()
@@ -499,4 +525,30 @@ func main() {
 		logger.Error("server stopped", "error", serveErr)
 		os.Exit(1)
 	}
+}
+
+func grpcAdminRoutes(server *rest.Server) map[string]grpcapi.AdminRoute {
+	routes := map[string]grpcapi.AdminRoute{}
+	for name, route := range server.AdminRoutes() {
+		routes[name] = grpcapi.AdminRoute{Method: route.Method, Path: route.Path, Handler: route.Handler}
+	}
+	return routes
+}
+
+// optionalSpanExporter keeps a nil exporter out of the interface, so the REST
+// server sees "no exporter" rather than a typed nil.
+func optionalSpanExporter(exporter *otlp.Exporter) rest.SpanExporter {
+	if exporter == nil {
+		return nil
+	}
+	return exporter
+}
+
+func envFloat(name string, fallback float64) float64 {
+	if raw := os.Getenv(name); raw != "" {
+		if value, err := strconv.ParseFloat(raw, 64); err == nil {
+			return value
+		}
+	}
+	return fallback
 }

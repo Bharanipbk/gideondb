@@ -16,6 +16,7 @@ with the quickstart, then choose the SDK or integration for your application.
 - [Experimental HNSW index](indexing/hnsw.md)
 - [Metadata filtering](indexing/filtering.md)
 - [Sparse, keyword (BM25) and hybrid retrieval](indexing/sparse-hybrid.md)
+- [Full-text analyzers, highlighting and facets](indexing/full-text.md)
 - [Binary quantization](indexing/binary-quantization.md)
 - [Product quantization](indexing/product-quantization.md)
 - [DiskANN disk-resident index](indexing/diskann.md)

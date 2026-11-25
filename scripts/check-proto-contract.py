@@ -10,6 +10,11 @@ REQUIRED_RPCS = {
     "CreateCollection", "DeleteCollection", "ListCollections", "DescribeCollection",
     "Upsert", "BatchUpsert", "Delete", "Get", "Search", "BatchSearch", "Scroll",
     "ClusterStatus", "ListNodes", "ListShards", "Health", "Stats", "Snapshot", "Restore",
+    # Administrative and cluster RPCs bridged to their REST endpoints.
+    "Ready", "ClusterReadiness", "ListPeers", "GetPlacement", "ListReplicas",
+    "PlanRebalance", "PrepareRebalance", "ApplyRebalance", "AbortRebalance",
+    "AdvanceMetadataEpoch", "CreateRecoveryPoint", "RecentLogs", "ClusterLogs",
+    "ListEmbedders", "ListRerankers",
 }
 
 

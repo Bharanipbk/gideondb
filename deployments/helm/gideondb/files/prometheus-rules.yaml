@@ -1,0 +1,60 @@
+# Prometheus alerting and recording rules for GideonDB.
+# Load with `rule_files:` in prometheus.yml, or wrap in a PrometheusRule
+# (the Helm chart does this when metrics.prometheusRule.enabled=true).
+groups:
+  - name: gideondb.recording
+    rules:
+      - record: gideondb:http_requests:rate5m
+        expr: sum by (job, route, status) (rate(gideondb_http_requests_total[5m]))
+      - record: gideondb:http_errors:ratio5m
+        expr: |
+          sum by (job) (rate(gideondb_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum by (job) (rate(gideondb_http_requests_total[5m])), 1e-9)
+      - record: gideondb:search_latency_seconds:p99_5m
+        expr: |
+          histogram_quantile(0.99, sum by (job, le) (rate(gideondb_http_request_duration_seconds_bucket{route=~".*/search"}[5m])))
+
+  - name: gideondb.alerts
+    rules:
+      - alert: GideonDBDown
+        expr: up{job=~".*gideondb.*"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "GideonDB target {{ $labels.instance }} is not being scraped"
+      - alert: GideonDBHighErrorRate
+        expr: gideondb:http_errors:ratio5m > 0.05
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 5% of GideonDB requests return 5xx ({{ $value | humanizePercentage }})"
+      - alert: GideonDBSlowSearch
+        expr: gideondb:search_latency_seconds:p99_5m > 0.5
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "GideonDB search p99 is {{ $value | humanizeDuration }}"
+      - alert: GideonDBReplicationLag
+        expr: max by (collection, shard, node_id) (gideondb_replication_lag_sequences) > 1000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Follower {{ $labels.node_id }} is {{ $value }} sequences behind on {{ $labels.collection }}/{{ $labels.shard }}"
+      - alert: GideonDBReplicationFailures
+        expr: sum by (job) (rate(gideondb_replication_operations_total{result="failure"}[10m])) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "GideonDB replication operations are failing"
+      - alert: GideonDBPeerUnhealthy
+        expr: min by (node_id) (gideondb_cluster_peer_healthy) == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Cluster peer {{ $labels.node_id }} is unhealthy"
+      - alert: GideonDBClusterViewNotReady
+        expr: min by (job) (gideondb_cluster_view_ready) == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "GideonDB peers disagree on the metadata epoch or control-plane digests"

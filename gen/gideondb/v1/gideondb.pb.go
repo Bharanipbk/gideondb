@@ -313,7 +313,11 @@ type Collection struct {
 	Index *IndexConfig `protobuf:"bytes,5,opt,name=index,proto3" json:"index,omitempty"`
 	// Vectorizer names a server-configured embedding model; records and
 	// searches may then send text instead of a vector. Optional.
-	Vectorizer    string `protobuf:"bytes,6,opt,name=vectorizer,proto3" json:"vectorizer,omitempty"`
+	Vectorizer string `protobuf:"bytes,6,opt,name=vectorizer,proto3" json:"vectorizer,omitempty"`
+	// TextAnalyzer turns record and query text into BM25 terms: standard
+	// (default), simple, whitespace, folding, cjk, english, french, german,
+	// spanish, italian or portuguese. Optional.
+	TextAnalyzer  string `protobuf:"bytes,7,opt,name=text_analyzer,json=textAnalyzer,proto3" json:"text_analyzer,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -386,6 +390,13 @@ func (x *Collection) GetIndex() *IndexConfig {
 func (x *Collection) GetVectorizer() string {
 	if x != nil {
 		return x.Vectorizer
+	}
+	return ""
+}
+
+func (x *Collection) GetTextAnalyzer() string {
+	if x != nil {
+		return x.TextAnalyzer
 	}
 	return ""
 }
@@ -613,7 +624,9 @@ type SearchResult struct {
 	// Payload contains non-indexed user fields.
 	Payload *structpb.Struct `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
 	// Namespace is the matched record namespace.
-	Namespace     string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	Namespace string `protobuf:"bytes,5,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	// Highlights are text snippets with query terms marked, when requested.
+	Highlights    []string `protobuf:"bytes,6,rep,name=highlights,proto3" json:"highlights,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -681,6 +694,13 @@ func (x *SearchResult) GetNamespace() string {
 		return x.Namespace
 	}
 	return ""
+}
+
+func (x *SearchResult) GetHighlights() []string {
+	if x != nil {
+		return x.Highlights
+	}
+	return nil
 }
 
 // CreateCollectionRequest contains the immutable collection configuration.
@@ -1533,7 +1553,11 @@ type SearchRequest struct {
 	// Alpha is the dense weight in [0, 1] for weighted fusion (default 0.5).
 	Alpha *float32 `protobuf:"fixed32,9,opt,name=alpha,proto3,oneof" json:"alpha,omitempty"`
 	// Fusion selects weighted (default) or reciprocal-rank fusion.
-	Fusion        FusionMode `protobuf:"varint,10,opt,name=fusion,proto3,enum=gideondb.v1.FusionMode" json:"fusion,omitempty"`
+	Fusion FusionMode `protobuf:"varint,10,opt,name=fusion,proto3,enum=gideondb.v1.FusionMode" json:"fusion,omitempty"`
+	// Facets counts metadata values over every matching record.
+	Facets []*FacetRequest `protobuf:"bytes,11,rep,name=facets,proto3" json:"facets,omitempty"`
+	// Highlight adds snippets of record text with query terms marked.
+	Highlight     *HighlightOptions `protobuf:"bytes,12,opt,name=highlight,proto3" json:"highlight,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1638,6 +1662,267 @@ func (x *SearchRequest) GetFusion() FusionMode {
 	return FusionMode_FUSION_MODE_UNSPECIFIED
 }
 
+func (x *SearchRequest) GetFacets() []*FacetRequest {
+	if x != nil {
+		return x.Facets
+	}
+	return nil
+}
+
+func (x *SearchRequest) GetHighlight() *HighlightOptions {
+	if x != nil {
+		return x.Highlight
+	}
+	return nil
+}
+
+// FacetRequest asks for the most common values of one metadata field.
+type FacetRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Field is the metadata field name.
+	Field string `protobuf:"bytes,1,opt,name=field,proto3" json:"field,omitempty"`
+	// Size is the number of buckets returned (default 10, at most 1000).
+	Size          uint32 `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FacetRequest) Reset() {
+	*x = FacetRequest{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FacetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FacetRequest) ProtoMessage() {}
+
+func (x *FacetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FacetRequest.ProtoReflect.Descriptor instead.
+func (*FacetRequest) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *FacetRequest) GetField() string {
+	if x != nil {
+		return x.Field
+	}
+	return ""
+}
+
+func (x *FacetRequest) GetSize() uint32 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+// HighlightOptions controls result snippets.
+type HighlightOptions struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Query defaults to the search text.
+	Query string `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
+	// PreTag and PostTag wrap each match (default <em> and </em>).
+	PreTag string `protobuf:"bytes,2,opt,name=pre_tag,json=preTag,proto3" json:"pre_tag,omitempty"`
+	// PostTag closes each match.
+	PostTag string `protobuf:"bytes,3,opt,name=post_tag,json=postTag,proto3" json:"post_tag,omitempty"`
+	// FragmentSize is the target snippet length in bytes (default 150).
+	FragmentSize uint32 `protobuf:"varint,4,opt,name=fragment_size,json=fragmentSize,proto3" json:"fragment_size,omitempty"`
+	// Fragments is the maximum snippets per result (default 3).
+	Fragments uint32 `protobuf:"varint,5,opt,name=fragments,proto3" json:"fragments,omitempty"`
+	// Raw skips HTML-escaping the text around the tags.
+	Raw           bool `protobuf:"varint,6,opt,name=raw,proto3" json:"raw,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HighlightOptions) Reset() {
+	*x = HighlightOptions{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HighlightOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HighlightOptions) ProtoMessage() {}
+
+func (x *HighlightOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HighlightOptions.ProtoReflect.Descriptor instead.
+func (*HighlightOptions) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *HighlightOptions) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *HighlightOptions) GetPreTag() string {
+	if x != nil {
+		return x.PreTag
+	}
+	return ""
+}
+
+func (x *HighlightOptions) GetPostTag() string {
+	if x != nil {
+		return x.PostTag
+	}
+	return ""
+}
+
+func (x *HighlightOptions) GetFragmentSize() uint32 {
+	if x != nil {
+		return x.FragmentSize
+	}
+	return 0
+}
+
+func (x *HighlightOptions) GetFragments() uint32 {
+	if x != nil {
+		return x.Fragments
+	}
+	return 0
+}
+
+func (x *HighlightOptions) GetRaw() bool {
+	if x != nil {
+		return x.Raw
+	}
+	return false
+}
+
+// FacetBucket is one metadata value and its record count.
+type FacetBucket struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Value is the metadata value.
+	Value *structpb.Value `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// Count is the number of matching records holding it.
+	Count         uint64 `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FacetBucket) Reset() {
+	*x = FacetBucket{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FacetBucket) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FacetBucket) ProtoMessage() {}
+
+func (x *FacetBucket) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FacetBucket.ProtoReflect.Descriptor instead.
+func (*FacetBucket) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *FacetBucket) GetValue() *structpb.Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *FacetBucket) GetCount() uint64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+// FacetBuckets holds one field's buckets, largest first.
+type FacetBuckets struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Buckets are ordered by count, largest first.
+	Buckets       []*FacetBucket `protobuf:"bytes,1,rep,name=buckets,proto3" json:"buckets,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FacetBuckets) Reset() {
+	*x = FacetBuckets{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FacetBuckets) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FacetBuckets) ProtoMessage() {}
+
+func (x *FacetBuckets) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FacetBuckets.ProtoReflect.Descriptor instead.
+func (*FacetBuckets) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *FacetBuckets) GetBuckets() []*FacetBucket {
+	if x != nil {
+		return x.Buckets
+	}
+	return nil
+}
+
 // SearchResponse contains ordered matches and distributed execution metadata.
 type SearchResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1651,13 +1936,15 @@ type SearchResponse struct {
 	MetadataEpoch uint64 `protobuf:"varint,4,opt,name=metadata_epoch,json=metadataEpoch,proto3" json:"metadata_epoch,omitempty"`
 	// AuthoritativePlacement is true only for a converged committed view.
 	AuthoritativePlacement bool `protobuf:"varint,5,opt,name=authoritative_placement,json=authoritativePlacement,proto3" json:"authoritative_placement,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Facets maps each requested field to its buckets.
+	Facets        map[string]*FacetBuckets `protobuf:"bytes,6,rep,name=facets,proto3" json:"facets,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SearchResponse) Reset() {
 	*x = SearchResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[21]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1669,7 +1956,7 @@ func (x *SearchResponse) String() string {
 func (*SearchResponse) ProtoMessage() {}
 
 func (x *SearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[21]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1682,7 +1969,7 @@ func (x *SearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
 func (*SearchResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{21}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *SearchResponse) GetResults() []*SearchResult {
@@ -1720,6 +2007,13 @@ func (x *SearchResponse) GetAuthoritativePlacement() bool {
 	return false
 }
 
+func (x *SearchResponse) GetFacets() map[string]*FacetBuckets {
+	if x != nil {
+		return x.Facets
+	}
+	return nil
+}
+
 // BatchSearchRequest contains a bounded list of independent searches.
 type BatchSearchRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1731,7 +2025,7 @@ type BatchSearchRequest struct {
 
 func (x *BatchSearchRequest) Reset() {
 	*x = BatchSearchRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[22]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1743,7 +2037,7 @@ func (x *BatchSearchRequest) String() string {
 func (*BatchSearchRequest) ProtoMessage() {}
 
 func (x *BatchSearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[22]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1756,7 +2050,7 @@ func (x *BatchSearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchSearchRequest.ProtoReflect.Descriptor instead.
 func (*BatchSearchRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{22}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *BatchSearchRequest) GetSearches() []*SearchRequest {
@@ -1777,7 +2071,7 @@ type BatchSearchResponse struct {
 
 func (x *BatchSearchResponse) Reset() {
 	*x = BatchSearchResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[23]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1789,7 +2083,7 @@ func (x *BatchSearchResponse) String() string {
 func (*BatchSearchResponse) ProtoMessage() {}
 
 func (x *BatchSearchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[23]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1802,7 +2096,7 @@ func (x *BatchSearchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BatchSearchResponse.ProtoReflect.Descriptor instead.
 func (*BatchSearchResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{23}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *BatchSearchResponse) GetResponses() []*SearchResponse {
@@ -1833,7 +2127,7 @@ type ScrollRequest struct {
 
 func (x *ScrollRequest) Reset() {
 	*x = ScrollRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[24]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1845,7 +2139,7 @@ func (x *ScrollRequest) String() string {
 func (*ScrollRequest) ProtoMessage() {}
 
 func (x *ScrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[24]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1858,7 +2152,7 @@ func (x *ScrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScrollRequest.ProtoReflect.Descriptor instead.
 func (*ScrollRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{24}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ScrollRequest) GetCollection() string {
@@ -1922,7 +2216,7 @@ type ScrollResponse struct {
 
 func (x *ScrollResponse) Reset() {
 	*x = ScrollResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[25]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1934,7 +2228,7 @@ func (x *ScrollResponse) String() string {
 func (*ScrollResponse) ProtoMessage() {}
 
 func (x *ScrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[25]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1947,7 +2241,7 @@ func (x *ScrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScrollResponse.ProtoReflect.Descriptor instead.
 func (*ScrollResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{25}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ScrollResponse) GetRecords() []*Record {
@@ -2000,7 +2294,7 @@ type ShardFailure struct {
 
 func (x *ShardFailure) Reset() {
 	*x = ShardFailure{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[26]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2012,7 +2306,7 @@ func (x *ShardFailure) String() string {
 func (*ShardFailure) ProtoMessage() {}
 
 func (x *ShardFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[26]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2025,7 +2319,7 @@ func (x *ShardFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardFailure.ProtoReflect.Descriptor instead.
 func (*ShardFailure) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{26}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ShardFailure) GetShardId() uint32 {
@@ -2070,7 +2364,7 @@ type ShardWriteOutcome struct {
 
 func (x *ShardWriteOutcome) Reset() {
 	*x = ShardWriteOutcome{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[27]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2082,7 +2376,7 @@ func (x *ShardWriteOutcome) String() string {
 func (*ShardWriteOutcome) ProtoMessage() {}
 
 func (x *ShardWriteOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[27]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2095,7 +2389,7 @@ func (x *ShardWriteOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardWriteOutcome.ProtoReflect.Descriptor instead.
 func (*ShardWriteOutcome) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{27}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ShardWriteOutcome) GetShardId() uint32 {
@@ -2149,7 +2443,7 @@ type ClusterStatusRequest struct {
 
 func (x *ClusterStatusRequest) Reset() {
 	*x = ClusterStatusRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[28]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2161,7 +2455,7 @@ func (x *ClusterStatusRequest) String() string {
 func (*ClusterStatusRequest) ProtoMessage() {}
 
 func (x *ClusterStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[28]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2174,7 +2468,7 @@ func (x *ClusterStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatusRequest.ProtoReflect.Descriptor instead.
 func (*ClusterStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{28}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{32}
 }
 
 // ClusterStatusResponse summarizes authoritative control-plane state.
@@ -2200,7 +2494,7 @@ type ClusterStatusResponse struct {
 
 func (x *ClusterStatusResponse) Reset() {
 	*x = ClusterStatusResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[29]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2212,7 +2506,7 @@ func (x *ClusterStatusResponse) String() string {
 func (*ClusterStatusResponse) ProtoMessage() {}
 
 func (x *ClusterStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[29]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2225,7 +2519,7 @@ func (x *ClusterStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterStatusResponse.ProtoReflect.Descriptor instead.
 func (*ClusterStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{29}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ClusterStatusResponse) GetClusterId() string {
@@ -2286,7 +2580,7 @@ type ListNodesRequest struct {
 
 func (x *ListNodesRequest) Reset() {
 	*x = ListNodesRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[30]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2298,7 +2592,7 @@ func (x *ListNodesRequest) String() string {
 func (*ListNodesRequest) ProtoMessage() {}
 
 func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[30]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2311,7 +2605,7 @@ func (x *ListNodesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesRequest.ProtoReflect.Descriptor instead.
 func (*ListNodesRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{30}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{34}
 }
 
 // ListNodesResponse contains known nodes in identity order.
@@ -2327,7 +2621,7 @@ type ListNodesResponse struct {
 
 func (x *ListNodesResponse) Reset() {
 	*x = ListNodesResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[31]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2339,7 +2633,7 @@ func (x *ListNodesResponse) String() string {
 func (*ListNodesResponse) ProtoMessage() {}
 
 func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[31]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2352,7 +2646,7 @@ func (x *ListNodesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListNodesResponse.ProtoReflect.Descriptor instead.
 func (*ListNodesResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{31}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ListNodesResponse) GetNodes() []*Node {
@@ -2390,7 +2684,7 @@ type Node struct {
 
 func (x *Node) Reset() {
 	*x = Node{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[32]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2402,7 +2696,7 @@ func (x *Node) String() string {
 func (*Node) ProtoMessage() {}
 
 func (x *Node) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[32]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2415,7 +2709,7 @@ func (x *Node) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Node.ProtoReflect.Descriptor instead.
 func (*Node) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{32}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *Node) GetNodeId() string {
@@ -2471,7 +2765,7 @@ type ListShardsRequest struct {
 
 func (x *ListShardsRequest) Reset() {
 	*x = ListShardsRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[33]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2483,7 +2777,7 @@ func (x *ListShardsRequest) String() string {
 func (*ListShardsRequest) ProtoMessage() {}
 
 func (x *ListShardsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[33]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2496,7 +2790,7 @@ func (x *ListShardsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListShardsRequest.ProtoReflect.Descriptor instead.
 func (*ListShardsRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{33}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ListShardsRequest) GetCollection() string {
@@ -2521,7 +2815,7 @@ type ListShardsResponse struct {
 
 func (x *ListShardsResponse) Reset() {
 	*x = ListShardsResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[34]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2533,7 +2827,7 @@ func (x *ListShardsResponse) String() string {
 func (*ListShardsResponse) ProtoMessage() {}
 
 func (x *ListShardsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[34]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2546,7 +2840,7 @@ func (x *ListShardsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListShardsResponse.ProtoReflect.Descriptor instead.
 func (*ListShardsResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{34}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ListShardsResponse) GetShards() []*ShardPlacement {
@@ -2587,7 +2881,7 @@ type ShardPlacement struct {
 
 func (x *ShardPlacement) Reset() {
 	*x = ShardPlacement{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[35]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2599,7 +2893,7 @@ func (x *ShardPlacement) String() string {
 func (*ShardPlacement) ProtoMessage() {}
 
 func (x *ShardPlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[35]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2612,7 +2906,7 @@ func (x *ShardPlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardPlacement.ProtoReflect.Descriptor instead.
 func (*ShardPlacement) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{35}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ShardPlacement) GetCollection() string {
@@ -2654,7 +2948,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[36]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2666,7 +2960,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[36]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2679,7 +2973,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{36}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *HealthRequest) GetRequireReady() bool {
@@ -2702,7 +2996,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[37]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2714,7 +3008,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[37]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2727,7 +3021,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{37}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *HealthResponse) GetHealthy() bool {
@@ -2755,7 +3049,7 @@ type StatsRequest struct {
 
 func (x *StatsRequest) Reset() {
 	*x = StatsRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[38]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2767,7 +3061,7 @@ func (x *StatsRequest) String() string {
 func (*StatsRequest) ProtoMessage() {}
 
 func (x *StatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[38]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2780,7 +3074,7 @@ func (x *StatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsRequest.ProtoReflect.Descriptor instead.
 func (*StatsRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{38}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *StatsRequest) GetCollection() string {
@@ -2811,7 +3105,7 @@ type StatsResponse struct {
 
 func (x *StatsResponse) Reset() {
 	*x = StatsResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[39]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2823,7 +3117,7 @@ func (x *StatsResponse) String() string {
 func (*StatsResponse) ProtoMessage() {}
 
 func (x *StatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[39]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2836,7 +3130,7 @@ func (x *StatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatsResponse.ProtoReflect.Descriptor instead.
 func (*StatsResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{39}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *StatsResponse) GetVectorCount() uint64 {
@@ -2894,7 +3188,7 @@ type SnapshotRequest struct {
 
 func (x *SnapshotRequest) Reset() {
 	*x = SnapshotRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[40]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2906,7 +3200,7 @@ func (x *SnapshotRequest) String() string {
 func (*SnapshotRequest) ProtoMessage() {}
 
 func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[40]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2919,7 +3213,7 @@ func (x *SnapshotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotRequest.ProtoReflect.Descriptor instead.
 func (*SnapshotRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{40}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *SnapshotRequest) GetClusterWide() bool {
@@ -2955,7 +3249,7 @@ type SnapshotResponse struct {
 
 func (x *SnapshotResponse) Reset() {
 	*x = SnapshotResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[41]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2967,7 +3261,7 @@ func (x *SnapshotResponse) String() string {
 func (*SnapshotResponse) ProtoMessage() {}
 
 func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[41]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2980,7 +3274,7 @@ func (x *SnapshotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SnapshotResponse.ProtoReflect.Descriptor instead.
 func (*SnapshotResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{41}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *SnapshotResponse) GetOperationId() string {
@@ -3037,7 +3331,7 @@ type RestoreRequest struct {
 
 func (x *RestoreRequest) Reset() {
 	*x = RestoreRequest{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[42]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3049,7 +3343,7 @@ func (x *RestoreRequest) String() string {
 func (*RestoreRequest) ProtoMessage() {}
 
 func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[42]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3062,7 +3356,7 @@ func (x *RestoreRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreRequest.ProtoReflect.Descriptor instead.
 func (*RestoreRequest) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{42}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *RestoreRequest) GetOperationId() string {
@@ -3115,7 +3409,7 @@ type RestoreResponse struct {
 
 func (x *RestoreResponse) Reset() {
 	*x = RestoreResponse{}
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[43]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3127,7 +3421,7 @@ func (x *RestoreResponse) String() string {
 func (*RestoreResponse) ProtoMessage() {}
 
 func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gideondb_v1_gideondb_proto_msgTypes[43]
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3140,7 +3434,7 @@ func (x *RestoreResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreResponse.ProtoReflect.Descriptor instead.
 func (*RestoreResponse) Descriptor() ([]byte, []int) {
-	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{43}
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *RestoreResponse) GetOperationId() string {
@@ -3164,11 +3458,113 @@ func (x *RestoreResponse) GetVectorCount() uint64 {
 	return 0
 }
 
+// AdminRequest carries the inputs of an administrative REST endpoint.
+type AdminRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Body is the JSON request body for endpoints that take one.
+	Body *structpb.Struct `protobuf:"bytes,1,opt,name=body,proto3" json:"body,omitempty"`
+	// Query holds URL query parameters, such as limit for log RPCs.
+	Query         map[string]string `protobuf:"bytes,2,rep,name=query,proto3" json:"query,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminRequest) Reset() {
+	*x = AdminRequest{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminRequest) ProtoMessage() {}
+
+func (x *AdminRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminRequest.ProtoReflect.Descriptor instead.
+func (*AdminRequest) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *AdminRequest) GetBody() *structpb.Struct {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *AdminRequest) GetQuery() map[string]string {
+	if x != nil {
+		return x.Query
+	}
+	return nil
+}
+
+// AdminResponse carries the JSON response of an administrative endpoint.
+type AdminResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Result is the REST response body. A top-level JSON array is returned
+	// as {"items": [...]}.
+	Result        *structpb.Struct `protobuf:"bytes,1,opt,name=result,proto3" json:"result,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdminResponse) Reset() {
+	*x = AdminResponse{}
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdminResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdminResponse) ProtoMessage() {}
+
+func (x *AdminResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gideondb_v1_gideondb_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdminResponse.ProtoReflect.Descriptor instead.
+func (*AdminResponse) Descriptor() ([]byte, []int) {
+	return file_gideondb_v1_gideondb_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *AdminResponse) GetResult() *structpb.Struct {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
 var File_gideondb_v1_gideondb_proto protoreflect.FileDescriptor
 
 const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\n" +
-	"\x1agideondb/v1/gideondb.proto\x12\vgideondb.v1\x1a\x1cgoogle/protobuf/struct.proto\"\xe4\x01\n" +
+	"\x1agideondb/v1/gideondb.proto\x12\vgideondb.v1\x1a\x1cgoogle/protobuf/struct.proto\"\x89\x02\n" +
 	"\n" +
 	"Collection\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
@@ -3179,7 +3575,8 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x05index\x18\x05 \x01(\v2\x18.gideondb.v1.IndexConfigR\x05index\x12\x1e\n" +
 	"\n" +
 	"vectorizer\x18\x06 \x01(\tR\n" +
-	"vectorizer\"\xf0\x01\n" +
+	"vectorizer\x12#\n" +
+	"\rtext_analyzer\x18\a \x01(\tR\ftextAnalyzer\"\xf0\x01\n" +
 	"\vIndexConfig\x12*\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x16.gideondb.v1.IndexTypeR\x04type\x12\f\n" +
 	"\x01m\x18\x02 \x01(\rR\x01m\x12'\n" +
@@ -3199,13 +3596,16 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x04text\x18\t \x01(\tR\x04text\x1a?\n" +
 	"\x11SparseVectorEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x02R\x05value:\x028\x01\"\xba\x01\n" +
+	"\x05value\x18\x02 \x01(\x02R\x05value:\x028\x01\"\xda\x01\n" +
 	"\fSearchResult\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x02R\x05score\x123\n" +
 	"\bmetadata\x18\x03 \x01(\v2\x17.google.protobuf.StructR\bmetadata\x121\n" +
 	"\apayload\x18\x04 \x01(\v2\x17.google.protobuf.StructR\apayload\x12\x1c\n" +
-	"\tnamespace\x18\x05 \x01(\tR\tnamespace\"R\n" +
+	"\tnamespace\x18\x05 \x01(\tR\tnamespace\x12\x1e\n" +
+	"\n" +
+	"highlights\x18\x06 \x03(\tR\n" +
+	"highlights\"R\n" +
 	"\x17CreateCollectionRequest\x127\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\v2\x17.gideondb.v1.CollectionR\n" +
@@ -3262,7 +3662,7 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1c\n" +
 	"\tnamespace\x18\x03 \x01(\tR\tnamespace\":\n" +
 	"\vGetResponse\x12+\n" +
-	"\x06record\x18\x01 \x01(\v2\x13.gideondb.v1.RecordR\x06record\"\xce\x03\n" +
+	"\x06record\x18\x01 \x01(\v2\x13.gideondb.v1.RecordR\x06record\"\xbe\x04\n" +
 	"\rSearchRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
@@ -3276,17 +3676,38 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x04text\x18\b \x01(\tR\x04text\x12\x19\n" +
 	"\x05alpha\x18\t \x01(\x02H\x00R\x05alpha\x88\x01\x01\x12/\n" +
 	"\x06fusion\x18\n" +
-	" \x01(\x0e2\x17.gideondb.v1.FusionModeR\x06fusion\x1a?\n" +
+	" \x01(\x0e2\x17.gideondb.v1.FusionModeR\x06fusion\x121\n" +
+	"\x06facets\x18\v \x03(\v2\x19.gideondb.v1.FacetRequestR\x06facets\x12;\n" +
+	"\thighlight\x18\f \x01(\v2\x1d.gideondb.v1.HighlightOptionsR\thighlight\x1a?\n" +
 	"\x11SparseVectorEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x02R\x05value:\x028\x01B\b\n" +
-	"\x06_alpha\"\xf6\x01\n" +
+	"\x06_alpha\"8\n" +
+	"\fFacetRequest\x12\x14\n" +
+	"\x05field\x18\x01 \x01(\tR\x05field\x12\x12\n" +
+	"\x04size\x18\x02 \x01(\rR\x04size\"\xb1\x01\n" +
+	"\x10HighlightOptions\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x17\n" +
+	"\apre_tag\x18\x02 \x01(\tR\x06preTag\x12\x19\n" +
+	"\bpost_tag\x18\x03 \x01(\tR\apostTag\x12#\n" +
+	"\rfragment_size\x18\x04 \x01(\rR\ffragmentSize\x12\x1c\n" +
+	"\tfragments\x18\x05 \x01(\rR\tfragments\x12\x10\n" +
+	"\x03raw\x18\x06 \x01(\bR\x03raw\"Q\n" +
+	"\vFacetBucket\x12,\n" +
+	"\x05value\x18\x01 \x01(\v2\x16.google.protobuf.ValueR\x05value\x12\x14\n" +
+	"\x05count\x18\x02 \x01(\x04R\x05count\"B\n" +
+	"\fFacetBuckets\x122\n" +
+	"\abuckets\x18\x01 \x03(\v2\x18.gideondb.v1.FacetBucketR\abuckets\"\x8d\x03\n" +
 	"\x0eSearchResponse\x123\n" +
 	"\aresults\x18\x01 \x03(\v2\x19.gideondb.v1.SearchResultR\aresults\x125\n" +
 	"\bfailures\x18\x02 \x03(\v2\x19.gideondb.v1.ShardFailureR\bfailures\x12\x18\n" +
 	"\apartial\x18\x03 \x01(\bR\apartial\x12%\n" +
 	"\x0emetadata_epoch\x18\x04 \x01(\x04R\rmetadataEpoch\x127\n" +
-	"\x17authoritative_placement\x18\x05 \x01(\bR\x16authoritativePlacement\"L\n" +
+	"\x17authoritative_placement\x18\x05 \x01(\bR\x16authoritativePlacement\x12?\n" +
+	"\x06facets\x18\x06 \x03(\v2'.gideondb.v1.SearchResponse.FacetsEntryR\x06facets\x1aT\n" +
+	"\vFacetsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12/\n" +
+	"\x05value\x18\x02 \x01(\v2\x19.gideondb.v1.FacetBucketsR\x05value:\x028\x01\"L\n" +
 	"\x12BatchSearchRequest\x126\n" +
 	"\bsearches\x18\x01 \x03(\v2\x1a.gideondb.v1.SearchRequestR\bsearches\"P\n" +
 	"\x13BatchSearchResponse\x129\n" +
@@ -3389,7 +3810,16 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x0fRestoreResponse\x12!\n" +
 	"\foperation_id\x18\x01 \x01(\tR\voperationId\x12%\n" +
 	"\x0emetadata_epoch\x18\x02 \x01(\x04R\rmetadataEpoch\x12!\n" +
-	"\fvector_count\x18\x03 \x01(\x04R\vvectorCount*~\n" +
+	"\fvector_count\x18\x03 \x01(\x04R\vvectorCount\"\xb1\x01\n" +
+	"\fAdminRequest\x12+\n" +
+	"\x04body\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x04body\x12:\n" +
+	"\x05query\x18\x02 \x03(\v2$.gideondb.v1.AdminRequest.QueryEntryR\x05query\x1a8\n" +
+	"\n" +
+	"QueryEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"@\n" +
+	"\rAdminResponse\x12/\n" +
+	"\x06result\x18\x01 \x01(\v2\x17.google.protobuf.StructR\x06result*~\n" +
 	"\x0eDistanceMetric\x12\x1f\n" +
 	"\x1bDISTANCE_METRIC_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16DISTANCE_METRIC_COSINE\x10\x01\x12\x17\n" +
@@ -3411,7 +3841,7 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x1bACKNOWLEDGEMENT_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16ACKNOWLEDGEMENT_LEADER\x10\x01\x12\x1a\n" +
 	"\x16ACKNOWLEDGEMENT_QUORUM\x10\x02\x12\x17\n" +
-	"\x13ACKNOWLEDGEMENT_ALL\x10\x032\x8b\v\n" +
+	"\x13ACKNOWLEDGEMENT_ALL\x10\x032\xc5\x13\n" +
 	"\x0fGideonDBService\x12_\n" +
 	"\x10CreateCollection\x12$.gideondb.v1.CreateCollectionRequest\x1a%.gideondb.v1.CreateCollectionResponse\x12_\n" +
 	"\x10DeleteCollection\x12$.gideondb.v1.DeleteCollectionRequest\x1a%.gideondb.v1.DeleteCollectionResponse\x12\\\n" +
@@ -3431,7 +3861,23 @@ const file_gideondb_v1_gideondb_proto_rawDesc = "" +
 	"\x06Health\x12\x1a.gideondb.v1.HealthRequest\x1a\x1b.gideondb.v1.HealthResponse\x12>\n" +
 	"\x05Stats\x12\x19.gideondb.v1.StatsRequest\x1a\x1a.gideondb.v1.StatsResponse\x12I\n" +
 	"\bSnapshot\x12\x1c.gideondb.v1.SnapshotRequest\x1a\x1d.gideondb.v1.SnapshotResponse0\x01\x12F\n" +
-	"\aRestore\x12\x1b.gideondb.v1.RestoreRequest\x1a\x1c.gideondb.v1.RestoreResponse(\x01Bc\n" +
+	"\aRestore\x12\x1b.gideondb.v1.RestoreRequest\x1a\x1c.gideondb.v1.RestoreResponse(\x01\x12>\n" +
+	"\x05Ready\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12I\n" +
+	"\x10ClusterReadiness\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12B\n" +
+	"\tListPeers\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12E\n" +
+	"\fGetPlacement\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12E\n" +
+	"\fListReplicas\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12F\n" +
+	"\rPlanRebalance\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12I\n" +
+	"\x10PrepareRebalance\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12G\n" +
+	"\x0eApplyRebalance\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12G\n" +
+	"\x0eAbortRebalance\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12M\n" +
+	"\x14AdvanceMetadataEpoch\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12L\n" +
+	"\x13CreateRecoveryPoint\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12C\n" +
+	"\n" +
+	"RecentLogs\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12D\n" +
+	"\vClusterLogs\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12F\n" +
+	"\rListEmbedders\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponse\x12F\n" +
+	"\rListRerankers\x12\x19.gideondb.v1.AdminRequest\x1a\x1a.gideondb.v1.AdminResponseBc\n" +
 	"\x12io.gideondb.api.v1P\x01Z9github.com/Bharanipbk/gideondb/gen/gideondb/v1;gideondbv1\xaa\x02\x0fGideonDB.Api.V1b\x06proto3"
 
 var (
@@ -3447,7 +3893,7 @@ func file_gideondb_v1_gideondb_proto_rawDescGZIP() []byte {
 }
 
 var file_gideondb_v1_gideondb_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_gideondb_v1_gideondb_proto_msgTypes = make([]protoimpl.MessageInfo, 46)
+var file_gideondb_v1_gideondb_proto_msgTypes = make([]protoimpl.MessageInfo, 54)
 var file_gideondb_v1_gideondb_proto_goTypes = []any{
 	(DistanceMetric)(0),                // 0: gideondb.v1.DistanceMetric
 	(IndexType)(0),                     // 1: gideondb.v1.IndexType
@@ -3475,43 +3921,52 @@ var file_gideondb_v1_gideondb_proto_goTypes = []any{
 	(*GetRequest)(nil),                 // 23: gideondb.v1.GetRequest
 	(*GetResponse)(nil),                // 24: gideondb.v1.GetResponse
 	(*SearchRequest)(nil),              // 25: gideondb.v1.SearchRequest
-	(*SearchResponse)(nil),             // 26: gideondb.v1.SearchResponse
-	(*BatchSearchRequest)(nil),         // 27: gideondb.v1.BatchSearchRequest
-	(*BatchSearchResponse)(nil),        // 28: gideondb.v1.BatchSearchResponse
-	(*ScrollRequest)(nil),              // 29: gideondb.v1.ScrollRequest
-	(*ScrollResponse)(nil),             // 30: gideondb.v1.ScrollResponse
-	(*ShardFailure)(nil),               // 31: gideondb.v1.ShardFailure
-	(*ShardWriteOutcome)(nil),          // 32: gideondb.v1.ShardWriteOutcome
-	(*ClusterStatusRequest)(nil),       // 33: gideondb.v1.ClusterStatusRequest
-	(*ClusterStatusResponse)(nil),      // 34: gideondb.v1.ClusterStatusResponse
-	(*ListNodesRequest)(nil),           // 35: gideondb.v1.ListNodesRequest
-	(*ListNodesResponse)(nil),          // 36: gideondb.v1.ListNodesResponse
-	(*Node)(nil),                       // 37: gideondb.v1.Node
-	(*ListShardsRequest)(nil),          // 38: gideondb.v1.ListShardsRequest
-	(*ListShardsResponse)(nil),         // 39: gideondb.v1.ListShardsResponse
-	(*ShardPlacement)(nil),             // 40: gideondb.v1.ShardPlacement
-	(*HealthRequest)(nil),              // 41: gideondb.v1.HealthRequest
-	(*HealthResponse)(nil),             // 42: gideondb.v1.HealthResponse
-	(*StatsRequest)(nil),               // 43: gideondb.v1.StatsRequest
-	(*StatsResponse)(nil),              // 44: gideondb.v1.StatsResponse
-	(*SnapshotRequest)(nil),            // 45: gideondb.v1.SnapshotRequest
-	(*SnapshotResponse)(nil),           // 46: gideondb.v1.SnapshotResponse
-	(*RestoreRequest)(nil),             // 47: gideondb.v1.RestoreRequest
-	(*RestoreResponse)(nil),            // 48: gideondb.v1.RestoreResponse
-	nil,                                // 49: gideondb.v1.Record.SparseVectorEntry
-	nil,                                // 50: gideondb.v1.SearchRequest.SparseVectorEntry
-	(*structpb.Struct)(nil),            // 51: google.protobuf.Struct
+	(*FacetRequest)(nil),               // 26: gideondb.v1.FacetRequest
+	(*HighlightOptions)(nil),           // 27: gideondb.v1.HighlightOptions
+	(*FacetBucket)(nil),                // 28: gideondb.v1.FacetBucket
+	(*FacetBuckets)(nil),               // 29: gideondb.v1.FacetBuckets
+	(*SearchResponse)(nil),             // 30: gideondb.v1.SearchResponse
+	(*BatchSearchRequest)(nil),         // 31: gideondb.v1.BatchSearchRequest
+	(*BatchSearchResponse)(nil),        // 32: gideondb.v1.BatchSearchResponse
+	(*ScrollRequest)(nil),              // 33: gideondb.v1.ScrollRequest
+	(*ScrollResponse)(nil),             // 34: gideondb.v1.ScrollResponse
+	(*ShardFailure)(nil),               // 35: gideondb.v1.ShardFailure
+	(*ShardWriteOutcome)(nil),          // 36: gideondb.v1.ShardWriteOutcome
+	(*ClusterStatusRequest)(nil),       // 37: gideondb.v1.ClusterStatusRequest
+	(*ClusterStatusResponse)(nil),      // 38: gideondb.v1.ClusterStatusResponse
+	(*ListNodesRequest)(nil),           // 39: gideondb.v1.ListNodesRequest
+	(*ListNodesResponse)(nil),          // 40: gideondb.v1.ListNodesResponse
+	(*Node)(nil),                       // 41: gideondb.v1.Node
+	(*ListShardsRequest)(nil),          // 42: gideondb.v1.ListShardsRequest
+	(*ListShardsResponse)(nil),         // 43: gideondb.v1.ListShardsResponse
+	(*ShardPlacement)(nil),             // 44: gideondb.v1.ShardPlacement
+	(*HealthRequest)(nil),              // 45: gideondb.v1.HealthRequest
+	(*HealthResponse)(nil),             // 46: gideondb.v1.HealthResponse
+	(*StatsRequest)(nil),               // 47: gideondb.v1.StatsRequest
+	(*StatsResponse)(nil),              // 48: gideondb.v1.StatsResponse
+	(*SnapshotRequest)(nil),            // 49: gideondb.v1.SnapshotRequest
+	(*SnapshotResponse)(nil),           // 50: gideondb.v1.SnapshotResponse
+	(*RestoreRequest)(nil),             // 51: gideondb.v1.RestoreRequest
+	(*RestoreResponse)(nil),            // 52: gideondb.v1.RestoreResponse
+	(*AdminRequest)(nil),               // 53: gideondb.v1.AdminRequest
+	(*AdminResponse)(nil),              // 54: gideondb.v1.AdminResponse
+	nil,                                // 55: gideondb.v1.Record.SparseVectorEntry
+	nil,                                // 56: gideondb.v1.SearchRequest.SparseVectorEntry
+	nil,                                // 57: gideondb.v1.SearchResponse.FacetsEntry
+	nil,                                // 58: gideondb.v1.AdminRequest.QueryEntry
+	(*structpb.Struct)(nil),            // 59: google.protobuf.Struct
+	(*structpb.Value)(nil),             // 60: google.protobuf.Value
 }
 var file_gideondb_v1_gideondb_proto_depIdxs = []int32{
 	0,  // 0: gideondb.v1.Collection.metric:type_name -> gideondb.v1.DistanceMetric
 	6,  // 1: gideondb.v1.Collection.index:type_name -> gideondb.v1.IndexConfig
 	1,  // 2: gideondb.v1.IndexConfig.type:type_name -> gideondb.v1.IndexType
 	2,  // 3: gideondb.v1.IndexConfig.quantization:type_name -> gideondb.v1.Quantization
-	51, // 4: gideondb.v1.Record.metadata:type_name -> google.protobuf.Struct
-	51, // 5: gideondb.v1.Record.payload:type_name -> google.protobuf.Struct
-	49, // 6: gideondb.v1.Record.sparse_vector:type_name -> gideondb.v1.Record.SparseVectorEntry
-	51, // 7: gideondb.v1.SearchResult.metadata:type_name -> google.protobuf.Struct
-	51, // 8: gideondb.v1.SearchResult.payload:type_name -> google.protobuf.Struct
+	59, // 4: gideondb.v1.Record.metadata:type_name -> google.protobuf.Struct
+	59, // 5: gideondb.v1.Record.payload:type_name -> google.protobuf.Struct
+	55, // 6: gideondb.v1.Record.sparse_vector:type_name -> gideondb.v1.Record.SparseVectorEntry
+	59, // 7: gideondb.v1.SearchResult.metadata:type_name -> google.protobuf.Struct
+	59, // 8: gideondb.v1.SearchResult.payload:type_name -> google.protobuf.Struct
 	5,  // 9: gideondb.v1.CreateCollectionRequest.collection:type_name -> gideondb.v1.Collection
 	5,  // 10: gideondb.v1.CreateCollectionResponse.collection:type_name -> gideondb.v1.Collection
 	5,  // 11: gideondb.v1.ListCollectionsResponse.collections:type_name -> gideondb.v1.Collection
@@ -3522,60 +3977,99 @@ var file_gideondb_v1_gideondb_proto_depIdxs = []int32{
 	7,  // 16: gideondb.v1.BatchUpsertRequest.records:type_name -> gideondb.v1.Record
 	4,  // 17: gideondb.v1.BatchUpsertRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
 	7,  // 18: gideondb.v1.BatchUpsertResponse.records:type_name -> gideondb.v1.Record
-	32, // 19: gideondb.v1.BatchUpsertResponse.outcomes:type_name -> gideondb.v1.ShardWriteOutcome
+	36, // 19: gideondb.v1.BatchUpsertResponse.outcomes:type_name -> gideondb.v1.ShardWriteOutcome
 	4,  // 20: gideondb.v1.DeleteRequest.acknowledgement:type_name -> gideondb.v1.Acknowledgement
 	7,  // 21: gideondb.v1.GetResponse.record:type_name -> gideondb.v1.Record
-	51, // 22: gideondb.v1.SearchRequest.filter:type_name -> google.protobuf.Struct
-	50, // 23: gideondb.v1.SearchRequest.sparse_vector:type_name -> gideondb.v1.SearchRequest.SparseVectorEntry
+	59, // 22: gideondb.v1.SearchRequest.filter:type_name -> google.protobuf.Struct
+	56, // 23: gideondb.v1.SearchRequest.sparse_vector:type_name -> gideondb.v1.SearchRequest.SparseVectorEntry
 	3,  // 24: gideondb.v1.SearchRequest.fusion:type_name -> gideondb.v1.FusionMode
-	8,  // 25: gideondb.v1.SearchResponse.results:type_name -> gideondb.v1.SearchResult
-	31, // 26: gideondb.v1.SearchResponse.failures:type_name -> gideondb.v1.ShardFailure
-	25, // 27: gideondb.v1.BatchSearchRequest.searches:type_name -> gideondb.v1.SearchRequest
-	26, // 28: gideondb.v1.BatchSearchResponse.responses:type_name -> gideondb.v1.SearchResponse
-	7,  // 29: gideondb.v1.ScrollResponse.records:type_name -> gideondb.v1.Record
-	37, // 30: gideondb.v1.ListNodesResponse.nodes:type_name -> gideondb.v1.Node
-	40, // 31: gideondb.v1.ListShardsResponse.shards:type_name -> gideondb.v1.ShardPlacement
-	9,  // 32: gideondb.v1.GideonDBService.CreateCollection:input_type -> gideondb.v1.CreateCollectionRequest
-	11, // 33: gideondb.v1.GideonDBService.DeleteCollection:input_type -> gideondb.v1.DeleteCollectionRequest
-	13, // 34: gideondb.v1.GideonDBService.ListCollections:input_type -> gideondb.v1.ListCollectionsRequest
-	15, // 35: gideondb.v1.GideonDBService.DescribeCollection:input_type -> gideondb.v1.DescribeCollectionRequest
-	17, // 36: gideondb.v1.GideonDBService.Upsert:input_type -> gideondb.v1.UpsertRequest
-	19, // 37: gideondb.v1.GideonDBService.BatchUpsert:input_type -> gideondb.v1.BatchUpsertRequest
-	21, // 38: gideondb.v1.GideonDBService.Delete:input_type -> gideondb.v1.DeleteRequest
-	23, // 39: gideondb.v1.GideonDBService.Get:input_type -> gideondb.v1.GetRequest
-	25, // 40: gideondb.v1.GideonDBService.Search:input_type -> gideondb.v1.SearchRequest
-	27, // 41: gideondb.v1.GideonDBService.BatchSearch:input_type -> gideondb.v1.BatchSearchRequest
-	29, // 42: gideondb.v1.GideonDBService.Scroll:input_type -> gideondb.v1.ScrollRequest
-	33, // 43: gideondb.v1.GideonDBService.ClusterStatus:input_type -> gideondb.v1.ClusterStatusRequest
-	35, // 44: gideondb.v1.GideonDBService.ListNodes:input_type -> gideondb.v1.ListNodesRequest
-	38, // 45: gideondb.v1.GideonDBService.ListShards:input_type -> gideondb.v1.ListShardsRequest
-	41, // 46: gideondb.v1.GideonDBService.Health:input_type -> gideondb.v1.HealthRequest
-	43, // 47: gideondb.v1.GideonDBService.Stats:input_type -> gideondb.v1.StatsRequest
-	45, // 48: gideondb.v1.GideonDBService.Snapshot:input_type -> gideondb.v1.SnapshotRequest
-	47, // 49: gideondb.v1.GideonDBService.Restore:input_type -> gideondb.v1.RestoreRequest
-	10, // 50: gideondb.v1.GideonDBService.CreateCollection:output_type -> gideondb.v1.CreateCollectionResponse
-	12, // 51: gideondb.v1.GideonDBService.DeleteCollection:output_type -> gideondb.v1.DeleteCollectionResponse
-	14, // 52: gideondb.v1.GideonDBService.ListCollections:output_type -> gideondb.v1.ListCollectionsResponse
-	16, // 53: gideondb.v1.GideonDBService.DescribeCollection:output_type -> gideondb.v1.DescribeCollectionResponse
-	18, // 54: gideondb.v1.GideonDBService.Upsert:output_type -> gideondb.v1.UpsertResponse
-	20, // 55: gideondb.v1.GideonDBService.BatchUpsert:output_type -> gideondb.v1.BatchUpsertResponse
-	22, // 56: gideondb.v1.GideonDBService.Delete:output_type -> gideondb.v1.DeleteResponse
-	24, // 57: gideondb.v1.GideonDBService.Get:output_type -> gideondb.v1.GetResponse
-	26, // 58: gideondb.v1.GideonDBService.Search:output_type -> gideondb.v1.SearchResponse
-	28, // 59: gideondb.v1.GideonDBService.BatchSearch:output_type -> gideondb.v1.BatchSearchResponse
-	30, // 60: gideondb.v1.GideonDBService.Scroll:output_type -> gideondb.v1.ScrollResponse
-	34, // 61: gideondb.v1.GideonDBService.ClusterStatus:output_type -> gideondb.v1.ClusterStatusResponse
-	36, // 62: gideondb.v1.GideonDBService.ListNodes:output_type -> gideondb.v1.ListNodesResponse
-	39, // 63: gideondb.v1.GideonDBService.ListShards:output_type -> gideondb.v1.ListShardsResponse
-	42, // 64: gideondb.v1.GideonDBService.Health:output_type -> gideondb.v1.HealthResponse
-	44, // 65: gideondb.v1.GideonDBService.Stats:output_type -> gideondb.v1.StatsResponse
-	46, // 66: gideondb.v1.GideonDBService.Snapshot:output_type -> gideondb.v1.SnapshotResponse
-	48, // 67: gideondb.v1.GideonDBService.Restore:output_type -> gideondb.v1.RestoreResponse
-	50, // [50:68] is the sub-list for method output_type
-	32, // [32:50] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	26, // 25: gideondb.v1.SearchRequest.facets:type_name -> gideondb.v1.FacetRequest
+	27, // 26: gideondb.v1.SearchRequest.highlight:type_name -> gideondb.v1.HighlightOptions
+	60, // 27: gideondb.v1.FacetBucket.value:type_name -> google.protobuf.Value
+	28, // 28: gideondb.v1.FacetBuckets.buckets:type_name -> gideondb.v1.FacetBucket
+	8,  // 29: gideondb.v1.SearchResponse.results:type_name -> gideondb.v1.SearchResult
+	35, // 30: gideondb.v1.SearchResponse.failures:type_name -> gideondb.v1.ShardFailure
+	57, // 31: gideondb.v1.SearchResponse.facets:type_name -> gideondb.v1.SearchResponse.FacetsEntry
+	25, // 32: gideondb.v1.BatchSearchRequest.searches:type_name -> gideondb.v1.SearchRequest
+	30, // 33: gideondb.v1.BatchSearchResponse.responses:type_name -> gideondb.v1.SearchResponse
+	7,  // 34: gideondb.v1.ScrollResponse.records:type_name -> gideondb.v1.Record
+	41, // 35: gideondb.v1.ListNodesResponse.nodes:type_name -> gideondb.v1.Node
+	44, // 36: gideondb.v1.ListShardsResponse.shards:type_name -> gideondb.v1.ShardPlacement
+	59, // 37: gideondb.v1.AdminRequest.body:type_name -> google.protobuf.Struct
+	58, // 38: gideondb.v1.AdminRequest.query:type_name -> gideondb.v1.AdminRequest.QueryEntry
+	59, // 39: gideondb.v1.AdminResponse.result:type_name -> google.protobuf.Struct
+	29, // 40: gideondb.v1.SearchResponse.FacetsEntry.value:type_name -> gideondb.v1.FacetBuckets
+	9,  // 41: gideondb.v1.GideonDBService.CreateCollection:input_type -> gideondb.v1.CreateCollectionRequest
+	11, // 42: gideondb.v1.GideonDBService.DeleteCollection:input_type -> gideondb.v1.DeleteCollectionRequest
+	13, // 43: gideondb.v1.GideonDBService.ListCollections:input_type -> gideondb.v1.ListCollectionsRequest
+	15, // 44: gideondb.v1.GideonDBService.DescribeCollection:input_type -> gideondb.v1.DescribeCollectionRequest
+	17, // 45: gideondb.v1.GideonDBService.Upsert:input_type -> gideondb.v1.UpsertRequest
+	19, // 46: gideondb.v1.GideonDBService.BatchUpsert:input_type -> gideondb.v1.BatchUpsertRequest
+	21, // 47: gideondb.v1.GideonDBService.Delete:input_type -> gideondb.v1.DeleteRequest
+	23, // 48: gideondb.v1.GideonDBService.Get:input_type -> gideondb.v1.GetRequest
+	25, // 49: gideondb.v1.GideonDBService.Search:input_type -> gideondb.v1.SearchRequest
+	31, // 50: gideondb.v1.GideonDBService.BatchSearch:input_type -> gideondb.v1.BatchSearchRequest
+	33, // 51: gideondb.v1.GideonDBService.Scroll:input_type -> gideondb.v1.ScrollRequest
+	37, // 52: gideondb.v1.GideonDBService.ClusterStatus:input_type -> gideondb.v1.ClusterStatusRequest
+	39, // 53: gideondb.v1.GideonDBService.ListNodes:input_type -> gideondb.v1.ListNodesRequest
+	42, // 54: gideondb.v1.GideonDBService.ListShards:input_type -> gideondb.v1.ListShardsRequest
+	45, // 55: gideondb.v1.GideonDBService.Health:input_type -> gideondb.v1.HealthRequest
+	47, // 56: gideondb.v1.GideonDBService.Stats:input_type -> gideondb.v1.StatsRequest
+	49, // 57: gideondb.v1.GideonDBService.Snapshot:input_type -> gideondb.v1.SnapshotRequest
+	51, // 58: gideondb.v1.GideonDBService.Restore:input_type -> gideondb.v1.RestoreRequest
+	53, // 59: gideondb.v1.GideonDBService.Ready:input_type -> gideondb.v1.AdminRequest
+	53, // 60: gideondb.v1.GideonDBService.ClusterReadiness:input_type -> gideondb.v1.AdminRequest
+	53, // 61: gideondb.v1.GideonDBService.ListPeers:input_type -> gideondb.v1.AdminRequest
+	53, // 62: gideondb.v1.GideonDBService.GetPlacement:input_type -> gideondb.v1.AdminRequest
+	53, // 63: gideondb.v1.GideonDBService.ListReplicas:input_type -> gideondb.v1.AdminRequest
+	53, // 64: gideondb.v1.GideonDBService.PlanRebalance:input_type -> gideondb.v1.AdminRequest
+	53, // 65: gideondb.v1.GideonDBService.PrepareRebalance:input_type -> gideondb.v1.AdminRequest
+	53, // 66: gideondb.v1.GideonDBService.ApplyRebalance:input_type -> gideondb.v1.AdminRequest
+	53, // 67: gideondb.v1.GideonDBService.AbortRebalance:input_type -> gideondb.v1.AdminRequest
+	53, // 68: gideondb.v1.GideonDBService.AdvanceMetadataEpoch:input_type -> gideondb.v1.AdminRequest
+	53, // 69: gideondb.v1.GideonDBService.CreateRecoveryPoint:input_type -> gideondb.v1.AdminRequest
+	53, // 70: gideondb.v1.GideonDBService.RecentLogs:input_type -> gideondb.v1.AdminRequest
+	53, // 71: gideondb.v1.GideonDBService.ClusterLogs:input_type -> gideondb.v1.AdminRequest
+	53, // 72: gideondb.v1.GideonDBService.ListEmbedders:input_type -> gideondb.v1.AdminRequest
+	53, // 73: gideondb.v1.GideonDBService.ListRerankers:input_type -> gideondb.v1.AdminRequest
+	10, // 74: gideondb.v1.GideonDBService.CreateCollection:output_type -> gideondb.v1.CreateCollectionResponse
+	12, // 75: gideondb.v1.GideonDBService.DeleteCollection:output_type -> gideondb.v1.DeleteCollectionResponse
+	14, // 76: gideondb.v1.GideonDBService.ListCollections:output_type -> gideondb.v1.ListCollectionsResponse
+	16, // 77: gideondb.v1.GideonDBService.DescribeCollection:output_type -> gideondb.v1.DescribeCollectionResponse
+	18, // 78: gideondb.v1.GideonDBService.Upsert:output_type -> gideondb.v1.UpsertResponse
+	20, // 79: gideondb.v1.GideonDBService.BatchUpsert:output_type -> gideondb.v1.BatchUpsertResponse
+	22, // 80: gideondb.v1.GideonDBService.Delete:output_type -> gideondb.v1.DeleteResponse
+	24, // 81: gideondb.v1.GideonDBService.Get:output_type -> gideondb.v1.GetResponse
+	30, // 82: gideondb.v1.GideonDBService.Search:output_type -> gideondb.v1.SearchResponse
+	32, // 83: gideondb.v1.GideonDBService.BatchSearch:output_type -> gideondb.v1.BatchSearchResponse
+	34, // 84: gideondb.v1.GideonDBService.Scroll:output_type -> gideondb.v1.ScrollResponse
+	38, // 85: gideondb.v1.GideonDBService.ClusterStatus:output_type -> gideondb.v1.ClusterStatusResponse
+	40, // 86: gideondb.v1.GideonDBService.ListNodes:output_type -> gideondb.v1.ListNodesResponse
+	43, // 87: gideondb.v1.GideonDBService.ListShards:output_type -> gideondb.v1.ListShardsResponse
+	46, // 88: gideondb.v1.GideonDBService.Health:output_type -> gideondb.v1.HealthResponse
+	48, // 89: gideondb.v1.GideonDBService.Stats:output_type -> gideondb.v1.StatsResponse
+	50, // 90: gideondb.v1.GideonDBService.Snapshot:output_type -> gideondb.v1.SnapshotResponse
+	52, // 91: gideondb.v1.GideonDBService.Restore:output_type -> gideondb.v1.RestoreResponse
+	54, // 92: gideondb.v1.GideonDBService.Ready:output_type -> gideondb.v1.AdminResponse
+	54, // 93: gideondb.v1.GideonDBService.ClusterReadiness:output_type -> gideondb.v1.AdminResponse
+	54, // 94: gideondb.v1.GideonDBService.ListPeers:output_type -> gideondb.v1.AdminResponse
+	54, // 95: gideondb.v1.GideonDBService.GetPlacement:output_type -> gideondb.v1.AdminResponse
+	54, // 96: gideondb.v1.GideonDBService.ListReplicas:output_type -> gideondb.v1.AdminResponse
+	54, // 97: gideondb.v1.GideonDBService.PlanRebalance:output_type -> gideondb.v1.AdminResponse
+	54, // 98: gideondb.v1.GideonDBService.PrepareRebalance:output_type -> gideondb.v1.AdminResponse
+	54, // 99: gideondb.v1.GideonDBService.ApplyRebalance:output_type -> gideondb.v1.AdminResponse
+	54, // 100: gideondb.v1.GideonDBService.AbortRebalance:output_type -> gideondb.v1.AdminResponse
+	54, // 101: gideondb.v1.GideonDBService.AdvanceMetadataEpoch:output_type -> gideondb.v1.AdminResponse
+	54, // 102: gideondb.v1.GideonDBService.CreateRecoveryPoint:output_type -> gideondb.v1.AdminResponse
+	54, // 103: gideondb.v1.GideonDBService.RecentLogs:output_type -> gideondb.v1.AdminResponse
+	54, // 104: gideondb.v1.GideonDBService.ClusterLogs:output_type -> gideondb.v1.AdminResponse
+	54, // 105: gideondb.v1.GideonDBService.ListEmbedders:output_type -> gideondb.v1.AdminResponse
+	54, // 106: gideondb.v1.GideonDBService.ListRerankers:output_type -> gideondb.v1.AdminResponse
+	74, // [74:107] is the sub-list for method output_type
+	41, // [41:74] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gideondb_v1_gideondb_proto_init() }
@@ -3590,7 +4084,7 @@ func file_gideondb_v1_gideondb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gideondb_v1_gideondb_proto_rawDesc), len(file_gideondb_v1_gideondb_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   46,
+			NumMessages:   54,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

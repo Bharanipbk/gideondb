@@ -98,16 +98,18 @@ func (s *Server) distributedSearch(ctx context.Context, request *v1.SearchReques
 	}
 	// The REST coordinator embeds text once before fanning out.
 	payload, err := json.Marshal(struct {
-		Vector       []float32          `json:"vector"`
-		SparseVector map[string]float32 `json:"sparse_vector,omitempty"`
-		Text         string             `json:"text,omitempty"`
-		Alpha        *float32           `json:"alpha,omitempty"`
-		Fusion       core.FusionMode    `json:"fusion,omitempty"`
-		TopK         uint32             `json:"top_k"`
-		Namespace    string             `json:"namespace,omitempty"`
-		Filter       map[string]any     `json:"filter,omitempty"`
-		AllowPartial bool               `json:"allow_partial,omitempty"`
-	}{Vector: request.GetVector(), SparseVector: request.GetSparseVector(), Text: request.GetText(), Alpha: request.Alpha, Fusion: fusion, TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial()})
+		Vector       []float32           `json:"vector"`
+		SparseVector map[string]float32  `json:"sparse_vector,omitempty"`
+		Text         string              `json:"text,omitempty"`
+		Alpha        *float32            `json:"alpha,omitempty"`
+		Fusion       core.FusionMode     `json:"fusion,omitempty"`
+		TopK         uint32              `json:"top_k"`
+		Namespace    string              `json:"namespace,omitempty"`
+		Filter       map[string]any      `json:"filter,omitempty"`
+		AllowPartial bool                `json:"allow_partial,omitempty"`
+		Facets       []core.FacetRequest `json:"facets,omitempty"`
+		Highlight    *highlightJSON      `json:"highlight,omitempty"`
+	}{Vector: request.GetVector(), SparseVector: request.GetSparseVector(), Text: request.GetText(), Alpha: request.Alpha, Fusion: fusion, TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial(), Facets: fromProtoFacets(request.GetFacets()), Highlight: fromProtoHighlight(request.GetHighlight())})
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "search filter cannot be encoded")
 	}
@@ -129,9 +131,10 @@ func (s *Server) distributedSearch(ctx context.Context, request *v1.SearchReques
 			NodeID  string `json:"node_id"`
 			Error   string `json:"error"`
 		} `json:"failures"`
-		Partial                bool   `json:"partial"`
-		MetadataEpoch          uint64 `json:"metadata_epoch"`
-		AuthoritativePlacement bool   `json:"authoritative_placement"`
+		Partial                bool                          `json:"partial"`
+		MetadataEpoch          uint64                        `json:"metadata_epoch"`
+		AuthoritativePlacement bool                          `json:"authoritative_placement"`
+		Facets                 map[string][]core.FacetBucket `json:"facets,omitempty"`
 	}
 	decoder := json.NewDecoder(io.LimitReader(&capture.body, maxMessageBytes))
 	decoder.DisallowUnknownFields()
@@ -150,7 +153,11 @@ func (s *Server) distributedSearch(ctx context.Context, request *v1.SearchReques
 	for index, failure := range body.Failures {
 		failures[index] = &v1.ShardFailure{ShardId: failure.ShardID, NodeId: failure.NodeID, Error: failure.Error}
 	}
-	return &v1.SearchResponse{Results: results, Failures: failures, Partial: body.Partial, MetadataEpoch: body.MetadataEpoch, AuthoritativePlacement: body.AuthoritativePlacement}, nil
+	facets, err := toProtoFacets(body.Facets)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "convert distributed facets")
+	}
+	return &v1.SearchResponse{Results: results, Failures: failures, Partial: body.Partial, MetadataEpoch: body.MetadataEpoch, AuthoritativePlacement: body.AuthoritativePlacement, Facets: facets}, nil
 }
 
 func distributedSearchHTTPError(code int) error {

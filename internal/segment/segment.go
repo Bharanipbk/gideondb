@@ -3,6 +3,7 @@ package segment
 
 import (
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"hash/fnv"
 	"math"
 	"sort"
@@ -92,7 +93,7 @@ func NewMappedWithPQ(config core.CollectionConfig, records []core.Record, source
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
 		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
-		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric, lexical: newLexicalIndex(),
+		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
 	}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
@@ -119,7 +120,7 @@ func New(config core.CollectionConfig) (*Segment, error) {
 	var err error
 	s := &Segment{
 		nextID: 1, records: make(map[uint64]core.Record),
-		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric, lexical: newLexicalIndex(),
+		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
 	}
 	switch {
 	case config.Index.Type == core.IndexFlat && config.Index.Quantization == core.QuantizationBinary:
@@ -213,7 +214,7 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 	if metadataIndex == nil {
 		metadataIndex = metadata.NewIndex()
 	}
-	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex()}
+	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer))}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
 		s.records[ordinal] = cloneRecord(record)
@@ -270,7 +271,7 @@ func NewDiskANNWithMetadata(config core.CollectionConfig, records []core.Record,
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
 		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
-		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(),
+		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
 	}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
@@ -692,4 +693,51 @@ func cloneMap(in map[string]any) map[string]any {
 		out[k] = v
 	}
 	return out
+}
+
+// Facets counts metadata values for fields over records in namespace that
+// match filter, are not in excluded, and, when text is non-empty, contain
+// at least one of its analyzed terms.
+func (s *Segment) Facets(namespace string, filter *metadata.Expr, text string, fields []string, excluded map[string]struct{}) core.FacetCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := core.FacetCounts{}
+	var allowed *metadata.Set
+	if filter != nil {
+		allowed = s.metadata.Evaluate(filter)
+	}
+	var textMatch map[uint64]struct{}
+	if text != "" {
+		textMatch = map[uint64]struct{}{}
+		for _, term := range s.lexical.analyzer.Terms(text) {
+			for ordinal := range s.lexical.text[term] {
+				textMatch[ordinal] = struct{}{}
+			}
+		}
+	}
+	visit := func(ordinal uint64, record core.Record) {
+		if record.Namespace != namespace || (allowed != nil && !allowed.Contains(ordinal)) {
+			return
+		}
+		if _, blocked := excluded[key(record.Namespace, record.ID)]; blocked {
+			return
+		}
+		for _, field := range fields {
+			if value, ok := record.Metadata[field]; ok {
+				counts.Add(field, value)
+			}
+		}
+	}
+	if textMatch != nil {
+		for ordinal := range textMatch {
+			if record, ok := s.records[ordinal]; ok {
+				visit(ordinal, record)
+			}
+		}
+		return counts
+	}
+	for ordinal, record := range s.records {
+		visit(ordinal, record)
+	}
+	return counts
 }

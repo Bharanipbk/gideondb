@@ -5,6 +5,7 @@ package core
 import (
 	"errors"
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"math"
 	"regexp"
 )
@@ -82,6 +83,11 @@ type CollectionConfig struct {
 	// Vectors declares named vector fields beside the default unnamed
 	// vector. Optional; each field has its own dimension, metric and index.
 	Vectors map[string]VectorField `json:"vectors,omitempty"`
+	// TextAnalyzer names the analyzer that turns record and query text into
+	// BM25 terms: "standard" (default), "simple", "whitespace", "folding",
+	// "cjk", or a language analyzer ("english", "french", "german",
+	// "spanish", "italian", "portuguese"). Optional.
+	TextAnalyzer string `json:"text_analyzer,omitempty"`
 }
 
 var vectorizerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -190,6 +196,9 @@ func (c CollectionConfig) Validate() error {
 	}
 	if c.Vectorizer != "" && !vectorizerName.MatchString(c.Vectorizer) {
 		return fmt.Errorf("%w: vectorizer must match %s", ErrInvalidArgument, vectorizerName)
+	}
+	if _, err := analysis.Get(c.TextAnalyzer); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
 	switch c.Index.Type {
 	case IndexFlat:
@@ -352,4 +361,7 @@ type SearchResult struct {
 	// Text carries record text between nodes only while a cross-encoder
 	// rerank needs it; it is cleared before results reach clients.
 	Text string `json:"text,omitempty"`
+	// Highlights holds text snippets with query terms marked, when the
+	// search asked for them.
+	Highlights []string `json:"highlights,omitempty"`
 }

@@ -569,3 +569,39 @@ func (c *Collection) RouteShard(namespace, id string) uint32 {
 	_, _ = h.Write([]byte(id))
 	return uint32(h.Sum64() % uint64(len(c.shards)))
 }
+
+// Facets returns the top buckets of each requested metadata field over all
+// shards.
+func (c *Collection) Facets(namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest) (map[string][]core.FacetBucket, error) {
+	counts, err := c.FacetCounts(namespace, filter, text, requests, nil)
+	if err != nil {
+		return nil, err
+	}
+	return counts.Top(requests), nil
+}
+
+// FacetCounts returns raw counts for the given shards (all when shards is
+// nil), so a coordinator can merge counts from several nodes before Top.
+func (c *Collection) FacetCounts(namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest, shards []uint32) (core.FacetCounts, error) {
+	if err := core.ValidateFacets(requests); err != nil {
+		return nil, err
+	}
+	fields := make([]string, len(requests))
+	for i, request := range requests {
+		fields[i] = request.Field
+	}
+	counts := core.FacetCounts{}
+	if shards == nil {
+		for shardID := range c.shards {
+			counts.Merge(c.shards[shardID].Facets(namespace, filter, text, fields))
+		}
+		return counts, nil
+	}
+	for _, shardID := range shards {
+		if int(shardID) >= len(c.shards) {
+			return nil, fmt.Errorf("%w: shard %d", core.ErrNotFound, shardID)
+		}
+		counts.Merge(c.shards[shardID].Facets(namespace, filter, text, fields))
+	}
+	return counts, nil
+}

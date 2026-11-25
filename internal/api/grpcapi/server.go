@@ -75,9 +75,12 @@ type Options struct {
 	DistributedScroll   http.Handler
 	DistributedUpsert   http.Handler
 	DistributedDelete   http.Handler
-	RestoreDirectory    string
-	ClusterSnapshotter  ClusterSnapshotter
-	ServerOptions       []grpc.ServerOption
+	// AdminRoutes bridges administrative RPCs to REST handlers by route
+	// name (see rest.Server.AdminRoutes). Missing routes are Unimplemented.
+	AdminRoutes        map[string]AdminRoute
+	RestoreDirectory   string
+	ClusterSnapshotter ClusterSnapshotter
+	ServerOptions      []grpc.ServerOption
 	// Embedders resolves collection vectorizers for text-only records and
 	// searches. Nil disables embedding; text still drives BM25.
 	Embedders *embedding.Registry
@@ -280,7 +283,11 @@ func (s *Server) Search(ctx context.Context, request *v1.SearchRequest) (*v1.Sea
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &v1.SearchResponse{Results: converted}, nil
+	response := &v1.SearchResponse{Results: converted}
+	if err := s.applyLocalFullText(request, filter, results, response); err != nil {
+		return nil, err
+	}
+	return response, nil
 }
 
 func (s *Server) BatchSearch(ctx context.Context, request *v1.BatchSearchRequest) (*v1.BatchSearchResponse, error) {
@@ -755,7 +762,7 @@ func fromProtoCollection(value *v1.Collection) (core.CollectionConfig, error) {
 	default:
 		return core.CollectionConfig{}, fmtInvalid("unsupported quantization")
 	}
-	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Vectorizer: value.GetVectorizer(), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch()), Quantization: quantization, Oversampling: int(value.GetIndex().GetOversampling())}}
+	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Vectorizer: value.GetVectorizer(), TextAnalyzer: value.GetTextAnalyzer(), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch()), Quantization: quantization, Oversampling: int(value.GetIndex().GetOversampling())}}
 	if err := config.Validate(); err != nil {
 		return core.CollectionConfig{}, err
 	}
@@ -767,7 +774,7 @@ func toProtoCollection(value core.CollectionConfig) *v1.Collection {
 	indexTypes := map[core.IndexType]v1.IndexType{core.IndexFlat: v1.IndexType_INDEX_TYPE_FLAT, core.IndexHNSW: v1.IndexType_INDEX_TYPE_HNSW}
 	value = value.Normalized()
 	quantizations := map[core.Quantization]v1.Quantization{core.QuantizationBinary: v1.Quantization_QUANTIZATION_BINARY}
-	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Vectorizer: value.Vectorizer, Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch), Quantization: quantizations[value.Index.Quantization], Oversampling: uint32(value.Index.Oversampling)}}
+	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Vectorizer: value.Vectorizer, TextAnalyzer: value.TextAnalyzer, Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch), Quantization: quantizations[value.Index.Quantization], Oversampling: uint32(value.Index.Oversampling)}}
 }
 
 func fromProtoRecord(value *v1.Record) (core.Record, error) {
@@ -830,7 +837,7 @@ func toProtoResults(values []core.SearchResult) ([]*v1.SearchResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		result[index] = &v1.SearchResult{Id: value.ID, Score: value.Score, Metadata: metadataValue, Payload: payloadValue, Namespace: value.Namespace}
+		result[index] = &v1.SearchResult{Id: value.ID, Score: value.Score, Metadata: metadataValue, Payload: payloadValue, Namespace: value.Namespace, Highlights: value.Highlights}
 	}
 	return result, nil
 }
@@ -961,6 +968,9 @@ func authenticate(ctx context.Context, config Options) (context.Context, *Princi
 func authorize(principal *Principal, method string, request any) error {
 	if principal == nil || principal.Role == "admin" {
 		return nil
+	}
+	if rpc, ok := adminRPCs[method]; ok && rpc.adminOnly {
+		return status.Error(codes.PermissionDenied, "principal is not authorized for this operation")
 	}
 	writeAllowed := principal.Role == "writer"
 	switch method {

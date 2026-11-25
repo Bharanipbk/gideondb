@@ -216,3 +216,43 @@ func requestJSON(t *testing.T, handler http.Handler, method, target string, valu
 	}
 	return response.Body.Bytes()
 }
+
+func TestRESTAnalyzerFacetsAndHighlight(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(db, nil).Handler()
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "bad", "dimension": 2, "metric": "cosine", "shard_count": 1, "text_analyzer": "klingon"}, http.StatusBadRequest)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "shop", "dimension": 2, "metric": "cosine", "shard_count": 3, "text_analyzer": "english"}, http.StatusCreated)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/vectors/batch", map[string]any{"records": []map[string]any{
+		{"id": "1", "vector": []float32{1, 0}, "text": "Lightweight running shoes for trails", "metadata": map[string]any{"brand": "acme", "size": 42}},
+		{"id": "2", "vector": []float32{0, 1}, "text": "Runners love these road shoes", "metadata": map[string]any{"brand": "acme", "size": 44}},
+		{"id": "3", "vector": []float32{1, 1}, "text": "A warm winter jacket", "metadata": map[string]any{"brand": "zeta", "size": 42}},
+	}}, http.StatusOK)
+	response := requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{
+		"text": "shoe", "top_k": 5,
+		"facets":    []map[string]any{{"field": "brand"}, {"field": "size", "size": 1}},
+		"highlight": map[string]any{},
+	}, http.StatusOK)
+	body := string(response)
+	for _, want := range []string{`"id":"1"`, `"id":"2"`, `running \u003cem\u003eshoes\u003c/em\u003e`, `"facets":`, `"brand":[{"value":"acme","count":2}]`, `"size":[{"value":42,"count":1}]`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("response missing %s: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `"id":"3"`) || strings.Contains(body, `"text":`) {
+		t.Fatalf("unexpected hit or leaked text: %s", body)
+	}
+	// A vector search can highlight with an explicit query and facet over everything.
+	response = requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{
+		"vector": []float32{1, 1}, "top_k": 1, "facets": []map[string]any{{"field": "brand"}},
+		"highlight": map[string]any{"query": "jackets", "pre_tag": "[", "post_tag": "]"},
+	}, http.StatusOK)
+	if !strings.Contains(string(response), `winter [jacket]`) || !strings.Contains(string(response), `{"value":"acme","count":2},{"value":"zeta","count":1}`) {
+		t.Fatalf("vector highlight/facets: %s", response)
+	}
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{"vector": []float32{1, 1}, "top_k": 1, "highlight": map[string]any{}}, http.StatusBadRequest)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{"vector": []float32{1, 1}, "top_k": 1, "facets": []map[string]any{{"field": ""}}}, http.StatusBadRequest)
+}

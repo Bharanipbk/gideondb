@@ -1384,3 +1384,30 @@ func (e *Engine) closeLogs() error {
 	}
 	return first
 }
+
+// Facets counts metadata values over a collection's matching records.
+func (e *Engine) Facets(name, namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest) (map[string][]core.FacetBucket, error) {
+	c, err := e.getCollection(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.Facets(namespace, filter, text, requests)
+}
+
+// FacetCounts returns mergeable raw counts for some of a collection's shards.
+func (e *Engine) FacetCounts(name, namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest, shards []uint32) (core.FacetCounts, error) {
+	c, err := e.getCollection(name)
+	if err != nil {
+		return nil, err
+	}
+	return c.FacetCounts(namespace, filter, text, requests, shards)
+}
+
+// CollectionConfig returns a collection's configuration.
+func (e *Engine) CollectionConfig(name string) (core.CollectionConfig, error) {
+	c, err := e.getCollection(name)
+	if err != nil {
+		return core.CollectionConfig{}, err
+	}
+	return c.Config(), nil
+}

@@ -50,6 +50,9 @@ type CollectionConfig struct {
 	ShardCount int         `json:"shard_count"`
 	Index      IndexConfig `json:"index"`
 	Vectorizer string      `json:"vectorizer,omitempty"`
+	// TextAnalyzer selects how record and query text become BM25 terms, such
+	// as "english" or "cjk"; empty uses "standard".
+	TextAnalyzer string `json:"text_analyzer,omitempty"`
 }
 
 type IndexConfig struct {
@@ -114,6 +117,31 @@ type SearchOptions struct {
 	AllowPartial bool
 	// Offset skips that many results (or groups) for score pagination.
 	Offset int
+	// Highlight asks for marked snippets of each result's record text.
+	Highlight *HighlightOptions
+}
+
+// HighlightOptions controls result snippets; zero values use the server
+// defaults (<em> tags, 150-byte fragments, at most 3).
+type HighlightOptions struct {
+	Query        string `json:"query,omitempty"`
+	PreTag       string `json:"pre_tag,omitempty"`
+	PostTag      string `json:"post_tag,omitempty"`
+	FragmentSize int    `json:"fragment_size,omitempty"`
+	Fragments    int    `json:"fragments,omitempty"`
+	Raw          bool   `json:"raw,omitempty"`
+}
+
+// FacetRequest asks for the most common values of one metadata field.
+type FacetRequest struct {
+	Field string `json:"field"`
+	Size  int    `json:"size,omitempty"`
+}
+
+// FacetBucket is one metadata value and its record count.
+type FacetBucket struct {
+	Value any `json:"value"`
+	Count int `json:"count"`
 }
 
 // GroupOptions groups search hits by a metadata field.
@@ -135,6 +163,8 @@ type SearchResult struct {
 	Metadata  map[string]any `json:"metadata,omitempty"`
 	Payload   map[string]any `json:"payload,omitempty"`
 	Namespace string         `json:"namespace,omitempty"`
+	// Highlights is set when SearchOptions.Highlight was requested.
+	Highlights []string `json:"highlights,omitempty"`
 }
 
 type ShardFailure struct {
@@ -149,6 +179,8 @@ type DistributedSearchResponse struct {
 	Failures               []ShardFailure `json:"failures"`
 	MetadataEpoch          uint64         `json:"metadata_epoch"`
 	AuthoritativePlacement bool           `json:"authoritative_placement"`
+	// Facets is set when the request carried facets.
+	Facets map[string][]FacetBucket `json:"facets,omitempty"`
 }
 
 type ShardWriteOutcome struct {
@@ -288,6 +320,19 @@ func (c *Client) Search(ctx context.Context, collection string, options SearchOp
 	return response.Results, err
 }
 
+// SearchFacets runs a search and also counts each facet field's values over
+// every matching record.
+func (c *Client) SearchFacets(ctx context.Context, collection string, options SearchOptions, facets []FacetRequest) ([]SearchResult, map[string][]FacetBucket, error) {
+	var response struct {
+		Results []SearchResult           `json:"results"`
+		Facets  map[string][]FacetBucket `json:"facets"`
+	}
+	body := searchBody(options, false)
+	body["facets"] = facets
+	err := c.do(ctx, http.MethodPost, collectionPath(collection)+"/search", body, &response)
+	return response.Results, response.Facets, err
+}
+
 // SearchGroups returns up to options.TopK groups of hits sharing a value of
 // group.Field, ordered by each group's best hit.
 func (c *Client) SearchGroups(ctx context.Context, collection string, options SearchOptions, group GroupOptions) ([]SearchGroup, error) {
@@ -353,6 +398,9 @@ func searchBody(options SearchOptions, distributed bool) map[string]any {
 	}
 	if options.Offset != 0 {
 		body["offset"] = options.Offset
+	}
+	if options.Highlight != nil {
+		body["highlight"] = options.Highlight
 	}
 	if distributed && options.AllowPartial {
 		body["allow_partial"] = true

@@ -1,10 +1,9 @@
 package segment
 
 import (
+	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"math"
 	"sort"
-	"strings"
-	"unicode"
 
 	"github.com/Bharanipbk/gideondb/internal/core"
 )
@@ -27,10 +26,14 @@ type lexicalIndex struct {
 	text       map[string]map[uint64]uint32
 	docLength  map[uint64]uint32
 	totalTerms uint64
+	analyzer   *analysis.Analyzer
 }
 
-func newLexicalIndex() *lexicalIndex {
-	return &lexicalIndex{
+func newLexicalIndex(analyzer *analysis.Analyzer) *lexicalIndex {
+	if analyzer == nil {
+		analyzer = analysis.MustGet("")
+	}
+	return &lexicalIndex{analyzer: analyzer,
 		sparse: map[string]map[uint64]float32{}, sparseNorm: map[uint64]float64{},
 		text: map[string]map[uint64]uint32{}, docLength: map[uint64]uint32{},
 	}
@@ -58,7 +61,7 @@ func (l *lexicalIndex) add(ordinal uint64, record core.Record) {
 	if record.Text != "" {
 		frequencies := map[string]uint32{}
 		var length uint32
-		for _, token := range Tokenize(record.Text) {
+		for _, token := range l.analyzer.Terms(record.Text) {
 			frequencies[token]++
 			length++
 		}
@@ -89,7 +92,7 @@ func (l *lexicalIndex) remove(ordinal uint64, record core.Record) {
 	}
 	delete(l.sparseNorm, ordinal)
 	if length, ok := l.docLength[ordinal]; ok {
-		for _, token := range Tokenize(record.Text) {
+		for _, token := range l.analyzer.Terms(record.Text) {
 			if postings := l.text[token]; postings != nil {
 				delete(postings, ordinal)
 				if len(postings) == 0 {
@@ -139,7 +142,7 @@ func (l *lexicalIndex) searchSparse(query map[string]float32, allow func(uint64)
 func (l *lexicalIndex) searchText(text string, allow func(uint64) bool, limit int) []scoredOrdinal {
 	score := l.bm25Scorer(text)
 	candidates := map[uint64]struct{}{}
-	for _, token := range Tokenize(text) {
+	for _, token := range l.analyzer.Terms(text) {
 		for ordinal := range l.text[token] {
 			candidates[ordinal] = struct{}{}
 		}
@@ -167,7 +170,7 @@ func (l *lexicalIndex) bm25Scorer(text string) func(uint64) float32 {
 	}
 	var terms []term
 	seen := map[string]struct{}{}
-	for _, token := range Tokenize(text) {
+	for _, token := range l.analyzer.Terms(text) {
 		if _, duplicate := seen[token]; duplicate {
 			continue
 		}
@@ -204,23 +207,6 @@ func topScored(results []scoredOrdinal, limit int) []scoredOrdinal {
 
 func normalizeBM25(score float32) float32 { return score / (score + bm25Saturation) }
 
-// stopwords is a small English list; tokens are otherwise kept verbatim
-// (lowercased, no stemming) so behaviour is predictable across languages.
-var stopwords = map[string]struct{}{
-	"a": {}, "an": {}, "and": {}, "are": {}, "as": {}, "at": {}, "be": {}, "by": {}, "for": {}, "from": {},
-	"in": {}, "is": {}, "it": {}, "of": {}, "on": {}, "or": {}, "that": {}, "the": {}, "this": {}, "to": {},
-	"was": {}, "with": {},
-}
-
-// Tokenize lowercases text and splits on any rune that is not a letter or
-// digit, dropping English stopwords.
-func Tokenize(text string) []string {
-	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-	tokens := fields[:0]
-	for _, field := range fields {
-		if _, stop := stopwords[field]; !stop {
-			tokens = append(tokens, field)
-		}
-	}
-	return tokens
-}
+// Tokenize returns the "standard" analyzer's terms: lowercase, split on any
+// rune that is not a letter or digit, drop a short English stopword list.
+func Tokenize(text string) []string { return analysis.MustGet(analysis.DefaultName).Terms(text) }

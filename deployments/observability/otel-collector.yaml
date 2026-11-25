@@ -1,0 +1,25 @@
+# Minimal OpenTelemetry Collector pipeline for GideonDB.
+# Start GideonDB with -otlp-endpoint http://otel-collector:4318 and point
+# the exporter below at your tracing backend (Tempo, Jaeger, Honeycomb, ...).
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+processors:
+  batch: {}
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 80
+    spike_limit_percentage: 20
+exporters:
+  otlphttp/tempo:
+    endpoint: http://tempo:4318
+  debug:
+    verbosity: basic
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/tempo]

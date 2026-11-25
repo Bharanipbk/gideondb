@@ -214,9 +214,13 @@ automated tests, and user-facing documentation are all finished.
 - [ ] Run repeatable workload-specific soak, backup/restore, rolling-upgrade,
   partition, repair, rebalance, and disaster-recovery drills before recommending
   production use.
-- [ ] Add durable external observability guidance or integrations for metrics,
-  traces, and centralized logs; the embedded dashboard is only a bounded
-  operational aid.
+- [x] Add durable external observability guidance or integrations for metrics,
+  traces, and centralized logs. Built-in OTLP/HTTP span export with
+  ratio sampling (`internal/otlp`, `-otlp-endpoint`), a Grafana dashboard,
+  `promtool`-checked alert rules, an OpenTelemetry Collector example, a Fluent
+  Bit log-shipping example, and Helm `ServiceMonitor`/`PrometheusRule`/tracing
+  values. See [observability](docs/operations/observability.md). Child spans
+  for WAL, index and replication work and gRPC server spans remain open.
 
 ## Maintenance rule
 

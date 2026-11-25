@@ -60,6 +60,40 @@ service GideonDBService {
   rpc Snapshot(SnapshotRequest) returns (stream SnapshotResponse);
   // Restores a checksum-addressed archive into an explicitly empty target.
   rpc Restore(stream RestoreRequest) returns (RestoreResponse);
+
+  // Administrative and cluster RPCs mirror the REST endpoints of the same
+  // name. Requests carry the REST JSON body and query parameters; responses
+  // carry the REST JSON body as a Struct.
+  // Reports node readiness, including draining and dependency checks.
+  rpc Ready(AdminRequest) returns (AdminResponse);
+  // Reports whether every voter is ready and placement has converged.
+  rpc ClusterReadiness(AdminRequest) returns (AdminResponse);
+  // Lists discovered cluster peers with their advertised addresses.
+  rpc ListPeers(AdminRequest) returns (AdminResponse);
+  // Returns the committed shard placement table.
+  rpc GetPlacement(AdminRequest) returns (AdminResponse);
+  // Returns replica placement and per-replica sequence state.
+  rpc ListReplicas(AdminRequest) returns (AdminResponse);
+  // Computes a capacity-aware rebalance plan without changing anything; admin only.
+  rpc PlanRebalance(AdminRequest) returns (AdminResponse);
+  // Prepares a rebalance by snapshotting moving shards; admin only.
+  rpc PrepareRebalance(AdminRequest) returns (AdminResponse);
+  // Commits a prepared rebalance to the placement table; admin only.
+  rpc ApplyRebalance(AdminRequest) returns (AdminResponse);
+  // Aborts a prepared rebalance and releases its snapshots; admin only.
+  rpc AbortRebalance(AdminRequest) returns (AdminResponse);
+  // Advances the fenced metadata epoch; admin only.
+  rpc AdvanceMetadataEpoch(AdminRequest) returns (AdminResponse);
+  // Captures a cluster-wide backup recovery point; admin only.
+  rpc CreateRecoveryPoint(AdminRequest) returns (AdminResponse);
+  // Returns this node's bounded recent operational log entries.
+  rpc RecentLogs(AdminRequest) returns (AdminResponse);
+  // Returns recent operational log entries gathered from every peer.
+  rpc ClusterLogs(AdminRequest) returns (AdminResponse);
+  // Lists server-configured embedding models and their counters.
+  rpc ListEmbedders(AdminRequest) returns (AdminResponse);
+  // Lists server-configured rerankers.
+  rpc ListRerankers(AdminRequest) returns (AdminResponse);
 }
 
 // DistanceMetric selects vector similarity semantics for a collection.
@@ -129,6 +163,10 @@ message Collection {
   // Vectorizer names a server-configured embedding model; records and
   // searches may then send text instead of a vector. Optional.
   string vectorizer = 6;
+  // TextAnalyzer turns record and query text into BM25 terms: standard
+  // (default), simple, whitespace, folding, cjk, english, french, german,
+  // spanish, italian or portuguese. Optional.
+  string text_analyzer = 7;
 }
 
 // IndexConfig contains index selection and HNSW tuning parameters.
@@ -183,6 +221,8 @@ message SearchResult {
   google.protobuf.Struct payload = 4;
   // Namespace is the matched record namespace.
   string namespace = 5;
+  // Highlights are text snippets with query terms marked, when requested.
+  repeated string highlights = 6;
 }
 
 // CreateCollectionRequest contains the immutable collection configuration.
@@ -322,6 +362,48 @@ message SearchRequest {
   optional float alpha = 9;
   // Fusion selects weighted (default) or reciprocal-rank fusion.
   FusionMode fusion = 10;
+  // Facets counts metadata values over every matching record.
+  repeated FacetRequest facets = 11;
+  // Highlight adds snippets of record text with query terms marked.
+  HighlightOptions highlight = 12;
+}
+
+// FacetRequest asks for the most common values of one metadata field.
+message FacetRequest {
+  // Field is the metadata field name.
+  string field = 1;
+  // Size is the number of buckets returned (default 10, at most 1000).
+  uint32 size = 2;
+}
+
+// HighlightOptions controls result snippets.
+message HighlightOptions {
+  // Query defaults to the search text.
+  string query = 1;
+  // PreTag and PostTag wrap each match (default <em> and </em>).
+  string pre_tag = 2;
+  // PostTag closes each match.
+  string post_tag = 3;
+  // FragmentSize is the target snippet length in bytes (default 150).
+  uint32 fragment_size = 4;
+  // Fragments is the maximum snippets per result (default 3).
+  uint32 fragments = 5;
+  // Raw skips HTML-escaping the text around the tags.
+  bool raw = 6;
+}
+
+// FacetBucket is one metadata value and its record count.
+message FacetBucket {
+  // Value is the metadata value.
+  google.protobuf.Value value = 1;
+  // Count is the number of matching records holding it.
+  uint64 count = 2;
+}
+
+// FacetBuckets holds one field's buckets, largest first.
+message FacetBuckets {
+  // Buckets are ordered by count, largest first.
+  repeated FacetBucket buckets = 1;
 }
 
 // SearchResponse contains ordered matches and distributed execution metadata.
@@ -336,6 +418,8 @@ message SearchResponse {
   uint64 metadata_epoch = 4;
   // AuthoritativePlacement is true only for a converged committed view.
   bool authoritative_placement = 5;
+  // Facets maps each requested field to its buckets.
+  map<string, FacetBuckets> facets = 6;
 }
 
 // BatchSearchRequest contains a bounded list of independent searches.
@@ -562,4 +646,19 @@ message RestoreResponse {
   uint64 metadata_epoch = 2;
   // VectorCount is the restored logical record count.
   uint64 vector_count = 3;
+}
+
+// AdminRequest carries the inputs of an administrative REST endpoint.
+message AdminRequest {
+  // Body is the JSON request body for endpoints that take one.
+  google.protobuf.Struct body = 1;
+  // Query holds URL query parameters, such as limit for log RPCs.
+  map<string, string> query = 2;
+}
+
+// AdminResponse carries the JSON response of an administrative endpoint.
+message AdminResponse {
+  // Result is the REST response body. A top-level JSON array is returned
+  // as {"items": [...]}.
+  google.protobuf.Struct result = 1;
 }

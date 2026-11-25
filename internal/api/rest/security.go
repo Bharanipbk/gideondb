@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Bharanipbk/gideondb/internal/embedding"
+	"github.com/Bharanipbk/gideondb/internal/otlp"
 	"github.com/Bharanipbk/gideondb/internal/rerank"
 	"net"
 	"net/http"
@@ -51,7 +52,16 @@ type Options struct {
 	Embedders *embedding.Registry
 	// Rerankers are the cross-encoder endpoints search requests may name.
 	Rerankers *rerank.Registry
+	// SpanExporter receives one server span per sampled request, for
+	// example an *otlp.Exporter. Nil disables span export.
+	SpanExporter SpanExporter
+	// TraceSampleRatio samples new root traces when SpanExporter is set
+	// (0–1; requests with a traceparent follow its sampled flag).
+	TraceSampleRatio float64
 }
+
+// SpanExporter accepts finished spans without blocking.
+type SpanExporter interface{ Export(otlp.Span) }
 
 type Principal struct {
 	Name               string   `json:"name"`

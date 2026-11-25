@@ -1,17 +1,21 @@
 # gRPC API
 
-Maturity: **local data-plane transport implemented; distributed and administrative RPCs planned**.
+Maturity: **data-plane, distributed and administrative RPCs implemented**.
 
 The versioned public protobuf contract is
 [`gideondb.v1.GideonDBService`](../../api/proto/gideondb/v1/gideondb.proto).
-It covers the 18 operations required by the technical design:
+It covers the 18 operations required by the technical design, plus 15
+administrative and cluster RPCs:
 
 - collection creation, deletion, listing, and description;
 - record upsert, bounded batch upsert, deletion, and exact lookup;
 - search, ordered batch search, and opaque-cursor scrolling;
 - cluster status plus node and logical-shard placement listing;
 - health and bounded operational statistics; and
-- server-streamed snapshots plus client-streamed restores.
+- server-streamed snapshots plus client-streamed restores; and
+- [administrative and cluster RPCs](#administrative-and-cluster-rpcs) for
+  readiness, peers, placement, replicas, rebalancing, metadata epochs,
+  recovery points, logs, embedders and rerankers.
 
 The Go process can expose an opt-in gRPC listener with `-grpc-address`, the
 `GIDEONDB_GRPC_ADDRESS` environment variable, or the `grpc_address` JSON field.
@@ -43,6 +47,42 @@ engine data path.
 ```sh
 gideondb -http-address 127.0.0.1:6333 -grpc-address 127.0.0.1:6334
 ```
+
+## Administrative and cluster RPCs
+
+These RPCs mirror REST endpoints one for one. Each takes an `AdminRequest`
+(`body` is the REST JSON body as a `Struct`, `query` holds URL query
+parameters) and returns an `AdminResponse` whose `result` is the REST JSON
+response. A top-level JSON array is returned as `{"items": [...]}`. The node
+runs the same handler as REST, so validation, fencing and error text are the
+same. HTTP errors map to gRPC codes: 400 → `INVALID_ARGUMENT`, 401 →
+`UNAUTHENTICATED`, 403 → `PERMISSION_DENIED`, 404 → `NOT_FOUND`, 409/412 →
+`FAILED_PRECONDITION`, 429 → `RESOURCE_EXHAUSTED`, 503 → `UNAVAILABLE`.
+
+| RPC | REST endpoint | Role |
+|---|---|---|
+| `Ready` | `GET /v1/ready` | any |
+| `ClusterReadiness` | `GET /v1/cluster/readiness` | any |
+| `ListPeers` | `GET /v1/cluster/peers` | any |
+| `GetPlacement` | `GET /v1/cluster/placement` | any |
+| `ListReplicas` | `GET /v1/cluster/replicas` | any |
+| `PlanRebalance` | `GET /v1/cluster/rebalance/plan` | admin |
+| `PrepareRebalance` | `POST /v1/cluster/rebalance/prepare` | admin |
+| `ApplyRebalance` | `POST /v1/cluster/rebalance/apply` | admin |
+| `AbortRebalance` | `POST /v1/cluster/rebalance/abort` | admin |
+| `AdvanceMetadataEpoch` | `POST /v1/cluster/metadata/epoch` | admin |
+| `CreateRecoveryPoint` | `POST /v1/cluster/backup/recovery-point` | admin |
+| `RecentLogs` | `GET /v1/logs` | any |
+| `ClusterLogs` | `GET /v1/cluster/logs` | any |
+| `ListEmbedders` | `GET /v1/embedders` | any |
+| `ListRerankers` | `GET /v1/rerankers` | any |
+
+"Any" means any authenticated principal. The roles match the REST rules.
+Embedding the engine without the REST server leaves these RPCs
+`UNIMPLEMENTED`.
+
+Search also accepts `facets` and `highlight`, and `Collection` accepts
+`text_analyzer`; see [full-text](../indexing/full-text.md).
 
 The listener uses the configured bearer API key, reloadable principals file,
 and TLS identity. The legacy API key has administrator authority. Principals

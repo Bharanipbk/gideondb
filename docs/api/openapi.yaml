@@ -522,6 +522,8 @@ paths:
                 multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
+                facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
         "200":
@@ -533,6 +535,7 @@ paths:
                 properties:
                   results: {type: array, items: {$ref: "#/components/schemas/SearchResult"}}
                   rerank: {$ref: "#/components/schemas/RerankStatus"}
+                  facets: {$ref: "#/components/schemas/FacetResults"}
         "400": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
@@ -566,6 +569,8 @@ paths:
                 multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
+                facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
         "200":
@@ -841,6 +846,8 @@ paths:
                 multi_vector: {type: array, items: {type: array, items: {type: number, format: float}}, description: Late-interaction query token vectors for a multi-vector field named by using; scored with MaxSim.}
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
+                facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
         "200":
@@ -856,6 +863,7 @@ paths:
                   metadata_epoch: {type: integer, minimum: 1}
                   authoritative_placement: {type: boolean}
                   rerank: {$ref: "#/components/schemas/RerankStatus"}
+                  facets: {$ref: "#/components/schemas/FacetResults", description: Exact counts merged from every shard that answered; partial when shards failed.}
                 required: [results, partial, failures, metadata_epoch, authoritative_placement]
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -1005,6 +1013,7 @@ components:
         namespace: {type: string}
         timestamp: {type: integer, format: int64}
         version: {type: integer, format: uint64}
+        highlights: {type: array, items: {type: string}, description: Record text snippets with query terms wrapped in the highlight tags.}
       required: [id, score]
     ShardSearchFailure:
       type: object
@@ -1118,6 +1127,7 @@ components:
         metric: {type: string, enum: [cosine, dot, l2]}
         shard_count: {type: integer, minimum: 1}
         index: {$ref: "#/components/schemas/IndexConfig"}
+        text_analyzer: {type: string, enum: [standard, simple, whitespace, folding, cjk, english, french, german, spanish, italian, portuguese], default: standard, description: Analyzer that turns record and query text into BM25 terms. See docs/indexing/full-text.md.}
         vectors:
           type: object
           maxProperties: 16
@@ -1134,6 +1144,34 @@ components:
         datatype: {type: string, enum: [float32, float16, bfloat16], default: float32, description: Storage precision. Half types are rounded at write time and scored in float32.}
         multi_vector: {type: boolean, default: false, description: Store a list of vectors per record (late interaction) and search with MaxSim.}
       required: [dimension, metric]
+    FacetRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        field: {type: string, minLength: 1, description: Metadata field to count.}
+        size: {type: integer, minimum: 1, maximum: 1000, default: 10, description: Buckets returned, largest count first.}
+      required: [field]
+    FacetResults:
+      type: object
+      description: Buckets per requested field, largest count first; ties ordered by value.
+      additionalProperties:
+        type: array
+        items:
+          type: object
+          properties:
+            value: {description: The metadata value (string, number or boolean).}
+            count: {type: integer, minimum: 1}
+          required: [value, count]
+    HighlightRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        query: {type: string, maxLength: 1048576, description: Terms to mark. Defaults to the search text; required for vector-only searches.}
+        pre_tag: {type: string, maxLength: 64, default: "<em>"}
+        post_tag: {type: string, maxLength: 64, default: "</em>"}
+        fragment_size: {type: integer, minimum: 1, maximum: 10000, default: 150, description: Target snippet length in bytes.}
+        fragments: {type: integer, minimum: 1, maximum: 20, default: 3}
+        raw: {type: boolean, default: false, description: Skip HTML-escaping the text around the tags.}
     RerankSpec:
       type: object
       additionalProperties: false

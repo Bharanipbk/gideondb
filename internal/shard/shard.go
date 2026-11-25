@@ -314,3 +314,19 @@ func (s *Shard) Close() error {
 	}
 	return nil
 }
+
+// Facets counts metadata values across the shard's live records; a record
+// overwritten in the active segment or deleted is counted once or not at all.
+func (s *Shard) Facets(namespace string, filter *metadata.Expr, text string, fields []string) core.FacetCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := s.active.Facets(namespace, filter, text, fields, nil)
+	if s.immutable != nil {
+		excluded := s.active.Keys()
+		for key := range s.tombstones {
+			excluded[key] = struct{}{}
+		}
+		counts.Merge(s.immutable.segment.Facets(namespace, filter, text, fields, excluded))
+	}
+	return counts
+}

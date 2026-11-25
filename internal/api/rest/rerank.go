@@ -89,6 +89,9 @@ func (s *Server) searchShardStage(collectionName string, shardID uint32, request
 	default:
 		results, err = s.engine.SearchShardFilteredWithEF(collectionName, shardID, request.Namespace, request.Vector, request.TopK, filter, request.EFSearch)
 	}
+	if err == nil && request.needsText() {
+		err = s.engine.AttachText(collectionName, results)
+	}
 	if err != nil || request.Rerank == nil {
 		return results, err
 	}

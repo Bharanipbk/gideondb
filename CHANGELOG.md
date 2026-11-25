@@ -7,6 +7,37 @@ describe unreleased experimental work.
 
 ### Added
 
+- Full-text analyzers, highlighting and facets
+  ([guide](docs/indexing/full-text.md)). Collections take `text_analyzer`:
+  `standard` (the default, unchanged), `simple`, `whitespace`, `folding`,
+  `cjk` (bigrams), `english` (Porter), or light stemmers for French, German,
+  Spanish, Italian and Portuguese. Searches take `highlight` (tagged,
+  HTML-escaped snippets in `results[].highlights`) and `facets` (exact
+  metadata value counts over every matching record, merged across shard
+  owners by the cluster endpoint). REST, gRPC (`text_analyzer`,
+  `SearchRequest.facets`/`highlight`, `SearchResult.highlights`,
+  `SearchResponse.facets`) and the Go client are updated. In a cluster,
+  every node must be upgraded before clients send `facets` or `highlight`.
+- OpenTelemetry trace export: `-otlp-endpoint`, `-otlp-headers` and
+  `-trace-sample-ratio` (and the matching `OTEL_EXPORTER_OTLP_*` variables)
+  send one server span per sampled request over OTLP/HTTP JSON. The queue is
+  bounded and never blocks requests, and sampling follows `traceparent`.
+  `deployments/observability/` adds a Grafana dashboard, Prometheus alert
+  and recording rules, a Collector pipeline and a Fluent Bit config. The Helm
+  chart adds `observability.serviceMonitor`, `observability.prometheusRule`
+  and `observability.tracing`.
+- 15 administrative and cluster gRPC RPCs (`Ready`, `ClusterReadiness`,
+  `ListPeers`, `GetPlacement`, `ListReplicas`, `PlanRebalance`,
+  `PrepareRebalance`, `ApplyRebalance`, `AbortRebalance`,
+  `AdvanceMetadataEpoch`, `CreateRecoveryPoint`, `RecentLogs`, `ClusterLogs`,
+  `ListEmbedders`, `ListRerankers`). They run the REST handlers, so behaviour
+  matches the REST endpoints. Rebalance, recovery-point and epoch RPCs are
+  admin only.
+- `gideondb-loadtest compare` with `deployments/benchmark/compose.yaml` and
+  `scripts/benchmark-compare.sh`: runs GideonDB, Qdrant and OpenSearch with
+  the same data, the same HNSW parameters and the same CPU and memory limits,
+  and reports tie-aware recall, QPS, latency, build time and memory per
+  `ef_search`.
 - Product quantization for flat collections
   (`"index": {"type": "flat", "quantization": "pq", "pq_subspaces": M, "oversampling": N}`):
   per-segment k-means codebooks (M subspaces × 256 centroids, deterministic

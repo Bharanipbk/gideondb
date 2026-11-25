@@ -46,6 +46,10 @@ type report struct {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "compare" {
+		runCompare(os.Args[2:])
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "server" {
 		runServer(os.Args[2:])
 		return

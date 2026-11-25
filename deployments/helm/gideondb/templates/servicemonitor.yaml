@@ -1,0 +1,38 @@
+{{- if .Values.observability.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "gideondb.fullname" . }}
+  labels:
+    {{- include "gideondb.labels" . | nindent 4 }}
+    {{- with .Values.observability.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "gideondb.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: {{ .Values.observability.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.observability.serviceMonitor.scrapeTimeout }}
+      # /metrics requires the same bearer key as the REST API.
+      authorization:
+        type: Bearer
+        credentials:
+          name: {{ include "gideondb.secretName" . }}
+          key: api-key
+      tlsConfig:
+        {{- if eq .Values.tls.mode "secret" }}
+        ca:
+          secret:
+            name: {{ .Values.tls.secretName }}
+            key: ca.crt
+        serverName: {{ include "gideondb.fullname" . }}
+        {{- else }}
+        # Self-signed certificates are generated per pod.
+        insecureSkipVerify: true
+        {{- end }}
+{{- end }}

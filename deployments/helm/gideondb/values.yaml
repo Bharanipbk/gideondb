@@ -56,6 +56,25 @@ config:
   # Optional extra command-line flags, e.g. ["-grpc-address=0.0.0.0:6334"].
   extraArgs: []
 
+observability:
+  # OTLP/HTTP span export. Leave otlpEndpoint empty to disable.
+  tracing:
+    otlpEndpoint: ""        # e.g. http://otel-collector.observability:4318
+    sampleRatio: 1          # fraction of new root traces exported (0-1)
+    # Optional Secret key holding OTEL_EXPORTER_OTLP_HEADERS ("k=v,k2=v2").
+    headersSecret:
+      name: ""
+      key: headers
+  # Prometheus Operator integration (needs its CRDs installed).
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+  prometheusRule:
+    enabled: false
+    labels: {}
+
 service:
   type: ClusterIP
   port: 6333

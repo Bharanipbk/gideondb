@@ -26,24 +26,39 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	GideonDBService_CreateCollection_FullMethodName   = "/gideondb.v1.GideonDBService/CreateCollection"
-	GideonDBService_DeleteCollection_FullMethodName   = "/gideondb.v1.GideonDBService/DeleteCollection"
-	GideonDBService_ListCollections_FullMethodName    = "/gideondb.v1.GideonDBService/ListCollections"
-	GideonDBService_DescribeCollection_FullMethodName = "/gideondb.v1.GideonDBService/DescribeCollection"
-	GideonDBService_Upsert_FullMethodName             = "/gideondb.v1.GideonDBService/Upsert"
-	GideonDBService_BatchUpsert_FullMethodName        = "/gideondb.v1.GideonDBService/BatchUpsert"
-	GideonDBService_Delete_FullMethodName             = "/gideondb.v1.GideonDBService/Delete"
-	GideonDBService_Get_FullMethodName                = "/gideondb.v1.GideonDBService/Get"
-	GideonDBService_Search_FullMethodName             = "/gideondb.v1.GideonDBService/Search"
-	GideonDBService_BatchSearch_FullMethodName        = "/gideondb.v1.GideonDBService/BatchSearch"
-	GideonDBService_Scroll_FullMethodName             = "/gideondb.v1.GideonDBService/Scroll"
-	GideonDBService_ClusterStatus_FullMethodName      = "/gideondb.v1.GideonDBService/ClusterStatus"
-	GideonDBService_ListNodes_FullMethodName          = "/gideondb.v1.GideonDBService/ListNodes"
-	GideonDBService_ListShards_FullMethodName         = "/gideondb.v1.GideonDBService/ListShards"
-	GideonDBService_Health_FullMethodName             = "/gideondb.v1.GideonDBService/Health"
-	GideonDBService_Stats_FullMethodName              = "/gideondb.v1.GideonDBService/Stats"
-	GideonDBService_Snapshot_FullMethodName           = "/gideondb.v1.GideonDBService/Snapshot"
-	GideonDBService_Restore_FullMethodName            = "/gideondb.v1.GideonDBService/Restore"
+	GideonDBService_CreateCollection_FullMethodName     = "/gideondb.v1.GideonDBService/CreateCollection"
+	GideonDBService_DeleteCollection_FullMethodName     = "/gideondb.v1.GideonDBService/DeleteCollection"
+	GideonDBService_ListCollections_FullMethodName      = "/gideondb.v1.GideonDBService/ListCollections"
+	GideonDBService_DescribeCollection_FullMethodName   = "/gideondb.v1.GideonDBService/DescribeCollection"
+	GideonDBService_Upsert_FullMethodName               = "/gideondb.v1.GideonDBService/Upsert"
+	GideonDBService_BatchUpsert_FullMethodName          = "/gideondb.v1.GideonDBService/BatchUpsert"
+	GideonDBService_Delete_FullMethodName               = "/gideondb.v1.GideonDBService/Delete"
+	GideonDBService_Get_FullMethodName                  = "/gideondb.v1.GideonDBService/Get"
+	GideonDBService_Search_FullMethodName               = "/gideondb.v1.GideonDBService/Search"
+	GideonDBService_BatchSearch_FullMethodName          = "/gideondb.v1.GideonDBService/BatchSearch"
+	GideonDBService_Scroll_FullMethodName               = "/gideondb.v1.GideonDBService/Scroll"
+	GideonDBService_ClusterStatus_FullMethodName        = "/gideondb.v1.GideonDBService/ClusterStatus"
+	GideonDBService_ListNodes_FullMethodName            = "/gideondb.v1.GideonDBService/ListNodes"
+	GideonDBService_ListShards_FullMethodName           = "/gideondb.v1.GideonDBService/ListShards"
+	GideonDBService_Health_FullMethodName               = "/gideondb.v1.GideonDBService/Health"
+	GideonDBService_Stats_FullMethodName                = "/gideondb.v1.GideonDBService/Stats"
+	GideonDBService_Snapshot_FullMethodName             = "/gideondb.v1.GideonDBService/Snapshot"
+	GideonDBService_Restore_FullMethodName              = "/gideondb.v1.GideonDBService/Restore"
+	GideonDBService_Ready_FullMethodName                = "/gideondb.v1.GideonDBService/Ready"
+	GideonDBService_ClusterReadiness_FullMethodName     = "/gideondb.v1.GideonDBService/ClusterReadiness"
+	GideonDBService_ListPeers_FullMethodName            = "/gideondb.v1.GideonDBService/ListPeers"
+	GideonDBService_GetPlacement_FullMethodName         = "/gideondb.v1.GideonDBService/GetPlacement"
+	GideonDBService_ListReplicas_FullMethodName         = "/gideondb.v1.GideonDBService/ListReplicas"
+	GideonDBService_PlanRebalance_FullMethodName        = "/gideondb.v1.GideonDBService/PlanRebalance"
+	GideonDBService_PrepareRebalance_FullMethodName     = "/gideondb.v1.GideonDBService/PrepareRebalance"
+	GideonDBService_ApplyRebalance_FullMethodName       = "/gideondb.v1.GideonDBService/ApplyRebalance"
+	GideonDBService_AbortRebalance_FullMethodName       = "/gideondb.v1.GideonDBService/AbortRebalance"
+	GideonDBService_AdvanceMetadataEpoch_FullMethodName = "/gideondb.v1.GideonDBService/AdvanceMetadataEpoch"
+	GideonDBService_CreateRecoveryPoint_FullMethodName  = "/gideondb.v1.GideonDBService/CreateRecoveryPoint"
+	GideonDBService_RecentLogs_FullMethodName           = "/gideondb.v1.GideonDBService/RecentLogs"
+	GideonDBService_ClusterLogs_FullMethodName          = "/gideondb.v1.GideonDBService/ClusterLogs"
+	GideonDBService_ListEmbedders_FullMethodName        = "/gideondb.v1.GideonDBService/ListEmbedders"
+	GideonDBService_ListRerankers_FullMethodName        = "/gideondb.v1.GideonDBService/ListRerankers"
 )
 
 // GideonDBServiceClient is the client API for GideonDBService service.
@@ -90,6 +105,39 @@ type GideonDBServiceClient interface {
 	Snapshot(ctx context.Context, in *SnapshotRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[SnapshotResponse], error)
 	// Restores a checksum-addressed archive into an explicitly empty target.
 	Restore(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[RestoreRequest, RestoreResponse], error)
+	// Administrative and cluster RPCs mirror the REST endpoints of the same
+	// name. Requests carry the REST JSON body and query parameters; responses
+	// carry the REST JSON body as a Struct.
+	// Reports node readiness, including draining and dependency checks.
+	Ready(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Reports whether every voter is ready and placement has converged.
+	ClusterReadiness(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Lists discovered cluster peers with their advertised addresses.
+	ListPeers(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Returns the committed shard placement table.
+	GetPlacement(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Returns replica placement and per-replica sequence state.
+	ListReplicas(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Computes a capacity-aware rebalance plan without changing anything; admin only.
+	PlanRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Prepares a rebalance by snapshotting moving shards; admin only.
+	PrepareRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Commits a prepared rebalance to the placement table; admin only.
+	ApplyRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Aborts a prepared rebalance and releases its snapshots; admin only.
+	AbortRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Advances the fenced metadata epoch; admin only.
+	AdvanceMetadataEpoch(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Captures a cluster-wide backup recovery point; admin only.
+	CreateRecoveryPoint(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Returns this node's bounded recent operational log entries.
+	RecentLogs(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Returns recent operational log entries gathered from every peer.
+	ClusterLogs(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Lists server-configured embedding models and their counters.
+	ListEmbedders(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
+	// Lists server-configured rerankers.
+	ListRerankers(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error)
 }
 
 type gideonDBServiceClient struct {
@@ -292,6 +340,156 @@ func (c *gideonDBServiceClient) Restore(ctx context.Context, opts ...grpc.CallOp
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type GideonDBService_RestoreClient = grpc.ClientStreamingClient[RestoreRequest, RestoreResponse]
 
+func (c *gideonDBServiceClient) Ready(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_Ready_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ClusterReadiness(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ClusterReadiness_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ListPeers(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ListPeers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) GetPlacement(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_GetPlacement_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ListReplicas(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ListReplicas_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) PlanRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_PlanRebalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) PrepareRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_PrepareRebalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ApplyRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ApplyRebalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) AbortRebalance(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_AbortRebalance_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) AdvanceMetadataEpoch(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_AdvanceMetadataEpoch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) CreateRecoveryPoint(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_CreateRecoveryPoint_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) RecentLogs(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_RecentLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ClusterLogs(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ClusterLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ListEmbedders(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ListEmbedders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *gideonDBServiceClient) ListRerankers(ctx context.Context, in *AdminRequest, opts ...grpc.CallOption) (*AdminResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdminResponse)
+	err := c.cc.Invoke(ctx, GideonDBService_ListRerankers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GideonDBServiceServer is the server API for GideonDBService service.
 // All implementations must embed UnimplementedGideonDBServiceServer
 // for forward compatibility.
@@ -336,6 +534,39 @@ type GideonDBServiceServer interface {
 	Snapshot(*SnapshotRequest, grpc.ServerStreamingServer[SnapshotResponse]) error
 	// Restores a checksum-addressed archive into an explicitly empty target.
 	Restore(grpc.ClientStreamingServer[RestoreRequest, RestoreResponse]) error
+	// Administrative and cluster RPCs mirror the REST endpoints of the same
+	// name. Requests carry the REST JSON body and query parameters; responses
+	// carry the REST JSON body as a Struct.
+	// Reports node readiness, including draining and dependency checks.
+	Ready(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Reports whether every voter is ready and placement has converged.
+	ClusterReadiness(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Lists discovered cluster peers with their advertised addresses.
+	ListPeers(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Returns the committed shard placement table.
+	GetPlacement(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Returns replica placement and per-replica sequence state.
+	ListReplicas(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Computes a capacity-aware rebalance plan without changing anything; admin only.
+	PlanRebalance(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Prepares a rebalance by snapshotting moving shards; admin only.
+	PrepareRebalance(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Commits a prepared rebalance to the placement table; admin only.
+	ApplyRebalance(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Aborts a prepared rebalance and releases its snapshots; admin only.
+	AbortRebalance(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Advances the fenced metadata epoch; admin only.
+	AdvanceMetadataEpoch(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Captures a cluster-wide backup recovery point; admin only.
+	CreateRecoveryPoint(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Returns this node's bounded recent operational log entries.
+	RecentLogs(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Returns recent operational log entries gathered from every peer.
+	ClusterLogs(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Lists server-configured embedding models and their counters.
+	ListEmbedders(context.Context, *AdminRequest) (*AdminResponse, error)
+	// Lists server-configured rerankers.
+	ListRerankers(context.Context, *AdminRequest) (*AdminResponse, error)
 	mustEmbedUnimplementedGideonDBServiceServer()
 }
 
@@ -399,6 +630,51 @@ func (UnimplementedGideonDBServiceServer) Snapshot(*SnapshotRequest, grpc.Server
 }
 func (UnimplementedGideonDBServiceServer) Restore(grpc.ClientStreamingServer[RestoreRequest, RestoreResponse]) error {
 	return status.Errorf(codes.Unimplemented, "method Restore not implemented")
+}
+func (UnimplementedGideonDBServiceServer) Ready(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Ready not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ClusterReadiness(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClusterReadiness not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ListPeers(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListPeers not implemented")
+}
+func (UnimplementedGideonDBServiceServer) GetPlacement(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetPlacement not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ListReplicas(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListReplicas not implemented")
+}
+func (UnimplementedGideonDBServiceServer) PlanRebalance(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PlanRebalance not implemented")
+}
+func (UnimplementedGideonDBServiceServer) PrepareRebalance(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PrepareRebalance not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ApplyRebalance(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ApplyRebalance not implemented")
+}
+func (UnimplementedGideonDBServiceServer) AbortRebalance(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AbortRebalance not implemented")
+}
+func (UnimplementedGideonDBServiceServer) AdvanceMetadataEpoch(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdvanceMetadataEpoch not implemented")
+}
+func (UnimplementedGideonDBServiceServer) CreateRecoveryPoint(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CreateRecoveryPoint not implemented")
+}
+func (UnimplementedGideonDBServiceServer) RecentLogs(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RecentLogs not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ClusterLogs(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClusterLogs not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ListEmbedders(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListEmbedders not implemented")
+}
+func (UnimplementedGideonDBServiceServer) ListRerankers(context.Context, *AdminRequest) (*AdminResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListRerankers not implemented")
 }
 func (UnimplementedGideonDBServiceServer) mustEmbedUnimplementedGideonDBServiceServer() {}
 func (UnimplementedGideonDBServiceServer) testEmbeddedByValue()                         {}
@@ -727,6 +1003,276 @@ func _GideonDBService_Restore_Handler(srv interface{}, stream grpc.ServerStream)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type GideonDBService_RestoreServer = grpc.ClientStreamingServer[RestoreRequest, RestoreResponse]
 
+func _GideonDBService_Ready_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).Ready(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_Ready_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).Ready(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ClusterReadiness_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ClusterReadiness(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ClusterReadiness_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ClusterReadiness(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ListPeers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ListPeers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ListPeers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ListPeers(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_GetPlacement_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).GetPlacement(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_GetPlacement_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).GetPlacement(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ListReplicas_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ListReplicas(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ListReplicas_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ListReplicas(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_PlanRebalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).PlanRebalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_PlanRebalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).PlanRebalance(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_PrepareRebalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).PrepareRebalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_PrepareRebalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).PrepareRebalance(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ApplyRebalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ApplyRebalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ApplyRebalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ApplyRebalance(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_AbortRebalance_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).AbortRebalance(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_AbortRebalance_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).AbortRebalance(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_AdvanceMetadataEpoch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).AdvanceMetadataEpoch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_AdvanceMetadataEpoch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).AdvanceMetadataEpoch(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_CreateRecoveryPoint_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).CreateRecoveryPoint(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_CreateRecoveryPoint_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).CreateRecoveryPoint(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_RecentLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).RecentLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_RecentLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).RecentLogs(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ClusterLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ClusterLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ClusterLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ClusterLogs(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ListEmbedders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ListEmbedders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ListEmbedders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ListEmbedders(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _GideonDBService_ListRerankers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GideonDBServiceServer).ListRerankers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GideonDBService_ListRerankers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GideonDBServiceServer).ListRerankers(ctx, req.(*AdminRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GideonDBService_ServiceDesc is the grpc.ServiceDesc for GideonDBService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -797,6 +1343,66 @@ var GideonDBService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Stats",
 			Handler:    _GideonDBService_Stats_Handler,
+		},
+		{
+			MethodName: "Ready",
+			Handler:    _GideonDBService_Ready_Handler,
+		},
+		{
+			MethodName: "ClusterReadiness",
+			Handler:    _GideonDBService_ClusterReadiness_Handler,
+		},
+		{
+			MethodName: "ListPeers",
+			Handler:    _GideonDBService_ListPeers_Handler,
+		},
+		{
+			MethodName: "GetPlacement",
+			Handler:    _GideonDBService_GetPlacement_Handler,
+		},
+		{
+			MethodName: "ListReplicas",
+			Handler:    _GideonDBService_ListReplicas_Handler,
+		},
+		{
+			MethodName: "PlanRebalance",
+			Handler:    _GideonDBService_PlanRebalance_Handler,
+		},
+		{
+			MethodName: "PrepareRebalance",
+			Handler:    _GideonDBService_PrepareRebalance_Handler,
+		},
+		{
+			MethodName: "ApplyRebalance",
+			Handler:    _GideonDBService_ApplyRebalance_Handler,
+		},
+		{
+			MethodName: "AbortRebalance",
+			Handler:    _GideonDBService_AbortRebalance_Handler,
+		},
+		{
+			MethodName: "AdvanceMetadataEpoch",
+			Handler:    _GideonDBService_AdvanceMetadataEpoch_Handler,
+		},
+		{
+			MethodName: "CreateRecoveryPoint",
+			Handler:    _GideonDBService_CreateRecoveryPoint_Handler,
+		},
+		{
+			MethodName: "RecentLogs",
+			Handler:    _GideonDBService_RecentLogs_Handler,
+		},
+		{
+			MethodName: "ClusterLogs",
+			Handler:    _GideonDBService_ClusterLogs_Handler,
+		},
+		{
+			MethodName: "ListEmbedders",
+			Handler:    _GideonDBService_ListEmbedders_Handler,
+		},
+		{
+			MethodName: "ListRerankers",
+			Handler:    _GideonDBService_ListRerankers_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
