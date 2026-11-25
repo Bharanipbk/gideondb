@@ -74,6 +74,44 @@ var hits = client.search("articles", new GideonDBClient.SearchOptions()
     .text("vector database").alpha(0.7).fusion("rrf").topK(5));
 ```
 
+## Query syntax, highlighting, facets, aggregations and sorting
+
+`createCollection` passes `text_analyzer` and `synonyms` straight through.
+`searchResponse` returns the whole body (`results`, `facets`, `aggregations`);
+`distributedSearch(collection, options, allowPartial)` accepts the same options.
+Each result carries `highlights` when `highlight` is set.
+
+```java
+client.createCollection(Map.of("name", "shop", "dimension", 384,
+    "text_analyzer", "english", "synonyms", List.of(List.of("tv", "television"))));
+
+var response = client.searchResponse("shop", new GideonDBClient.SearchOptions()
+    .text("\"smart tv\" -refurbished").syntax("simple").topK(10)
+    .highlight(new GideonDBClient.HighlightOptions().preTag("<b>").postTag("</b>"))
+    .facet("brand", 5)
+    .aggregation("price", GideonDBClient.Aggregation.stats("price"))
+    .aggregation("bands", GideonDBClient.Aggregation.range("price")
+        .addRange("cheap", null, 100.0).addRange("premium", 100.0, null))
+    .sort("price", "asc").sortCandidates(500));
+var brands = GideonDBClient.facets(response).get("brand");
+var stats = GideonDBClient.aggregations(response).get("price");
+```
+
+## Autocomplete and document ingestion
+
+```java
+var s = client.suggest("shop", "smart telev", 5);
+var completions = GideonDBClient.completions(s);   // [{text, word, count}]
+var fix = s.get("did_you_mean");                   // may be null
+
+var doc = client.ingestDocument("articles", "guide.pdf",
+    java.nio.file.Files.readAllBytes(java.nio.file.Path.of("guide.pdf")),
+    new GideonDBClient.DocumentOptions().namespace("kb")
+        .metadata(Map.of("team", "docs")).chunkSize(800).chunkOverlap(100)
+        .contentType("application/pdf"));
+// doc: document_id, title, format, chunks, characters, replaced_chunks_removed
+```
+
 Run strict compilation and behavioral tests from the repository root:
 
 ```sh

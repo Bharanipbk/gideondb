@@ -110,3 +110,103 @@ test("hybrid, text, sparse search and quantized vectorizer collections send exac
   await assert.rejects(client.search("docs", { text: "x", topK: 1, fusion: "max" }), TypeError);
   assert.equal(requests.length, 5);
 });
+
+test("full-text collection options, query syntax, highlight, facets, aggregations and sort send exact bodies", async () => {
+  const requests = [];
+  const client = new GideonDBClient("https://db.example", { fetch: queuedFetch([
+    jsonResponse({ name: "docs" }, 201),
+    jsonResponse({ results: [{ id: "a", score: 1, highlights: ["<b>vector</b> db"] }] }),
+    jsonResponse({
+      results: [{ id: "a", score: 1 }],
+      facets: { category: [{ value: "guide", count: 2 }] },
+      aggregations: { price: { count: 2, min: 1, max: 3, sum: 4, avg: 2 }, bands: { buckets: [{ key: "cheap", to: 10, count: 2 }] } },
+    }),
+    jsonResponse({ results: [], partial: false, failures: [], metadata_epoch: 1, authoritative_placement: true, facets: { category: [] }, aggregations: {} }),
+  ], requests) });
+  const config = { name: "docs", dimension: 2, metric: "cosine", shard_count: 1, text_analyzer: "english", synonyms: [["car", "automobile"]] };
+  await client.createCollection(config);
+  const highlight = { query: "vector", pre_tag: "<b>", post_tag: "</b>", fragment_size: 80, fragments: 2, raw: true };
+  const results = await client.search("docs", { text: '"vector db" +fast', topK: 5, syntax: "simple", highlight });
+  assert.deepEqual(results[0].highlights, ["<b>vector</b> db"]);
+  const facets = [{ field: "category", size: 5 }];
+  const aggregations = {
+    price: { type: "stats", field: "price" },
+    hist: { type: "histogram", field: "price", interval: 10 },
+    bands: { type: "range", field: "price", ranges: [{ key: "cheap", to: 10 }, { from: 10 }] },
+    tags: { type: "terms", field: "tag", size: 3 },
+  };
+  const sort = [{ field: "price", order: "asc" }, { field: "_score" }];
+  const detailed = await client.searchDetailed("docs", { text: "x", topK: 3, facets, aggregations, sort, sortCandidates: 200 });
+  assert.equal(detailed.results[0].id, "a");
+  assert.deepEqual(detailed.facets.category, [{ value: "guide", count: 2 }]);
+  assert.equal(detailed.aggregations.price.avg, 2);
+  assert.equal(detailed.aggregations.bands.buckets[0].key, "cheap");
+  const cluster = await client.distributedSearch("docs", { text: "x", topK: 1, facets, syntax: "simple", sort });
+  assert.deepEqual(cluster.facets, { category: [] });
+  const bodies = requests.map(r => JSON.parse(r.options.body));
+  assert.deepEqual(bodies[0], config);
+  assert.deepEqual(bodies[1], { top_k: 5, text: '"vector db" +fast', syntax: "simple", highlight });
+  assert.deepEqual(bodies[2], { top_k: 3, text: "x", facets, aggregations, sort, sort_candidates: 200 });
+  assert.deepEqual(bodies[3], { top_k: 1, text: "x", syntax: "simple", facets, sort });
+  assert.match(requests[3].url, /\/v1\/cluster\/collections\/docs\/search$/);
+});
+
+test("suggest encodes text and size and parses completions", async () => {
+  const requests = [];
+  const client = new GideonDBClient("https://db.example", { fetch: queuedFetch([
+    jsonResponse({ completions: [{ text: "vector data", word: "data", count: 4 }], did_you_mean: "vector database" }),
+    jsonResponse({ completions: [] }),
+  ], requests) });
+  const suggestions = await client.suggest("my docs", "vector da", 5);
+  assert.equal(requests[0].url, "https://db.example/v1/collections/my%20docs/suggest?text=vector+da&size=5");
+  assert.equal(requests[0].options.method, "GET");
+  assert.deepEqual(suggestions.completions, [{ text: "vector data", word: "data", count: 4 }]);
+  assert.equal(suggestions.did_you_mean, "vector database");
+  await client.suggest("docs", "ve");
+  assert.equal(requests[1].url, "https://db.example/v1/collections/docs/suggest?text=ve");
+  await assert.rejects(client.suggest("docs", ""), TypeError);
+  await assert.rejects(client.suggest("docs", "x", 0), TypeError);
+});
+
+test("ingestDocument uploads multipart form data and parses the result", async () => {
+  const requests = [];
+  const result = { document_id: "guide", title: "Guide", format: "markdown", chunks: 3, characters: 2400, replaced_chunks_removed: 1 };
+  const client = new GideonDBClient("https://db.example", { apiKey: "secret", fetch: queuedFetch([
+    jsonResponse(result, 201),
+    jsonResponse(result, 201),
+    jsonResponse(result, 201),
+  ], requests) });
+  const got = await client.ingestDocument("docs", "dir/guide.md", "# Guide\nhello", {
+    id: "guide", namespace: "team", metadata: { lang: "en" }, chunkSize: 500, chunkOverlap: 50, contentType: "text/markdown",
+  });
+  assert.deepEqual(got, result);
+  const { url, options } = requests[0];
+  assert.equal(url, "https://db.example/v1/collections/docs/documents");
+  assert.equal(options.method, "POST");
+  assert.equal(options.headers["Content-Type"], undefined);
+  assert.equal(options.headers.Authorization, "Bearer secret");
+  assert.ok(options.body instanceof FormData);
+  assert.equal(options.body.get("id"), "guide");
+  assert.equal(options.body.get("namespace"), "team");
+  assert.equal(options.body.get("metadata"), '{"lang":"en"}');
+  assert.equal(options.body.get("chunk_size"), "500");
+  assert.equal(options.body.get("chunk_overlap"), "50");
+  const file = options.body.get("file");
+  assert.equal(file.name, "guide.md");
+  assert.equal(file.type, "text/markdown");
+  assert.equal(await file.text(), "# Guide\nhello");
+  // Encoded wire form carries the multipart boundary and file part.
+  const encoded = new Request("https://x", { method: "POST", body: options.body });
+  assert.match(encoded.headers.get("content-type"), /^multipart\/form-data; boundary=/);
+  const wire = await encoded.text();
+  assert.match(wire, /name="file"; filename="guide.md"\r\nContent-Type: text\/markdown/);
+
+  await client.ingestDocument("docs", "a.pdf", new Uint8Array([37, 80, 68, 70]));
+  const minimal = requests[1].options.body;
+  assert.deepEqual([...minimal.keys()], ["file"]);
+  assert.deepEqual(new Uint8Array(await minimal.get("file").arrayBuffer()), new Uint8Array([37, 80, 68, 70]));
+  await client.ingestDocument("docs", "b.txt", new Blob(["hi"]));
+  assert.equal(await requests[2].options.body.get("file").text(), "hi");
+  await assert.rejects(client.ingestDocument("docs", "c.txt", 42), TypeError);
+  await assert.rejects(client.ingestDocument("docs", "", "x"), TypeError);
+});

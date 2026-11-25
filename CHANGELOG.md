@@ -49,8 +49,16 @@ describe unreleased experimental work.
     dependency.
   - gRPC gains `SearchRequest.syntax` and `Collection.synonyms`. The Go client
     gains `Syntax`, `Sort`, `SearchAggregate`, `Suggest` and `IngestDocument`.
-    Aggregations, sorting, suggest and document upload are REST and Go-client
-    only for now.
+- Python, TypeScript, Java, Rust and .NET SDKs now support `text_analyzer`,
+  `synonyms`, `syntax`, `highlight` (and result `highlights`), `facets`,
+  `aggregations`, `sort` and `sort_candidates` on local and cluster search.
+  Each also gains a full-response search method (`search_response`,
+  `searchDetailed`, `searchResponse`, `search_response`,
+  `SearchWithResponseAsync`), plus suggest and multipart document upload.
+  Existing methods are unchanged. **Rust:** new fields on `CollectionConfig`,
+  `SearchOptions`, `SearchResult`, `DistributedSearchResponse` and the
+  transport `Request` mean struct literals that list every field must add
+  `..Default::default()`.
 - Full-text analyzers, highlighting and facets
   ([guide](docs/indexing/full-text.md)). Collections take `text_analyzer`:
   `standard` (the default, unchanged), `simple`, `whitespace`, `folding`,

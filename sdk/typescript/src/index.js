@@ -97,6 +97,32 @@ export class GideonDBClient {
     return (await this.request("POST", `${collectionPath(collection)}/search`, searchBody(search, false), options)).results;
   }
 
+  async searchDetailed(collection, search, options) {
+    return this.request("POST", `${collectionPath(collection)}/search`, searchBody(search, false), options);
+  }
+
+  async suggest(collection, text, size, options) {
+    if (typeof text !== "string" || text === "") throw new TypeError("suggest requires text");
+    const query = new URLSearchParams({ text });
+    if (size !== undefined) {
+      if (!Number.isInteger(size) || size < 1) throw new TypeError("size must be a positive integer");
+      query.set("size", String(size));
+    }
+    return this.request("GET", `${collectionPath(collection)}/suggest?${query}`, undefined, options);
+  }
+
+  async ingestDocument(collection, filename, content, settings = {}, options) {
+    if (typeof filename !== "string" || filename === "") throw new TypeError("ingestDocument requires a filename");
+    const form = new FormData();
+    if (settings.id) form.append("id", settings.id);
+    if (settings.namespace) form.append("namespace", settings.namespace);
+    if (settings.metadata !== undefined) form.append("metadata", JSON.stringify(settings.metadata));
+    if (settings.chunkSize) form.append("chunk_size", String(settings.chunkSize));
+    if (settings.chunkOverlap) form.append("chunk_overlap", String(settings.chunkOverlap));
+    form.append("file", documentBlob(content, settings.contentType), filename.split(/[\\/]/).pop());
+    return this.request("POST", `${collectionPath(collection)}/documents`, form, options);
+  }
+
   async distributedSearch(collection, search, options) {
     return this.request("POST", `${clusterCollectionPath(collection)}/search`, searchBody(search, true), options);
   }
@@ -109,7 +135,8 @@ export class GideonDBClient {
 
   async request(method, path, body, options = {}) {
     const headers = { Accept: "application/json", "X-GideonDB-Client": "typescript/dev" };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const multipart = body instanceof FormData;
+    if (body !== undefined && !multipart) headers["Content-Type"] = "application/json";
     if (this.apiKey) headers.Authorization = `Bearer ${this.apiKey}`;
     const timeoutSignal = AbortSignal.timeout(this.timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeoutSignal]) : timeoutSignal;
@@ -118,7 +145,7 @@ export class GideonDBClient {
       response = await this.fetch(this.baseURL + path, {
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined || multipart ? body : JSON.stringify(body),
         signal,
       });
     } catch (error) {
@@ -160,8 +187,21 @@ function searchBody(search, distributed) {
   if (search.fusion) body.fusion = search.fusion;
   if (search.namespace) body.namespace = search.namespace;
   if (search.filter !== undefined) body.filter = search.filter;
+  if (search.syntax) body.syntax = search.syntax;
+  if (search.highlight !== undefined) body.highlight = search.highlight;
+  if (search.facets !== undefined) body.facets = search.facets;
+  if (search.aggregations !== undefined) body.aggregations = search.aggregations;
+  if (search.sort !== undefined) body.sort = search.sort;
+  if (search.sortCandidates !== undefined) body.sort_candidates = search.sortCandidates;
   if (distributed && search.allowPartial) body.allow_partial = true;
   return body;
+}
+
+function documentBlob(content, contentType) {
+  const type = contentType ?? "";
+  if (content instanceof Blob) return contentType ? new Blob([content], { type }) : content;
+  if (typeof content === "string" || content instanceof Uint8Array || content instanceof ArrayBuffer) return new Blob([content], { type });
+  throw new TypeError("document content must be a Blob, Uint8Array, ArrayBuffer or string");
 }
 
 async function readBounded(response) {

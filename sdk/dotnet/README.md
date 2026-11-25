@@ -74,6 +74,53 @@ var hits = await client.SearchAsync("articles", new SearchOptions
 });
 ```
 
+## Query syntax, highlighting, facets, aggregations and sorting
+
+Collections accept a `TextAnalyzer` (for example `"english"` or `"cjk"`) and
+`Synonyms`. `SearchOptions` adds `Syntax = "simple"` (phrases, `+must`,
+`-must_not`, `fuzzy~`, `prefix*`, `^boost`), `Highlight`, `Facets`,
+`Aggregations`, `Sort` and `SortCandidates`; only the fields you set are sent.
+`SearchWithResponseAsync`, `SearchFacetsAsync` and `SearchAggregateAsync`
+return a `SearchResponse` with `Facets` and `Aggregations`;
+`DistributedSearchResponse` exposes the same. Each `SearchResult` carries
+`Highlights` when requested.
+
+```csharp
+await client.CreateCollectionAsync(new CollectionConfig
+{
+    Name = "articles", Dimension = 384, Metric = "cosine", ShardCount = 1,
+    TextAnalyzer = "english", Synonyms = new[] { new[] { "car", "auto" } }
+});
+
+var response = await client.SearchWithResponseAsync("articles", new SearchOptions
+{
+    Text = "\"vector database\" -draft", Syntax = "simple", TopK = 10,
+    Highlight = new HighlightOptions { PreTag = "<b>", PostTag = "</b>" },
+    Facets = new[] { new FacetRequest { Field = "lang", Size = 5 } },
+    Aggregations = new Dictionary<string, Aggregation>
+    {
+        ["price"] = new Aggregation { Type = "stats", Field = "price" }
+    },
+    Sort = new[] { new SortField { Field = "price", Order = "asc" } }
+});
+var langs = response.Facets!["lang"];
+var avg = response.Aggregations!["price"].Avg;
+```
+
+## Autocomplete and document ingestion
+
+```csharp
+var suggestions = await client.SuggestAsync("articles", "vectr datab", size: 5);
+Console.WriteLine(suggestions.DidYouMean);
+
+var document = await client.IngestDocumentAsync("articles", "guide.pdf",
+    await File.ReadAllBytesAsync("guide.pdf"),
+    new DocumentOptions { Id = "guide", ChunkSize = 800, Metadata = new Dictionary<string, object?> { ["lang"] = "en" } });
+Console.WriteLine($"{document.DocumentId}: {document.Chunks} chunks");
+```
+
+A `Stream` overload of `IngestDocumentAsync` leaves the caller's stream open.
+
 Run the dependency-free contract tests from the repository root:
 
 ```sh

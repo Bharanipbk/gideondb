@@ -27,6 +27,10 @@ export interface CollectionConfig {
   /** Name of a server embedding model used to embed record and query text. */
   vectorizer?: string;
   index?: IndexConfig;
+  /** Full-text analyzer name, e.g. "standard" or "english". */
+  text_analyzer?: string;
+  /** Groups of equivalent terms expanded at query time. */
+  synonyms?: string[][];
 }
 
 export interface VectorRecord {
@@ -65,6 +69,77 @@ export interface SearchRequest {
   namespace?: string;
   filter?: Record<string, unknown>;
   allowPartial?: boolean;
+  /** "simple" enables "phrases", +must, -must_not, fuzzy~, prefix* and ^boost in text. */
+  syntax?: "simple";
+  highlight?: HighlightRequest;
+  facets?: FacetRequest[];
+  aggregations?: Record<string, AggregationRequest>;
+  sort?: SortField[];
+  /** Relevance candidates that sort reorders (1-10000). */
+  sortCandidates?: number;
+}
+
+export interface HighlightRequest {
+  query?: string;
+  pre_tag?: string;
+  post_tag?: string;
+  fragment_size?: number;
+  fragments?: number;
+  raw?: boolean;
+}
+
+export interface FacetRequest { field: string; size?: number; }
+export type FacetResults = Record<string, Array<{ value: string | number | boolean; count: number }>>;
+
+export interface AggregationRequest {
+  type: "stats" | "histogram" | "range" | "terms";
+  field: string;
+  interval?: number;
+  ranges?: Array<{ key?: string; from?: number; to?: number }>;
+  size?: number;
+}
+
+export interface AggregationResult {
+  count?: number;
+  min?: number;
+  max?: number;
+  sum?: number;
+  avg?: number;
+  buckets?: Array<{ key: unknown; from?: number; to?: number; count: number }>;
+}
+
+export interface SortField { field: string; order?: "asc" | "desc"; }
+
+export interface SearchResponse {
+  results: SearchResult[];
+  facets?: FacetResults;
+  aggregations?: Record<string, AggregationResult>;
+}
+
+export interface Suggestions {
+  completions: Array<{ text: string; word: string; count: number }>;
+  did_you_mean?: string;
+}
+
+export interface DocumentOptions {
+  /** Default: the file name without extension. */
+  id?: string;
+  namespace?: string;
+  metadata?: Record<string, unknown>;
+  /** Runes per chunk (server default 1000). */
+  chunkSize?: number;
+  /** Runes of overlap (server default 150). */
+  chunkOverlap?: number;
+  contentType?: string;
+}
+
+export interface DocumentResult {
+  document_id: string;
+  title: string;
+  format: string;
+  chunks: number;
+  characters: number;
+  replaced_chunks_removed: number;
 }
 
 export interface SearchResult {
@@ -73,10 +148,14 @@ export interface SearchResult {
   metadata?: Record<string, unknown>;
   payload?: Record<string, unknown>;
   namespace?: string;
+  /** Record text snippets, present when highlight was requested. */
+  highlights?: string[];
 }
 
 export interface DistributedSearchResponse {
   results: SearchResult[];
+  facets?: FacetResults;
+  aggregations?: Record<string, AggregationResult>;
   partial: boolean;
   failures: Array<{ shard_id: number; node_id?: string; error: string }>;
   metadata_epoch: number;
@@ -113,6 +192,10 @@ export class GideonDBClient {
   distributedScroll(collection: string, settings?: { namespace?: string; limit?: number; cursor?: string; includeVector?: boolean }, options?: RequestOptions): Promise<RecordPage>;
   delete(collection: string, id: string, options?: RequestOptions & { namespace?: string }): Promise<void>;
   search(collection: string, search: SearchRequest, options?: RequestOptions): Promise<SearchResult[]>;
+  /** Like search, but returns the full response including facets and aggregations. */
+  searchDetailed(collection: string, search: SearchRequest, options?: RequestOptions): Promise<SearchResponse>;
+  suggest(collection: string, text: string, size?: number, options?: RequestOptions): Promise<Suggestions>;
+  ingestDocument(collection: string, filename: string, content: Blob | Uint8Array | ArrayBuffer | string, settings?: DocumentOptions, options?: RequestOptions): Promise<DocumentResult>;
   distributedSearch(collection: string, search: SearchRequest, options?: RequestOptions): Promise<DistributedSearchResponse>;
   distributedBatchUpsert(collection: string, records: VectorRecord[], settings?: { acknowledgement?: Acknowledgement }, options?: RequestOptions): Promise<DistributedWriteResponse>;
 }

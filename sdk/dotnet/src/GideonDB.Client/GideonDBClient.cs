@@ -80,6 +80,55 @@ public sealed class GideonDBClient : IDisposable
     public async Task<IReadOnlyList<SearchResult>> SearchAsync(string collection, SearchOptions options, CancellationToken cancellationToken = default) =>
         (await SendAsync<SearchResults>(HttpMethod.Post, $"{CollectionPath(collection)}/search", SearchBody(options, false), cancellationToken).ConfigureAwait(false)).Results;
 
+    /// <summary>Runs a search and returns results plus any requested facets and aggregations.</summary>
+    public Task<SearchResponse> SearchWithResponseAsync(string collection, SearchOptions options, CancellationToken cancellationToken = default) =>
+        SendAsync<SearchResponse>(HttpMethod.Post, $"{CollectionPath(collection)}/search", SearchBody(options, false), cancellationToken);
+
+    /// <summary>Runs a search and counts the most common values of metadata fields.</summary>
+    public async Task<SearchResponse> SearchFacetsAsync(string collection, SearchOptions options, IReadOnlyList<FacetRequest> facets, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return await SearchWithResponseAsync(collection, options with { Facets = facets ?? throw new ArgumentNullException(nameof(facets)) }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Runs a search and computes named aggregations over every matching record.</summary>
+    public async Task<SearchResponse> SearchAggregateAsync(string collection, SearchOptions options, IReadOnlyDictionary<string, Aggregation> aggregations, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return await SearchWithResponseAsync(collection, options with { Aggregations = aggregations ?? throw new ArgumentNullException(nameof(aggregations)) }, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Completes the last word of <paramref name="text"/> and proposes a spelling fix.</summary>
+    public Task<Suggestions> SuggestAsync(string collection, string text, int size = 0, CancellationToken cancellationToken = default)
+    {
+        var query = $"?text={Encode(text)}";
+        if (size > 0) query += $"&size={size}";
+        return SendAsync<Suggestions>(HttpMethod.Get, $"{CollectionPath(collection)}/suggest{query}", null, cancellationToken);
+    }
+
+    /// <summary>Uploads a text, Markdown, HTML, PDF or DOCX file for server-side extraction, chunking and embedding.</summary>
+    public Task<DocumentResult> IngestDocumentAsync(string collection, string fileName, byte[] content, DocumentOptions? options = null, CancellationToken cancellationToken = default) =>
+        IngestDocumentAsync(collection, fileName, new MemoryStream(content ?? throw new ArgumentNullException(nameof(content)), false), options, cancellationToken);
+
+    /// <summary>Uploads a document read from <paramref name="content"/>; the stream is not disposed.</summary>
+    public async Task<DocumentResult> IngestDocumentAsync(string collection, string fileName, Stream content, DocumentOptions? options = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (string.IsNullOrWhiteSpace(fileName)) throw new ArgumentException("File name is required.", nameof(fileName));
+        options ??= new DocumentOptions();
+        var form = new MultipartFormDataContent();
+        void Field(string name, string? value) { if (!string.IsNullOrEmpty(value)) form.Add(new StringContent(value), name); }
+        Field("id", options.Id);
+        Field("namespace", options.Namespace);
+        if (options.Metadata is not null) Field("metadata", JsonSerializer.Serialize(options.Metadata, JsonOptions));
+        if (options.ChunkSize is { } size) Field("chunk_size", size.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (options.ChunkOverlap is { } overlap) Field("chunk_overlap", overlap.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        var file = new StreamContent(new NonDisposingStream(content));
+        if (!string.IsNullOrEmpty(options.ContentType)) file.Headers.ContentType = MediaTypeHeaderValue.Parse(options.ContentType);
+        form.Add(file, "file", Path.GetFileName(fileName));
+        return await SendAsync<DocumentResult>(HttpMethod.Post, $"{CollectionPath(collection)}/documents", form, cancellationToken).ConfigureAwait(false);
+    }
+
     public Task<DistributedSearchResponse> DistributedSearchAsync(string collection, SearchOptions options, CancellationToken cancellationToken = default) =>
         SendAsync<DistributedSearchResponse>(HttpMethod.Post, $"{ClusterCollectionPath(collection)}/search", SearchBody(options, true), cancellationToken);
 
@@ -110,7 +159,8 @@ public sealed class GideonDBClient : IDisposable
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.TryAddWithoutValidation("X-GideonDB-Client", "dotnet/dev");
         if (!string.IsNullOrEmpty(apiKey)) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        if (body is not null) request.Content = JsonContent.Create(body, options: JsonOptions);
+        if (body is HttpContent content) request.Content = content;
+        else if (body is not null) request.Content = JsonContent.Create(body, options: JsonOptions);
 
         try
         {
@@ -179,6 +229,16 @@ public sealed class GideonDBClient : IDisposable
         if (hasSparse) body["sparse_vector"] = JsonSerializer.SerializeToNode(options.SparseVector, JsonOptions);
         if (options.Alpha is { } weight) body["alpha"] = weight;
         if (!string.IsNullOrEmpty(options.Fusion)) body["fusion"] = options.Fusion;
+        if (!string.IsNullOrEmpty(options.Syntax)) body["syntax"] = options.Syntax;
+        if (options.Highlight is not null) body["highlight"] = JsonSerializer.SerializeToNode(options.Highlight, JsonOptions);
+        if (options.Facets is { Count: > 0 }) body["facets"] = JsonSerializer.SerializeToNode(options.Facets, JsonOptions);
+        if (options.Aggregations is { Count: > 0 }) body["aggregations"] = JsonSerializer.SerializeToNode(options.Aggregations, JsonOptions);
+        if (options.Sort is { Count: > 0 }) body["sort"] = JsonSerializer.SerializeToNode(options.Sort, JsonOptions);
+        if (options.SortCandidates is { } candidates)
+        {
+            if (candidates <= 0) throw new ArgumentOutOfRangeException(nameof(options), "SortCandidates must be positive.");
+            body["sort_candidates"] = candidates;
+        }
         if (distributed && options.AllowPartial) body["allow_partial"] = true;
         return body;
     }
@@ -206,6 +266,25 @@ public sealed class GideonDBClient : IDisposable
     private sealed record CollectionList([property: JsonPropertyName("collections")] IReadOnlyList<CollectionConfig> Collections);
     private sealed record RecordList([property: JsonPropertyName("records")] IReadOnlyList<VectorRecord> Records);
     private sealed record SearchResults([property: JsonPropertyName("results")] IReadOnlyList<SearchResult> Results);
+    /// <summary>Lets a caller-owned stream be wrapped in HttpContent without being disposed.</summary>
+    private sealed class NonDisposingStream : Stream
+    {
+        private readonly Stream inner;
+        public NonDisposingStream(Stream inner) => this.inner = inner;
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => inner.ReadAsync(buffer, cancellationToken);
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => inner.ReadAsync(buffer, offset, count, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     private sealed record ApiErrorBody([property: JsonPropertyName("code")] string? Code, [property: JsonPropertyName("message")] string? Message);
 }
 
@@ -258,6 +337,10 @@ public sealed record CollectionConfig
     [JsonPropertyName("shard_count")] public int ShardCount { get; init; }
     [JsonPropertyName("vectorizer")] public string? Vectorizer { get; init; }
     [JsonPropertyName("index")] public IndexConfig? Index { get; init; }
+    /// <summary>BM25 analyzer such as "english" or "cjk"; null uses the server's "standard".</summary>
+    [JsonPropertyName("text_analyzer")] public string? TextAnalyzer { get; init; }
+    /// <summary>Groups of interchangeable words for text queries.</summary>
+    [JsonPropertyName("synonyms")] public IReadOnlyList<IReadOnlyList<string>>? Synonyms { get; init; }
 }
 
 public sealed record CollectionDescription(
@@ -306,6 +389,129 @@ public sealed record SearchOptions
     public double? Alpha { get; init; }
     /// <summary>"weighted" (server default) or "rrf".</summary>
     public string? Fusion { get; init; }
+    /// <summary>"simple" enables "phrases", +must, -must_not, fuzzy~, prefix* and ^boosts in Text.</summary>
+    public string? Syntax { get; init; }
+    /// <summary>Requests marked snippets of each result's record text.</summary>
+    public HighlightOptions? Highlight { get; init; }
+    /// <summary>Metadata fields whose most common values are counted (see SearchResponse.Facets).</summary>
+    public IReadOnlyList<FacetRequest>? Facets { get; init; }
+    /// <summary>Named aggregations over every matching record (see SearchResponse.Aggregations).</summary>
+    public IReadOnlyDictionary<string, Aggregation>? Aggregations { get; init; }
+    /// <summary>Orders relevance candidates by metadata fields or "_score".</summary>
+    public IReadOnlyList<SortField>? Sort { get; init; }
+    /// <summary>Size of the candidate pool that Sort reorders (server default max(100, 10x page)).</summary>
+    public int? SortCandidates { get; init; }
+}
+
+/// <summary>Snippet options; null fields use the server defaults (&lt;em&gt; tags, 150-byte fragments, at most 3).</summary>
+public sealed record HighlightOptions
+{
+    [JsonPropertyName("query")] public string? Query { get; init; }
+    [JsonPropertyName("pre_tag")] public string? PreTag { get; init; }
+    [JsonPropertyName("post_tag")] public string? PostTag { get; init; }
+    [JsonPropertyName("fragment_size")] public int? FragmentSize { get; init; }
+    [JsonPropertyName("fragments")] public int? Fragments { get; init; }
+    [JsonPropertyName("raw")] public bool? Raw { get; init; }
+}
+
+public sealed record FacetRequest
+{
+    [JsonPropertyName("field")] public string Field { get; init; } = string.Empty;
+    [JsonPropertyName("size")] public int? Size { get; init; }
+}
+
+public sealed record FacetBucket
+{
+    /// <summary>The metadata value (string, number or boolean).</summary>
+    [JsonPropertyName("value")] public JsonElement Value { get; init; }
+    [JsonPropertyName("count")] public long Count { get; init; }
+}
+
+/// <summary>One "stats", "histogram", "range" or "terms" aggregation.</summary>
+public sealed record Aggregation
+{
+    [JsonPropertyName("type")] public string Type { get; init; } = string.Empty;
+    [JsonPropertyName("field")] public string Field { get; init; } = string.Empty;
+    [JsonPropertyName("interval")] public double? Interval { get; init; }
+    [JsonPropertyName("ranges")] public IReadOnlyList<AggregationRange>? Ranges { get; init; }
+    [JsonPropertyName("size")] public int? Size { get; init; }
+}
+
+/// <summary>A half-open [From, To) range; null bounds are open.</summary>
+public sealed record AggregationRange
+{
+    [JsonPropertyName("key")] public string? Key { get; init; }
+    [JsonPropertyName("from")] public double? From { get; init; }
+    [JsonPropertyName("to")] public double? To { get; init; }
+}
+
+public sealed record AggregationResult
+{
+    [JsonPropertyName("count")] public long? Count { get; init; }
+    [JsonPropertyName("min")] public double? Min { get; init; }
+    [JsonPropertyName("max")] public double? Max { get; init; }
+    [JsonPropertyName("sum")] public double? Sum { get; init; }
+    [JsonPropertyName("avg")] public double? Avg { get; init; }
+    [JsonPropertyName("buckets")] public IReadOnlyList<AggregationBucket>? Buckets { get; init; }
+}
+
+public sealed record AggregationBucket
+{
+    [JsonPropertyName("key")] public JsonElement Key { get; init; }
+    [JsonPropertyName("from")] public double? From { get; init; }
+    [JsonPropertyName("to")] public double? To { get; init; }
+    [JsonPropertyName("count")] public long Count { get; init; }
+}
+
+/// <summary>Orders results by one field; Order is "asc" or "desc".</summary>
+public sealed record SortField
+{
+    [JsonPropertyName("field")] public string Field { get; init; } = string.Empty;
+    [JsonPropertyName("order")] public string? Order { get; init; }
+}
+
+public sealed record SearchResponse
+{
+    [JsonPropertyName("results")] public IReadOnlyList<SearchResult> Results { get; init; } = Array.Empty<SearchResult>();
+    [JsonPropertyName("facets")] public IReadOnlyDictionary<string, IReadOnlyList<FacetBucket>>? Facets { get; init; }
+    [JsonPropertyName("aggregations")] public IReadOnlyDictionary<string, AggregationResult>? Aggregations { get; init; }
+}
+
+public sealed record SuggestionCompletion
+{
+    [JsonPropertyName("text")] public string Text { get; init; } = string.Empty;
+    [JsonPropertyName("word")] public string Word { get; init; } = string.Empty;
+    [JsonPropertyName("count")] public long Count { get; init; }
+}
+
+public sealed record Suggestions
+{
+    [JsonPropertyName("completions")] public IReadOnlyList<SuggestionCompletion> Completions { get; init; } = Array.Empty<SuggestionCompletion>();
+    [JsonPropertyName("did_you_mean")] public string? DidYouMean { get; init; }
+}
+
+public sealed record DocumentOptions
+{
+    /// <summary>Document ID; the server defaults to the file name without extension.</summary>
+    public string? Id { get; init; }
+    public string? Namespace { get; init; }
+    public IReadOnlyDictionary<string, object?>? Metadata { get; init; }
+    /// <summary>Chunk size in characters (server default 1000).</summary>
+    public int? ChunkSize { get; init; }
+    /// <summary>Chunk overlap in characters (server default 150).</summary>
+    public int? ChunkOverlap { get; init; }
+    /// <summary>Optional Content-Type of the file part.</summary>
+    public string? ContentType { get; init; }
+}
+
+public sealed record DocumentResult
+{
+    [JsonPropertyName("document_id")] public string DocumentId { get; init; } = string.Empty;
+    [JsonPropertyName("title")] public string Title { get; init; } = string.Empty;
+    [JsonPropertyName("format")] public string Format { get; init; } = string.Empty;
+    [JsonPropertyName("chunks")] public int Chunks { get; init; }
+    [JsonPropertyName("characters")] public int Characters { get; init; }
+    [JsonPropertyName("replaced_chunks_removed")] public int ReplacedChunksRemoved { get; init; }
 }
 
 public sealed record SearchResult
@@ -315,6 +521,8 @@ public sealed record SearchResult
     [JsonPropertyName("metadata")] public IReadOnlyDictionary<string, JsonElement>? Metadata { get; init; }
     [JsonPropertyName("payload")] public IReadOnlyDictionary<string, JsonElement>? Payload { get; init; }
     [JsonPropertyName("namespace")] public string? Namespace { get; init; }
+    /// <summary>Marked snippets, set when SearchOptions.Highlight was requested.</summary>
+    [JsonPropertyName("highlights")] public IReadOnlyList<string>? Highlights { get; init; }
 }
 
 public sealed record ShardFailure(
@@ -327,7 +535,12 @@ public sealed record DistributedSearchResponse(
     [property: JsonPropertyName("partial")] bool Partial,
     [property: JsonPropertyName("failures")] IReadOnlyList<ShardFailure> Failures,
     [property: JsonPropertyName("metadata_epoch")] ulong MetadataEpoch,
-    [property: JsonPropertyName("authoritative_placement")] bool AuthoritativePlacement);
+    [property: JsonPropertyName("authoritative_placement")] bool AuthoritativePlacement)
+{
+    /// <summary>Facet counts merged from every answering shard, when requested.</summary>
+    [JsonPropertyName("facets")] public IReadOnlyDictionary<string, IReadOnlyList<FacetBucket>>? Facets { get; init; }
+    [JsonPropertyName("aggregations")] public IReadOnlyDictionary<string, AggregationResult>? Aggregations { get; init; }
+}
 
 public sealed record ShardWriteOutcome
 {

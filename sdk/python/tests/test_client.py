@@ -140,3 +140,112 @@ class HybridTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             sdk.search("docs", None, 1, text="x", fusion="max")
         self.assertEqual(len(opener.requests), 5)
+
+
+class SearchFeaturesTest(unittest.TestCase):
+    def test_collection_text_analyzer_and_synonyms_pass_through(self):
+        opener = QueueOpener([Response(201, {"name": "docs", "text_analyzer": "english"})])
+        sdk = Client("https://db.example", opener=opener)
+        config = {"name": "docs", "dimension": 2, "metric": "cosine", "shard_count": 1,
+                  "text_analyzer": "english", "synonyms": [["car", "auto"], ["tv", "television"]]}
+        self.assertEqual(sdk.create_collection(config)["text_analyzer"], "english")
+        self.assertEqual(json.loads(opener.requests[0][0].data), config)
+
+    def test_search_features_body_and_rich_response(self):
+        response = {
+            "results": [{"id": "a", "score": 1.0, "highlights": {"text": ["<b>red</b> car"]}}],
+            "facets": {"color": [{"value": "red", "count": 3}]},
+            "aggregations": {"price_stats": {"count": 3, "min": 1, "max": 9}},
+        }
+        opener = QueueOpener([Response(body=response), Response(body=response),
+                              Response(body=dict(response, partial=False)), Response(body={"results": []})])
+        sdk = Client("https://db.example", opener=opener)
+        kwargs = dict(
+            text='"red car" -blue', syntax="simple",
+            highlight={"pre_tag": "<b>", "post_tag": "</b>", "fragment_size": 80, "fragments": 2},
+            facets=[{"field": "color", "size": 5}],
+            aggregations={"price_stats": {"type": "stats", "field": "price"},
+                          "bands": {"type": "range", "field": "price", "ranges": [{"key": "cheap", "to": 5}, {"from": 5}]}},
+            sort=[{"field": "price", "order": "asc"}, {"field": "_score"}],
+            sort_candidates=200,
+        )
+        full = sdk.search_response("docs", None, 5, **kwargs)
+        self.assertEqual(full["facets"]["color"][0]["count"], 3)
+        self.assertEqual(full["aggregations"]["price_stats"]["max"], 9)
+        self.assertEqual(full["results"][0]["highlights"]["text"], ["<b>red</b> car"])
+        results = sdk.search("docs", None, 5, **kwargs)
+        self.assertEqual(results[0]["highlights"]["text"], ["<b>red</b> car"])
+        cluster = sdk.distributed_search("docs", None, 5, allow_partial=True, **kwargs)
+        self.assertEqual(cluster["facets"]["color"][0]["value"], "red")
+        sdk.search("docs", None, 2, text="x", highlight={})
+        expected = {
+            "top_k": 5, "text": '"red car" -blue', "syntax": "simple",
+            "highlight": {"pre_tag": "<b>", "post_tag": "</b>", "fragment_size": 80, "fragments": 2},
+            "facets": [{"field": "color", "size": 5}],
+            "aggregations": {"price_stats": {"type": "stats", "field": "price"},
+                             "bands": {"type": "range", "field": "price", "ranges": [{"key": "cheap", "to": 5}, {"from": 5}]}},
+            "sort": [{"field": "price", "order": "asc"}, {"field": "_score"}],
+            "sort_candidates": 200,
+        }
+        bodies = [json.loads(r.data) for r, _ in opener.requests]
+        self.assertEqual(bodies[0], expected)
+        self.assertEqual(bodies[1], expected)
+        self.assertEqual(bodies[2], dict(expected, allow_partial=True))
+        self.assertEqual(bodies[3], {"top_k": 2, "text": "x", "highlight": {}})
+        self.assertTrue(opener.requests[2][0].full_url.endswith("/v1/cluster/collections/docs/search"))
+        with self.assertRaises(ValueError):
+            sdk.search("docs", None, 1, text="x", syntax="lucene")
+
+    def test_suggest_query_and_response(self):
+        body = {"completions": [{"text": "vector data", "word": "data", "count": 4}], "did_you_mean": "vector database"}
+        opener = QueueOpener([Response(body=body), Response(body={"completions": []})])
+        sdk = Client("https://db.example", opener=opener)
+        self.assertEqual(sdk.suggest("my docs", "vector dat", size=3), body)
+        self.assertEqual(opener.requests[0][0].full_url,
+                         "https://db.example/v1/collections/my%20docs/suggest?text=vector+dat&size=3")
+        self.assertEqual(opener.requests[0][0].get_method(), "GET")
+        self.assertEqual(sdk.suggest("docs", "x")["completions"], [])
+        self.assertTrue(opener.requests[1][0].full_url.endswith("/suggest?text=x"))
+        with self.assertRaises(ValueError):
+            sdk.suggest("docs", "x", size=0)
+
+    def test_ingest_document_multipart(self):
+        result = {"document_id": "guide", "title": "Guide", "format": "markdown", "chunks": 2,
+                  "characters": 120, "replaced_chunks_removed": 1}
+        opener = QueueOpener([Response(201, result), Response(201, result)])
+        sdk = Client("https://db.example", api_key="k", opener=opener)
+        got = sdk.ingest_document(
+            "docs", "/tmp/dir/guide.md", b"# Guide\nhello", id="guide", namespace="t1",
+            metadata={"lang": "en"}, chunk_size=500, chunk_overlap=50, content_type="text/markdown",
+        )
+        self.assertEqual(got, result)
+        request = opener.requests[0][0]
+        self.assertTrue(request.full_url.endswith("/v1/collections/docs/documents"))
+        self.assertEqual(request.get_method(), "POST")
+        ctype = request.get_header("Content-type")
+        self.assertTrue(ctype.startswith("multipart/form-data; boundary="))
+        boundary = ctype.split("boundary=", 1)[1]
+        expected = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="id"\r\n\r\nguide\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="namespace"\r\n\r\nt1\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="metadata"\r\n\r\n{{"lang":"en"}}\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="chunk_size"\r\n\r\n500\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="chunk_overlap"\r\n\r\n50\r\n'
+            f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="guide.md"\r\n'
+            f'Content-Type: text/markdown\r\n\r\n# Guide\nhello\r\n'
+            f'--{boundary}--\r\n'
+        ).encode()
+        self.assertEqual(request.data, expected)
+        self.assertEqual(request.get_header("Authorization"), "Bearer k")
+        import email.parser
+        import email.policy
+        sdk.ingest_document("docs", "notes.txt", io.BytesIO(b"plain"))
+        request = opener.requests[1][0]
+        message = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+            b"Content-Type: " + request.get_header("Content-type").encode() + b"\r\n\r\n" + request.data)
+        parts = list(message.iter_parts())
+        self.assertEqual(len(parts), 1)
+        self.assertEqual(parts[0].get_param("name", header="content-disposition"), "file")
+        self.assertEqual(parts[0].get_filename(), "notes.txt")
+        self.assertIsNone(parts[0].get("Content-Type"))
+        self.assertEqual(parts[0].get_payload(decode=True), b"plain")

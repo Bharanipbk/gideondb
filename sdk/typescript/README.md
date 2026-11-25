@@ -86,3 +86,41 @@ await client.search("articles", { sparseVector: { vector: 1.0 }, topK: 10 });
 `fusion` is `"weighted"` (default) or `"rrf"`. `quantization: "binary"` is only
 valid on flat indexes; `oversampling` (1-100, default 4) controls how many
 candidates are rescored at full precision.
+
+## Full-text search, facets, aggregations, autocomplete and documents
+
+```js
+await client.createCollection({
+  name: "kb", dimension: 384, metric: "cosine", shard_count: 1, vectorizer: "minilm",
+  text_analyzer: "english", synonyms: [["car", "automobile"]],
+});
+
+// Query syntax, highlighting and metadata sort; results carry `highlights`.
+const hits = await client.search("kb", {
+  text: '"vector database" +fast -slow', syntax: "simple", topK: 10,
+  highlight: { pre_tag: "<b>", post_tag: "</b>", fragments: 2 },
+  sort: [{ field: "published", order: "desc" }], sortCandidates: 500,
+});
+
+// searchDetailed returns the whole response, including facets and aggregations.
+const { results, facets, aggregations } = await client.searchDetailed("kb", {
+  text: "vector", topK: 10,
+  facets: [{ field: "category", size: 5 }],
+  aggregations: {
+    price: { type: "stats", field: "price" },
+    bands: { type: "range", field: "price", ranges: [{ key: "cheap", to: 10 }, { from: 10 }] },
+  },
+});
+
+// Autocomplete and did-you-mean.
+const { completions, did_you_mean } = await client.suggest("kb", "vector da", 5);
+
+// Upload a text, Markdown, HTML, PDF or DOCX file (Blob, Uint8Array, ArrayBuffer or string).
+const doc = await client.ingestDocument("kb", "guide.md", "# Guide\n...", {
+  namespace: "team", metadata: { lang: "en" }, chunkSize: 800, chunkOverlap: 100,
+});
+console.log(doc.document_id, doc.chunks);
+```
+
+`distributedSearch` accepts the same search options and returns `facets` and
+`aggregations` alongside its placement fields.

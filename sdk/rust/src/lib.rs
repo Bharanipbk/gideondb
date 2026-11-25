@@ -47,6 +47,8 @@ pub struct Request {
     pub body: Option<Vec<u8>>,
     pub api_key: String,
     pub timeout: Duration,
+    /// Body media type; `None` means `application/json`.
+    pub content_type: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -216,6 +218,55 @@ impl Client {
             .results)
     }
 
+    /// Runs a search and returns results together with any requested
+    /// `facets` and `aggregations`.
+    pub fn search_response(
+        &self,
+        collection: &str,
+        options: &SearchOptions,
+    ) -> Result<SearchResponse, Error> {
+        self.request(
+            "POST",
+            &format!("{}/search", collection_path(collection)),
+            Some(search_body(options, false)?),
+        )
+    }
+
+    /// Completes the last word of `text` and proposes a spelling fix.
+    /// `size` of 0 uses the server default.
+    pub fn suggest(&self, collection: &str, text: &str, size: usize) -> Result<Suggestions, Error> {
+        if text.is_empty() {
+            return Err(Error::InvalidInput("text must not be empty".into()));
+        }
+        let mut path = format!(
+            "{}/suggest?text={}",
+            collection_path(collection),
+            encode(text)
+        );
+        if size > 0 {
+            path.push_str(&format!("&size={size}"));
+        }
+        self.request("GET", &path, None)
+    }
+
+    /// Uploads a text, Markdown, HTML, PDF or DOCX file for server-side
+    /// extraction, chunking and embedding.
+    pub fn ingest_document(
+        &self,
+        collection: &str,
+        filename: &str,
+        content: &[u8],
+        options: &DocumentOptions,
+    ) -> Result<DocumentResult, Error> {
+        let (body, content_type) = multipart_body(filename, content, options)?;
+        self.send_request(
+            "POST",
+            &format!("{}/documents", collection_path(collection)),
+            Some(body),
+            Some(content_type),
+        )
+    }
+
     pub fn distributed_search(
         &self,
         collection: &str,
@@ -255,6 +306,16 @@ impl Client {
         path: &str,
         body: Option<Vec<u8>>,
     ) -> Result<T, Error> {
+        self.send_request(method, path, body, None)
+    }
+
+    fn send_request<T: DeserializeOwned>(
+        &self,
+        method: &'static str,
+        path: &str,
+        body: Option<Vec<u8>>,
+        content_type: Option<String>,
+    ) -> Result<T, Error> {
         let response = self
             .transport
             .send(Request {
@@ -263,6 +324,7 @@ impl Client {
                 body,
                 api_key: self.api_key.clone(),
                 timeout: self.timeout,
+                content_type,
             })
             .map_err(|error| Error::Transport(error.to_string()))?;
         if response.body.len() > MAX_RESPONSE_BYTES {
@@ -295,6 +357,12 @@ pub struct CollectionConfig {
     pub vectorizer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index: Option<IndexConfig>,
+    /// Analyzer turning text into BM25 terms (see docs/indexing/full-text.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_analyzer: Option<String>,
+    /// Groups of interchangeable words for text queries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub synonyms: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -390,6 +458,162 @@ pub struct SearchOptions {
     pub alpha: Option<f32>,
     /// `"weighted"` (server default) or `"rrf"`.
     pub fusion: Option<String>,
+    /// `"simple"` enables phrases, +must, -must_not, fuzzy~, prefix* and ^boost.
+    pub syntax: Option<String>,
+    /// Requests marked snippets of each result's record text.
+    pub highlight: Option<HighlightOptions>,
+    /// Metadata value counts over every matching record.
+    pub facets: Vec<FacetRequest>,
+    /// Named stats, histogram, range or terms aggregations.
+    pub aggregations: BTreeMap<String, Aggregation>,
+    /// Orders relevance candidates by metadata fields or `_score`.
+    pub sort: Vec<SortField>,
+    /// Size of the candidate pool `sort` reorders.
+    pub sort_candidates: Option<usize>,
+}
+
+/// Highlight settings; unset fields use server defaults.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct HighlightOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragment_size: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fragments: Option<usize>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub raw: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FacetRequest {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FacetBucket {
+    pub value: Value,
+    pub count: u64,
+}
+
+/// One aggregation; `kind` is `"stats"`, `"histogram"`, `"range"` or `"terms"`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Aggregation {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interval: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ranges: Vec<AggregationRange>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size: Option<usize>,
+}
+
+/// Half-open `[from, to)` range; `None` bounds are open.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AggregationRange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct AggregationResult {
+    #[serde(default)]
+    pub count: Option<u64>,
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    #[serde(default)]
+    pub sum: Option<f64>,
+    #[serde(default)]
+    pub avg: Option<f64>,
+    #[serde(default)]
+    pub buckets: Vec<AggregationBucket>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AggregationBucket {
+    #[serde(default)]
+    pub key: Value,
+    #[serde(default)]
+    pub from: Option<f64>,
+    #[serde(default)]
+    pub to: Option<f64>,
+    pub count: u64,
+}
+
+/// Orders results by one field; `order` is `"asc"` or `"desc"`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SortField {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub order: Option<String>,
+}
+
+/// Full node-local search response.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SearchResponse {
+    pub results: Vec<SearchResult>,
+    #[serde(default)]
+    pub facets: BTreeMap<String, Vec<FacetBucket>>,
+    #[serde(default)]
+    pub aggregations: BTreeMap<String, AggregationResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Completion {
+    pub text: String,
+    pub word: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Suggestions {
+    #[serde(default)]
+    pub completions: Vec<Completion>,
+    #[serde(default)]
+    pub did_you_mean: Option<String>,
+}
+
+/// Upload options for `Client::ingest_document`; unset fields use server defaults.
+#[derive(Debug, Clone, Default)]
+pub struct DocumentOptions {
+    /// Default: the file name without extension.
+    pub id: Option<String>,
+    pub namespace: Option<String>,
+    pub metadata: Map<String, Value>,
+    /// Chunk length in characters (server default 1000).
+    pub chunk_size: Option<usize>,
+    /// Chunk overlap in characters (server default 150).
+    pub chunk_overlap: Option<usize>,
+    /// Content-Type of the file part.
+    pub content_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DocumentResult {
+    pub document_id: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub format: String,
+    pub chunks: usize,
+    #[serde(default)]
+    pub characters: usize,
+    #[serde(default)]
+    pub replaced_chunks_removed: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -402,6 +626,9 @@ pub struct SearchResult {
     pub payload: Map<String, Value>,
     #[serde(default)]
     pub namespace: Option<String>,
+    /// Marked snippets, set when `SearchOptions::highlight` was requested.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub highlights: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -420,6 +647,10 @@ pub struct DistributedSearchResponse {
     pub failures: Vec<ShardFailure>,
     pub metadata_epoch: u64,
     pub authoritative_placement: bool,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub facets: BTreeMap<String, Vec<FacetBucket>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub aggregations: BTreeMap<String, AggregationResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -511,10 +742,118 @@ fn search_body(options: &SearchOptions, distributed: bool) -> Result<Vec<u8>, Er
     if let Some(fusion) = fusion {
         body.insert("fusion".into(), Value::String(fusion.clone()));
     }
+    if let Some(syntax) = options.syntax.as_ref().filter(|value| !value.is_empty()) {
+        body.insert("syntax".into(), Value::String(syntax.clone()));
+    }
+    if let Some(highlight) = &options.highlight {
+        body.insert(
+            "highlight".into(),
+            serde_json::to_value(highlight).map_err(json_error)?,
+        );
+    }
+    if !options.facets.is_empty() {
+        body.insert(
+            "facets".into(),
+            serde_json::to_value(&options.facets).map_err(json_error)?,
+        );
+    }
+    if !options.aggregations.is_empty() {
+        body.insert(
+            "aggregations".into(),
+            serde_json::to_value(&options.aggregations).map_err(json_error)?,
+        );
+    }
+    if !options.sort.is_empty() {
+        body.insert(
+            "sort".into(),
+            serde_json::to_value(&options.sort).map_err(json_error)?,
+        );
+    }
+    if let Some(candidates) = options.sort_candidates {
+        body.insert("sort_candidates".into(), Value::from(candidates));
+    }
     if distributed && options.allow_partial {
         body.insert("allow_partial".into(), Value::Bool(true));
     }
     serialize(&body)
+}
+
+const MULTIPART_BOUNDARY: &str = "gideondb-rust-boundary-7d3f9a1c5e";
+
+fn multipart_body(
+    filename: &str,
+    content: &[u8],
+    options: &DocumentOptions,
+) -> Result<(Vec<u8>, String), Error> {
+    let base = filename.rsplit(['/', '\\']).next().unwrap_or_default();
+    if base.is_empty() {
+        return Err(Error::InvalidInput("filename must not be empty".into()));
+    }
+    if content
+        .windows(MULTIPART_BOUNDARY.len())
+        .any(|window| window == MULTIPART_BOUNDARY.as_bytes())
+    {
+        return Err(Error::InvalidInput(
+            "document content contains the multipart boundary".into(),
+        ));
+    }
+    let quote = |value: &str| -> Result<String, Error> {
+        if value.contains(['\r', '\n']) {
+            return Err(Error::InvalidInput(
+                "multipart values must not contain line breaks".into(),
+            ));
+        }
+        Ok(value.replace('\\', "\\\\").replace('"', "\\\""))
+    };
+    let mut fields: Vec<(&str, String)> = Vec::new();
+    if let Some(id) = options.id.as_ref().filter(|value| !value.is_empty()) {
+        fields.push(("id", id.clone()));
+    }
+    if let Some(namespace) = options.namespace.as_ref().filter(|value| !value.is_empty()) {
+        fields.push(("namespace", namespace.clone()));
+    }
+    if !options.metadata.is_empty() {
+        fields.push((
+            "metadata",
+            serde_json::to_string(&options.metadata).map_err(json_error)?,
+        ));
+    }
+    if let Some(size) = options.chunk_size {
+        fields.push(("chunk_size", size.to_string()));
+    }
+    if let Some(overlap) = options.chunk_overlap {
+        fields.push(("chunk_overlap", overlap.to_string()));
+    }
+    let mut body = Vec::with_capacity(content.len() + 512);
+    for (name, value) in fields {
+        body.extend_from_slice(
+            format!(
+                "--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{MULTIPART_BOUNDARY}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n",
+            quote(base)?
+        )
+        .as_bytes(),
+    );
+    if let Some(content_type) = options
+        .content_type
+        .as_deref()
+        .filter(|value| !value.is_empty())
+    {
+        body.extend_from_slice(format!("Content-Type: {}\r\n", quote(content_type)?).as_bytes());
+    }
+    body.extend_from_slice(b"\r\n");
+    body.extend_from_slice(content);
+    body.extend_from_slice(format!("\r\n--{MULTIPART_BOUNDARY}--\r\n").as_bytes());
+    Ok((
+        body,
+        format!("multipart/form-data; boundary={MULTIPART_BOUNDARY}"),
+    ))
 }
 
 fn validate_origin(value: &str) -> Result<String, Error> {
@@ -604,7 +943,13 @@ impl Transport for UreqTransport {
         let mut response = if let Some(body) = request.body {
             self.agent.run(
                 builder
-                    .header("Content-Type", "application/json")
+                    .header(
+                        "Content-Type",
+                        request
+                            .content_type
+                            .as_deref()
+                            .unwrap_or("application/json"),
+                    )
                     .body(body)?,
             )?
         } else {
@@ -748,6 +1093,7 @@ mod tests {
                     oversampling: Some(4),
                     ..Default::default()
                 }),
+                ..Default::default()
             })
             .unwrap();
         client
@@ -843,5 +1189,262 @@ mod tests {
             client(transport).health(),
             Err(Error::ResponseTooLarge)
         ));
+    }
+    #[test]
+    fn text_analyzer_synonyms_and_search_features() {
+        let transport = Arc::new(QueueTransport::default());
+        transport.push(201, r#"{"name":"docs","dimension":2,"metric":"cosine","shard_count":1,"text_analyzer":"english","synonyms":[["car","auto"]]}"#);
+        transport.push(200, r#"{"results":[{"id":"one","score":0.9,"highlights":["a <b>car</b>"]}],
+            "facets":{"color":[{"value":"red","count":2},{"value":true,"count":1}]},
+            "aggregations":{"price":{"count":3,"min":1.0,"max":9.0,"sum":12.0,"avg":4.0},
+                            "bands":{"buckets":[{"key":"cheap","to":5.0,"count":2},{"key":"dear","from":5.0,"count":1}]}}}"#);
+        transport.push(200, r#"{"results":[{"id":"one","score":0.5}],"partial":false,"failures":[],"metadata_epoch":3,"authoritative_placement":true,"facets":{"color":[{"value":"red","count":4}]},"aggregations":{"n":{"count":4}}}"#);
+        transport.push(200, r#"{"results":[{"id":"two","score":0.1}]}"#);
+        let client = client(transport.clone());
+        let created = client
+            .create_collection(&CollectionConfig {
+                name: "docs".into(),
+                dimension: 2,
+                metric: "cosine".into(),
+                shard_count: 1,
+                text_analyzer: Some("english".into()),
+                synonyms: vec![vec!["car".into(), "auto".into()]],
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(
+            created.synonyms,
+            vec![vec!["car".to_string(), "auto".to_string()]]
+        );
+        let options = SearchOptions {
+            top_k: 2,
+            text: Some("\"red car\" -used".into()),
+            syntax: Some("simple".into()),
+            highlight: Some(HighlightOptions {
+                pre_tag: Some("<b>".into()),
+                post_tag: Some("</b>".into()),
+                fragment_size: Some(80),
+                fragments: Some(2),
+                ..Default::default()
+            }),
+            facets: vec![FacetRequest {
+                field: "color".into(),
+                size: Some(5),
+            }],
+            aggregations: BTreeMap::from([
+                (
+                    "price".into(),
+                    Aggregation {
+                        kind: "stats".into(),
+                        field: "price".into(),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "bands".into(),
+                    Aggregation {
+                        kind: "range".into(),
+                        field: "price".into(),
+                        ranges: vec![
+                            AggregationRange {
+                                key: Some("cheap".into()),
+                                to: Some(5.0),
+                                ..Default::default()
+                            },
+                            AggregationRange {
+                                key: Some("dear".into()),
+                                from: Some(5.0),
+                                ..Default::default()
+                            },
+                        ],
+                        ..Default::default()
+                    },
+                ),
+            ]),
+            sort: vec![
+                SortField {
+                    field: "price".into(),
+                    order: Some("desc".into()),
+                },
+                SortField {
+                    field: "_score".into(),
+                    order: None,
+                },
+            ],
+            sort_candidates: Some(200),
+            ..Default::default()
+        };
+        let response = client.search_response("docs", &options).unwrap();
+        assert_eq!(response.results[0].highlights, vec!["a <b>car</b>"]);
+        assert_eq!(response.facets["color"][1].value, json!(true));
+        assert_eq!(response.facets["color"][0].count, 2);
+        assert_eq!(response.aggregations["price"].avg, Some(4.0));
+        assert_eq!(
+            response.aggregations["bands"].buckets[0].key,
+            json!("cheap")
+        );
+        assert_eq!(response.aggregations["bands"].buckets[1].from, Some(5.0));
+        let distributed = client
+            .distributed_search(
+                "docs",
+                &SearchOptions {
+                    allow_partial: true,
+                    ..options.clone()
+                },
+            )
+            .unwrap();
+        assert_eq!(distributed.facets["color"][0].count, 4);
+        assert_eq!(distributed.aggregations["n"].count, Some(4));
+        let plain = client
+            .search(
+                "docs",
+                &SearchOptions {
+                    top_k: 1,
+                    text: Some("car".into()),
+                    highlight: Some(HighlightOptions {
+                        raw: true,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(plain[0].highlights.is_empty());
+        let requests = transport.requests.lock().unwrap();
+        let body = |index: usize| -> Value {
+            serde_json::from_slice(requests[index].body.as_ref().unwrap()).unwrap()
+        };
+        assert_eq!(
+            body(0),
+            json!({"name":"docs","dimension":2,"metric":"cosine","shard_count":1,
+                   "text_analyzer":"english","synonyms":[["car","auto"]]})
+        );
+        let expected = json!({
+            "top_k":2,"text":"\"red car\" -used","syntax":"simple",
+            "highlight":{"pre_tag":"<b>","post_tag":"</b>","fragment_size":80,"fragments":2},
+            "facets":[{"field":"color","size":5}],
+            "aggregations":{
+                "bands":{"type":"range","field":"price","ranges":[{"key":"cheap","to":5.0},{"key":"dear","from":5.0}]},
+                "price":{"type":"stats","field":"price"}},
+            "sort":[{"field":"price","order":"desc"},{"field":"_score"}],
+            "sort_candidates":200});
+        assert_eq!(body(1), expected);
+        assert!(requests[1].url.ends_with("/v1/collections/docs/search"));
+        let mut distributed_expected = expected.clone();
+        distributed_expected["allow_partial"] = json!(true);
+        assert_eq!(body(2), distributed_expected);
+        assert!(
+            requests[2]
+                .url
+                .ends_with("/v1/cluster/collections/docs/search")
+        );
+        assert_eq!(
+            body(3),
+            json!({"top_k":1,"text":"car","highlight":{"raw":true}})
+        );
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.content_type.is_none())
+        );
+    }
+
+    #[test]
+    fn suggest_encodes_query_and_parses_completions() {
+        let transport = Arc::new(QueueTransport::default());
+        transport.push(200, r#"{"completions":[{"text":"vector datab","word":"database","count":7}],"did_you_mean":"vector database"}"#);
+        transport.push(200, r#"{"completions":[]}"#);
+        let client = client(transport.clone());
+        let suggestions = client.suggest("my docs", "vectr datab&x", 3).unwrap();
+        assert_eq!(suggestions.completions[0].word, "database");
+        assert_eq!(suggestions.completions[0].count, 7);
+        assert_eq!(suggestions.did_you_mean.as_deref(), Some("vector database"));
+        assert_eq!(client.suggest("docs", "ve", 0).unwrap().did_you_mean, None);
+        assert!(matches!(
+            client.suggest("docs", "", 1),
+            Err(Error::InvalidInput(_))
+        ));
+        let requests = transport.requests.lock().unwrap();
+        assert_eq!(requests[0].method, "GET");
+        assert!(
+            requests[0]
+                .url
+                .ends_with("/v1/collections/my%20docs/suggest?text=vectr%20datab%26x&size=3")
+        );
+        assert!(
+            requests[1]
+                .url
+                .ends_with("/v1/collections/docs/suggest?text=ve")
+        );
+        assert!(requests[0].body.is_none());
+    }
+
+    #[test]
+    fn ingest_document_builds_multipart_body() {
+        let transport = Arc::new(QueueTransport::default());
+        transport.push(201, r#"{"document_id":"guide","title":"Guide","format":"markdown","chunks":3,"characters":2400,"replaced_chunks_removed":1}"#);
+        transport.push(201, r#"{"document_id":"notes","chunks":1}"#);
+        let client = client(transport.clone());
+        let result = client
+            .ingest_document(
+                "docs",
+                "dir/guide.md",
+                b"# Guide\nbody",
+                &DocumentOptions {
+                    id: Some("guide".into()),
+                    namespace: Some("team".into()),
+                    metadata: Map::from_iter([("lang".to_string(), json!("en"))]),
+                    chunk_size: Some(800),
+                    chunk_overlap: Some(100),
+                    content_type: Some("text/markdown".into()),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            result,
+            DocumentResult {
+                document_id: "guide".into(),
+                title: "Guide".into(),
+                format: "markdown".into(),
+                chunks: 3,
+                characters: 2400,
+                replaced_chunks_removed: 1,
+            }
+        );
+        client
+            .ingest_document("docs", "notes.txt", b"hi", &DocumentOptions::default())
+            .unwrap();
+        assert!(matches!(
+            client.ingest_document("docs", "dir/", b"x", &DocumentOptions::default()),
+            Err(Error::InvalidInput(_))
+        ));
+        let requests = transport.requests.lock().unwrap();
+        let b = MULTIPART_BOUNDARY;
+        assert_eq!(requests[0].method, "POST");
+        assert!(requests[0].url.ends_with("/v1/collections/docs/documents"));
+        assert_eq!(
+            requests[0].content_type.as_deref(),
+            Some(format!("multipart/form-data; boundary={b}").as_str())
+        );
+        let expected = format!(
+            "--{b}\r\nContent-Disposition: form-data; name=\"id\"\r\n\r\nguide\r\n\
+             --{b}\r\nContent-Disposition: form-data; name=\"namespace\"\r\n\r\nteam\r\n\
+             --{b}\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{{\"lang\":\"en\"}}\r\n\
+             --{b}\r\nContent-Disposition: form-data; name=\"chunk_size\"\r\n\r\n800\r\n\
+             --{b}\r\nContent-Disposition: form-data; name=\"chunk_overlap\"\r\n\r\n100\r\n\
+             --{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"guide.md\"\r\n\
+             Content-Type: text/markdown\r\n\r\n# Guide\nbody\r\n--{b}--\r\n"
+        );
+        assert_eq!(
+            String::from_utf8(requests[0].body.clone().unwrap()).unwrap(),
+            expected
+        );
+        let minimal = format!(
+            "--{b}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"\r\n\r\nhi\r\n--{b}--\r\n"
+        );
+        assert_eq!(
+            String::from_utf8(requests[1].body.clone().unwrap()).unwrap(),
+            minimal
+        );
     }
 }

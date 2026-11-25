@@ -130,6 +130,72 @@ public final class GideonDBClient {
         return requestObject("POST", clusterCollectionPath(collection) + "/search", body);
     }
 
+    /** Full local search response: results plus facets and aggregations when requested. */
+    public Map<String, Object> searchResponse(String collection, SearchOptions options) {
+        return requestObject("POST", collectionPath(collection) + "/search",
+                Objects.requireNonNull(options, "options").toBody());
+    }
+
+    /** Facet buckets per field ({@code field -> [{value, count}]}); empty when none were requested. */
+    public static Map<String, Object> facets(Map<String, Object> response) { return objectField(response, "facets"); }
+
+    /** Aggregation results by name ({@code name -> {count, min, max, sum, avg, buckets}}). */
+    public static Map<String, Object> aggregations(Map<String, Object> response) { return objectField(response, "aggregations"); }
+
+    /** Completes the last word of text; returns {@code completions [{text, word, count}]} and optional {@code did_you_mean}. */
+    public Map<String, Object> suggest(String collection, String text, int size) {
+        if (text == null || text.isEmpty()) throw new IllegalArgumentException("text is required");
+        StringBuilder path = new StringBuilder(collectionPath(collection)).append("/suggest?text=").append(encode(text));
+        if (size > 0) path.append("&size=").append(size);
+        return requestObject("GET", path.toString(), null);
+    }
+
+    /** Suggest completions as a list of {@code {text, word, count}} objects. */
+    public static List<Map<String, Object>> completions(Map<String, Object> suggestions) {
+        Object value = suggestions.get("completions");
+        return value == null ? List.of() : objectList(value);
+    }
+
+    /**
+     * Uploads a text, Markdown, HTML, PDF or DOCX file as multipart/form-data; the server extracts, chunks and
+     * embeds it. Returns {@code document_id, title, format, chunks, characters, replaced_chunks_removed}.
+     */
+    public Map<String, Object> ingestDocument(String collection, String filename, byte[] content, DocumentOptions options) {
+        Objects.requireNonNull(content, "content");
+        DocumentOptions o = options == null ? new DocumentOptions() : options;
+        String name = Objects.requireNonNull(filename, "filename").replace('\\', '/');
+        name = name.substring(name.lastIndexOf('/') + 1);
+        String boundary = "gideondb-" + java.util.UUID.randomUUID().toString().replace("-", "");
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        Map<String, String> fields = new LinkedHashMap<>();
+        if (o.id != null && !o.id.isEmpty()) fields.put("id", o.id);
+        if (o.namespace != null && !o.namespace.isEmpty()) fields.put("namespace", o.namespace);
+        if (o.metadata != null) fields.put("metadata", Json.stringify(o.metadata));
+        if (o.chunkSize != 0) fields.put("chunk_size", Integer.toString(o.chunkSize));
+        if (o.chunkOverlap != 0) fields.put("chunk_overlap", Integer.toString(o.chunkOverlap));
+        for (Map.Entry<String, String> field : fields.entrySet()) {
+            writeAscii(out, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"" + field.getKey() + "\"\r\n\r\n");
+            out.writeBytes(field.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            writeAscii(out, "\r\n");
+        }
+        String quoted = name.replace("\\", "\\\\").replace("\"", "\\\"").replace("\r", "").replace("\n", "");
+        StringBuilder header = new StringBuilder("--").append(boundary)
+                .append("\r\nContent-Disposition: form-data; name=\"file\"; filename=\"").append(quoted).append("\"\r\n");
+        if (o.contentType != null && !o.contentType.isBlank()) header.append("Content-Type: ").append(o.contentType).append("\r\n");
+        else header.append("Content-Type: application/octet-stream\r\n");
+        out.writeBytes(header.append("\r\n").toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        out.writeBytes(content);
+        writeAscii(out, "\r\n--" + boundary + "--\r\n");
+        Object value = send(new Request("POST", origin.resolve(collectionPath(collection) + "/documents"), null,
+                apiKey, timeout, out.toByteArray(), "multipart/form-data; boundary=" + boundary));
+        if (!(value instanceof Map<?, ?>)) throw new TransportException("response must be a JSON object");
+        return castObject(value);
+    }
+
+    private static void writeAscii(java.io.ByteArrayOutputStream out, String text) {
+        out.writeBytes(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     public Map<String, Object> distributedBatchUpsert(String collection,
             List<Map<String, Object>> records, String acknowledgement) {
         Map<String, Object> body = new LinkedHashMap<>();
@@ -139,8 +205,11 @@ public final class GideonDBClient {
     }
 
     private Object request(String method, String path, Object body) {
-        Request outgoing = new Request(method, origin.resolve(path), body == null ? null : Json.stringify(body),
-                apiKey, timeout);
+        return send(new Request(method, origin.resolve(path), body == null ? null : Json.stringify(body),
+                apiKey, timeout));
+    }
+
+    private Object send(Request outgoing) {
         Response response;
         try { response = transport.send(outgoing); }
         catch (InterruptedException e) {
@@ -194,6 +263,12 @@ public final class GideonDBClient {
         private Map<String, ? extends Number> sparseVector;
         private Double alpha;
         private String fusion;
+        private String syntax;
+        private HighlightOptions highlight;
+        private final List<Map<String, Object>> facets = new ArrayList<>();
+        private final Map<String, Object> aggregations = new LinkedHashMap<>();
+        private final List<Map<String, Object>> sort = new ArrayList<>();
+        private Integer sortCandidates;
 
         public SearchOptions vector(List<? extends Number> value) { this.vector = value; return this; }
         public SearchOptions topK(int value) { this.topK = value; return this; }
@@ -205,6 +280,29 @@ public final class GideonDBClient {
         public SearchOptions alpha(double value) { this.alpha = value; return this; }
         /** "weighted" (server default) or "rrf". */
         public SearchOptions fusion(String value) { this.fusion = value; return this; }
+        /** "simple" enables phrases, +must, -must_not, fuzzy~, prefix* and ^boost in text. */
+        public SearchOptions syntax(String value) { this.syntax = value; return this; }
+        /** Returns per-result {@code highlights} snippets. */
+        public SearchOptions highlight(HighlightOptions value) { this.highlight = value; return this; }
+        /** Counts metadata values of field over every matching record; size 0 uses the server default. */
+        public SearchOptions facet(String field, int size) {
+            Map<String, Object> facet = new LinkedHashMap<>();
+            facet.put("field", Objects.requireNonNull(field, "field"));
+            if (size > 0) facet.put("size", size);
+            facets.add(facet); return this;
+        }
+        public SearchOptions aggregation(String name, Aggregation value) {
+            aggregations.put(Objects.requireNonNull(name, "name"), Objects.requireNonNull(value, "aggregation").toBody());
+            return this;
+        }
+        /** Orders relevance candidates by a metadata field or "_score"; order is "asc", "desc" or null. */
+        public SearchOptions sort(String field, String order) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("field", Objects.requireNonNull(field, "field"));
+            if (order != null && !order.isEmpty()) entry.put("order", order);
+            sort.add(entry); return this;
+        }
+        public SearchOptions sortCandidates(int value) { this.sortCandidates = value; return this; }
 
         Map<String, Object> toBody() {
             if (topK <= 0) throw new IllegalArgumentException("topK must be positive");
@@ -225,8 +323,88 @@ public final class GideonDBClient {
             if (hasSparse) body.put("sparse_vector", sparseVector);
             if (alpha != null) body.put("alpha", alpha);
             if (fusion != null && !fusion.isEmpty()) body.put("fusion", fusion);
+            if (syntax != null && !syntax.isEmpty()) body.put("syntax", syntax);
+            if (highlight != null) body.put("highlight", highlight.toBody());
+            if (!facets.isEmpty()) body.put("facets", facets);
+            if (!aggregations.isEmpty()) body.put("aggregations", aggregations);
+            if (!sort.isEmpty()) body.put("sort", sort);
+            if (sortCandidates != null) body.put("sort_candidates", sortCandidates);
             return body;
         }
+    }
+
+    /** Highlight settings; unset fields use server defaults. */
+    public static final class HighlightOptions {
+        private String query, preTag, postTag;
+        private Integer fragmentSize, fragments;
+        private boolean raw;
+        public HighlightOptions query(String value) { this.query = value; return this; }
+        public HighlightOptions preTag(String value) { this.preTag = value; return this; }
+        public HighlightOptions postTag(String value) { this.postTag = value; return this; }
+        public HighlightOptions fragmentSize(int value) { this.fragmentSize = value; return this; }
+        public HighlightOptions fragments(int value) { this.fragments = value; return this; }
+        /** Skip HTML-escaping the text around the tags. */
+        public HighlightOptions raw(boolean value) { this.raw = value; return this; }
+        Map<String, Object> toBody() {
+            Map<String, Object> body = new LinkedHashMap<>();
+            if (query != null && !query.isEmpty()) body.put("query", query);
+            if (preTag != null && !preTag.isEmpty()) body.put("pre_tag", preTag);
+            if (postTag != null && !postTag.isEmpty()) body.put("post_tag", postTag);
+            if (fragmentSize != null) body.put("fragment_size", fragmentSize);
+            if (fragments != null) body.put("fragments", fragments);
+            if (raw) body.put("raw", true);
+            return body;
+        }
+    }
+
+    /** A stats, histogram, range or terms aggregation over a metadata field. */
+    public static final class Aggregation {
+        private final String type, field;
+        private Double interval;
+        private Integer size;
+        private final List<Map<String, Object>> ranges = new ArrayList<>();
+        private Aggregation(String type, String field) { this.type = type; this.field = Objects.requireNonNull(field, "field"); }
+        public static Aggregation stats(String field) { return new Aggregation("stats", field); }
+        public static Aggregation histogram(String field, double interval) {
+            if (!(interval > 0) || !Double.isFinite(interval)) throw new IllegalArgumentException("interval must be positive");
+            Aggregation a = new Aggregation("histogram", field); a.interval = interval; return a;
+        }
+        public static Aggregation terms(String field, int size) {
+            Aggregation a = new Aggregation("terms", field); if (size > 0) a.size = size; return a;
+        }
+        public static Aggregation range(String field) { return new Aggregation("range", field); }
+        /** Adds a range bucket; null from/to means open-ended (from inclusive, to exclusive). */
+        public Aggregation addRange(String key, Double from, Double to) {
+            Map<String, Object> r = new LinkedHashMap<>();
+            if (key != null && !key.isEmpty()) r.put("key", key);
+            if (from != null) r.put("from", from);
+            if (to != null) r.put("to", to);
+            ranges.add(r); return this;
+        }
+        Map<String, Object> toBody() {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("type", type); body.put("field", field);
+            if (interval != null) body.put("interval", interval);
+            if (!ranges.isEmpty()) body.put("ranges", ranges);
+            if (size != null) body.put("size", size);
+            return body;
+        }
+    }
+
+    /** Optional multipart fields for {@link #ingestDocument}. */
+    public static final class DocumentOptions {
+        private String id, namespace, contentType;
+        private Map<String, Object> metadata;
+        private int chunkSize, chunkOverlap;
+        /** Defaults to the file name without extension. */
+        public DocumentOptions id(String value) { this.id = value; return this; }
+        public DocumentOptions namespace(String value) { this.namespace = value; return this; }
+        /** Content-Type of the file part (application/octet-stream when unset). */
+        public DocumentOptions contentType(String value) { this.contentType = value; return this; }
+        /** JSON object copied onto every chunk. */
+        public DocumentOptions metadata(Map<String, Object> value) { this.metadata = value; return this; }
+        public DocumentOptions chunkSize(int value) { this.chunkSize = value; return this; }
+        public DocumentOptions chunkOverlap(int value) { this.chunkOverlap = value; return this; }
     }
 
     private static String collectionPath(String name) { return "/v1/collections/" + encode(name); }
@@ -247,6 +425,12 @@ public final class GideonDBClient {
                 .followRedirects(HttpClient.Redirect.NEVER).build());
     }
     @SuppressWarnings("unchecked") private static Map<String, Object> castObject(Object value) { return (Map<String, Object>) value; }
+    private static Map<String, Object> objectField(Map<String, Object> response, String key) {
+        Object value = Objects.requireNonNull(response, "response").get(key);
+        if (value == null) return Map.of();
+        if (!(value instanceof Map<?, ?>)) throw new TransportException("response field " + key + " must be an object");
+        return castObject(value);
+    }
     private static List<Map<String, Object>> objectList(Object value) {
         if (!(value instanceof List<?> list)) throw new TransportException("response field must be an array");
         List<Map<String, Object>> result = new ArrayList<>();
@@ -257,7 +441,16 @@ public final class GideonDBClient {
         return List.copyOf(result);
     }
 
-    public record Request(String method, URI uri, String body, String apiKey, Duration timeout) {}
+    /**
+     * Outgoing request. JSON requests carry {@code body}; multipart uploads carry {@code rawBody} with its
+     * {@code contentType} (and a null {@code body}).
+     */
+    public record Request(String method, URI uri, String body, String apiKey, Duration timeout,
+                          byte[] rawBody, String contentType) {
+        public Request(String method, URI uri, String body, String apiKey, Duration timeout) {
+            this(method, uri, body, apiKey, timeout, null, body == null ? null : "application/json");
+        }
+    }
     public record Response(int statusCode, byte[] body) {}
     @FunctionalInterface public interface Transport { Response send(Request request) throws IOException, InterruptedException; }
 
@@ -284,7 +477,9 @@ public final class GideonDBClient {
             HttpRequest.Builder builder = HttpRequest.newBuilder(request.uri()).timeout(request.timeout())
                     .header("Accept", "application/json").header("X-GideonDB-Client", "java/dev");
             if (!request.apiKey().isBlank()) builder.header("Authorization", "Bearer " + request.apiKey());
-            if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
+            if (request.rawBody() != null) builder.header("Content-Type", request.contentType())
+                    .method(request.method(), HttpRequest.BodyPublishers.ofByteArray(request.rawBody()));
+            else if (request.body() == null) builder.method(request.method(), HttpRequest.BodyPublishers.noBody());
             else builder.header("Content-Type", "application/json").method(request.method(), HttpRequest.BodyPublishers.ofString(request.body()));
             HttpResponse<InputStream> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream input = response.body()) {

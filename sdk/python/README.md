@@ -93,3 +93,43 @@ db.search("articles", None, 10, sparse_vector={"vector": 1.0})
 `fusion` is `"weighted"` (default) or `"rrf"`. `quantization: "binary"` is only
 valid on flat indexes; `oversampling` (1-100, default 4) controls how many
 candidates are rescored at full precision.
+
+## Full-text features, facets, aggregations, sorting, autocomplete and documents
+
+```python
+# Text analyzer and synonym groups are plain collection config fields.
+db.create_collection({
+    "name": "products", "dimension": 384, "metric": "cosine", "shard_count": 1,
+    "vectorizer": "minilm", "text_analyzer": "english",
+    "synonyms": [["car", "auto"], ["tv", "television"]],
+})
+
+# search() keeps returning the result list; search_response() returns the whole
+# body with "results" (each may carry "highlights"), "facets" and "aggregations".
+response = db.search_response(
+    "products", None, 10,
+    text='"red car" -used price*', syntax="simple",
+    highlight={"pre_tag": "<b>", "post_tag": "</b>", "fragment_size": 120, "fragments": 2},
+    facets=[{"field": "brand", "size": 10}],
+    aggregations={
+        "price": {"type": "stats", "field": "price"},
+        "bands": {"type": "range", "field": "price", "ranges": [{"key": "cheap", "to": 100}, {"from": 100}]},
+    },
+    sort=[{"field": "price", "order": "asc"}, {"field": "_score"}],
+    sort_candidates=500,
+)
+response["facets"]["brand"]; response["aggregations"]["price"]
+response["results"][0].get("highlights")
+
+# Autocomplete and spelling suggestion.
+db.suggest("products", "red ca", size=5)  # {"completions": [...], "did_you_mean": ...}
+
+# Upload a document for server-side extraction, chunking and embedding.
+with open("guide.pdf", "rb") as handle:
+    db.ingest_document("products", "guide.pdf", handle, id="guide",
+                       metadata={"lang": "en"}, chunk_size=800, chunk_overlap=100,
+                       content_type="application/pdf")
+```
+
+The same search keyword arguments are accepted by `search` and
+`distributed_search`; only arguments you set are sent.

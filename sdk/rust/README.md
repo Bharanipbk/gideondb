@@ -14,8 +14,7 @@ client.create_collection(&CollectionConfig {
     dimension: 3,
     metric: "cosine".into(),
     shard_count: 4,
-    vectorizer: None,
-    index: None,
+    ..Default::default()
 })?;
 
 client.upsert("documents", &Record {
@@ -63,6 +62,7 @@ client.create_collection(&CollectionConfig {
         oversampling: Some(4),
         ..Default::default()
     }),
+    ..Default::default()
 })?;
 client.upsert("articles", &Record {
     id: "a1".into(),
@@ -77,6 +77,51 @@ let hits = client.search("articles", &SearchOptions {
     top_k: 5,
     ..Default::default()
 })?;
+```
+
+## Query syntax, highlighting, facets, aggregations and sorting
+
+`CollectionConfig` accepts `text_analyzer` and `synonyms`. `SearchOptions`
+adds `syntax` (`"simple"`), `highlight`, `facets`, `aggregations`, `sort` and
+`sort_candidates`; only fields you set are sent. `search_response` (and
+`distributed_search`) return `facets` and `aggregations` alongside results, and
+each `SearchResult` carries `highlights`.
+
+```rust
+use gideondb_client::{Aggregation, FacetRequest, HighlightOptions, SearchOptions, SortField};
+use std::collections::BTreeMap;
+
+let response = client.search_response("articles", &SearchOptions {
+    text: Some("\"vector database\" -draft".into()),
+    syntax: Some("simple".into()),
+    highlight: Some(HighlightOptions { fragments: Some(2), ..Default::default() }),
+    facets: vec![FacetRequest { field: "category".into(), size: Some(5) }],
+    aggregations: BTreeMap::from([("price".into(), Aggregation {
+        kind: "stats".into(), field: "price".into(), ..Default::default()
+    })]),
+    sort: vec![SortField { field: "published".into(), order: Some("desc".into()) }],
+    top_k: 10,
+    ..Default::default()
+})?;
+println!("{:?} {:?}", response.facets["category"], response.aggregations["price"].avg);
+```
+
+## Autocomplete and document ingestion
+
+```rust
+use gideondb_client::DocumentOptions;
+
+let suggestions = client.suggest("articles", "vectr datab", 5)?;
+println!("{:?} {:?}", suggestions.completions, suggestions.did_you_mean);
+
+let bytes = std::fs::read("guide.pdf").unwrap();
+let doc = client.ingest_document("articles", "guide.pdf", &bytes, &DocumentOptions {
+    namespace: Some("handbook".into()),
+    chunk_size: Some(800),
+    content_type: Some("application/pdf".into()),
+    ..Default::default()
+})?;
+println!("{} chunks for {}", doc.chunks, doc.document_id);
 ```
 
 Run the SDK tests from the repository root:

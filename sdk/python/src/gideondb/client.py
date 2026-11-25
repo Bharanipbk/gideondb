@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 import ssl
+import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import IO, Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -136,13 +138,43 @@ class Client:
         sparse_vector: Mapping[str, float] | None = None,
         alpha: float | None = None,
         fusion: str = "",
+        syntax: str = "",
+        highlight: Mapping[str, Any] | None = None,
+        facets: Sequence[Mapping[str, Any]] | None = None,
+        aggregations: Mapping[str, Mapping[str, Any]] | None = None,
+        sort: Sequence[Mapping[str, Any]] | None = None,
+        sort_candidates: int | None = None,
     ) -> list[dict[str, Any]]:
-        response = self._request(
-            "POST",
-            f"{self._collection_path(collection)}/search",
-            self._search_body(vector, top_k, namespace, filter, text, sparse_vector, alpha, fusion),
-        )
-        return response["results"]
+        return self.search_response(
+            collection, vector, top_k, namespace=namespace, filter=filter, text=text,
+            sparse_vector=sparse_vector, alpha=alpha, fusion=fusion, syntax=syntax,
+            highlight=highlight, facets=facets, aggregations=aggregations, sort=sort,
+            sort_candidates=sort_candidates,
+        )["results"]
+
+    def search_response(
+        self,
+        collection: str,
+        vector: Sequence[float] | None,
+        top_k: int,
+        *,
+        namespace: str = "",
+        filter: Mapping[str, Any] | None = None,
+        text: str = "",
+        sparse_vector: Mapping[str, float] | None = None,
+        alpha: float | None = None,
+        fusion: str = "",
+        syntax: str = "",
+        highlight: Mapping[str, Any] | None = None,
+        facets: Sequence[Mapping[str, Any]] | None = None,
+        aggregations: Mapping[str, Mapping[str, Any]] | None = None,
+        sort: Sequence[Mapping[str, Any]] | None = None,
+        sort_candidates: int | None = None,
+    ) -> dict[str, Any]:
+        """Search and return the whole response: results (with highlights), facets and aggregations."""
+        body = self._search_body(vector, top_k, namespace, filter, text, sparse_vector, alpha, fusion)
+        self._add_search_features(body, syntax, highlight, facets, aggregations, sort, sort_candidates)
+        return self._request("POST", f"{self._collection_path(collection)}/search", body)
 
     def distributed_search(
         self,
@@ -157,8 +189,15 @@ class Client:
         sparse_vector: Mapping[str, float] | None = None,
         alpha: float | None = None,
         fusion: str = "",
+        syntax: str = "",
+        highlight: Mapping[str, Any] | None = None,
+        facets: Sequence[Mapping[str, Any]] | None = None,
+        aggregations: Mapping[str, Mapping[str, Any]] | None = None,
+        sort: Sequence[Mapping[str, Any]] | None = None,
+        sort_candidates: int | None = None,
     ) -> dict[str, Any]:
         body = self._search_body(vector, top_k, namespace, filter, text, sparse_vector, alpha, fusion)
+        self._add_search_features(body, syntax, highlight, facets, aggregations, sort, sort_candidates)
         if allow_partial:
             body["allow_partial"] = True
         return self._request(
@@ -178,6 +217,91 @@ class Client:
         return self._request(
             "POST", f"{self._cluster_collection_path(collection)}/vectors/batch", body
         )
+
+    def suggest(self, collection: str, text: str, size: int | None = None) -> dict[str, Any]:
+        """Complete the last word of text; returns completions and an optional did_you_mean."""
+        query: dict[str, Any] = {"text": text}
+        if size is not None:
+            if size < 1:
+                raise ValueError("size must be positive")
+            query["size"] = size
+        return self._request("GET", f"{self._collection_path(collection)}/suggest?{urlencode(query)}")
+
+    def ingest_document(
+        self,
+        collection: str,
+        filename: str,
+        content: bytes | IO[bytes],
+        *,
+        id: str | None = None,
+        namespace: str | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        chunk_size: int | None = None,
+        chunk_overlap: int | None = None,
+        content_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Upload a text, Markdown, HTML, PDF or DOCX file for server-side extraction and chunking."""
+        data = content if isinstance(content, (bytes, bytearray)) else content.read()
+        fields: dict[str, str] = {}
+        if id:
+            fields["id"] = id
+        if namespace:
+            fields["namespace"] = namespace
+        if metadata is not None:
+            fields["metadata"] = json.dumps(metadata, separators=(",", ":"))
+        if chunk_size is not None:
+            fields["chunk_size"] = str(chunk_size)
+        if chunk_overlap is not None:
+            fields["chunk_overlap"] = str(chunk_overlap)
+        boundary = uuid.uuid4().hex
+        body, form_type = self._multipart(boundary, fields, os.path.basename(filename), bytes(data), content_type)
+        return self._request(
+            "POST", f"{self._collection_path(collection)}/documents", body, content_type=form_type
+        )
+
+    @staticmethod
+    def _multipart(
+        boundary: str, fields: Mapping[str, str], filename: str, data: bytes, content_type: str | None
+    ) -> tuple[bytes, str]:
+        def quoted(value: str) -> str:
+            return value.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "").replace("\n", "")
+
+        parts: list[bytes] = []
+        for key, value in fields.items():
+            parts.append(
+                f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n'.encode()
+            )
+        header = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{quoted(filename)}"\r\n'
+        if content_type:
+            header += f"Content-Type: {content_type}\r\n"
+        parts.append(header.encode() + b"\r\n" + data + b"\r\n")
+        parts.append(f"--{boundary}--\r\n".encode())
+        return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+    @staticmethod
+    def _add_search_features(
+        body: dict[str, Any],
+        syntax: str,
+        highlight: Mapping[str, Any] | None,
+        facets: Sequence[Mapping[str, Any]] | None,
+        aggregations: Mapping[str, Mapping[str, Any]] | None,
+        sort: Sequence[Mapping[str, Any]] | None,
+        sort_candidates: int | None,
+    ) -> None:
+        if syntax:
+            if syntax != "simple":
+                raise ValueError('syntax must be "simple"')
+            body["syntax"] = syntax
+        if highlight is not None:
+            body["highlight"] = dict(highlight)
+        if facets:
+            body["facets"] = [dict(facet) for facet in facets]
+        if aggregations:
+            body["aggregations"] = {name: dict(spec) for name, spec in aggregations.items()}
+        if sort:
+            body["sort"] = [dict(field) for field in sort]
+        if sort_candidates is not None:
+            body["sort_candidates"] = sort_candidates
 
     @staticmethod
     def _search_body(
@@ -221,11 +345,14 @@ class Client:
     def _cluster_collection_path(name: str) -> str:
         return f"/v1/cluster/collections/{quote(name, safe='')}"
 
-    def _request(self, method: str, path: str, body: Any = None) -> Any:
-        encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+    def _request(self, method: str, path: str, body: Any = None, *, content_type: str = "") -> Any:
+        if content_type:
+            encoded = body
+        else:
+            encoded = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         headers = {"Accept": "application/json", "User-Agent": "gideondb-python/dev"}
         if encoded is not None:
-            headers["Content-Type"] = "application/json"
+            headers["Content-Type"] = content_type or "application/json"
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
         request = Request(self._base_url + path, data=encoded, headers=headers, method=method)
