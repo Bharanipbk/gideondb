@@ -60,8 +60,11 @@ Memory is the container's resident memory after the run (`docker stats`).
   **Update:** batch writes now link each shard's records in parallel, which
   makes ingest about 3× faster (556–654 → 1,943–2,008 vectors/s on 100,000
   GloVe vectors, with recall unchanged; see the [changelog](../../CHANGELOG.md)).
-  The figures above are from the earlier build. The engine-wide write lock
-  still serializes concurrent batches, so that is the next step.
+  Writes to different shards now also run concurrently instead of behind one
+  engine-wide lock, which is another 1.65× for 8 shards with 8 clients
+  (1,639–1,717 → 2,611–2,828 vectors/s). The figures above are from the
+  earlier build. A single shard still accepts one batch at a time, so use
+  several shards for write-heavy collections.
 - **Per-query latency:** latency through REST was lowest for GideonDB at
   every ef on this run. With the host this loaded, that ranking is not
   reliable yet.

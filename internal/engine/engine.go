@@ -36,6 +36,13 @@ type Engine struct {
 	ownership       map[string]map[uint32]struct{}
 	walDigests      map[string][]map[uint64][32]byte
 	idempotency     map[string][]map[string]idempotencyEntry
+	// shardLocks serialize writes to one logical shard: WAL append order is
+	// apply order, and per-shard WAL, counter, digest and ledger state is
+	// only touched under the shard's lock. Data-path writes hold mu for
+	// reading plus their shard locks, so writes to different shards (and
+	// collections) run concurrently. Operations that replace collections,
+	// logs or whole-engine state hold mu for writing, which excludes them.
+	shardLocks map[string][]sync.Mutex
 }
 
 func Open(dataPath string) (*Engine, error) {
@@ -63,7 +70,7 @@ func OpenWithOptions(dataPath string, options Options) (*Engine, error) {
 	}
 	e := &Engine{
 		dataPath: dataPath, collections: make(map[string]*collection.Collection),
-		logs: make(map[string][]*wal.Log), syncMode: options.WALSyncMode,
+		logs: make(map[string][]*wal.Log), syncMode: options.WALSyncMode, shardLocks: make(map[string][]sync.Mutex),
 		checkpointLSN: make(map[string][]uint64), mutations: make(map[string][]uint64),
 		checkpointEvery: options.CheckpointEvery,
 		ownership:       ownership,
@@ -132,6 +139,7 @@ func (e *Engine) CreateCollection(config core.CollectionConfig) error {
 	}
 	e.checkpointLSN[config.Name] = make([]uint64, config.ShardCount)
 	e.mutations[config.Name] = make([]uint64, config.ShardCount)
+	e.shardLocks[config.Name] = make([]sync.Mutex, config.ShardCount)
 	if err := e.openCollectionLogs(c); err != nil {
 		delete(e.collections, config.Name)
 		_ = os.Remove(e.collectionPath(config.Name))
@@ -179,6 +187,7 @@ func (e *Engine) DeleteCollection(name string) error {
 	delete(e.logs, name)
 	delete(e.checkpointLSN, name)
 	delete(e.mutations, name)
+	delete(e.shardLocks, name)
 	delete(e.idempotency, name)
 	return nil
 }
@@ -213,12 +222,17 @@ func (e *Engine) DescribeCollection(name string) (core.CollectionConfig, int, er
 }
 
 func (e *Engine) Upsert(name string, record core.Record) (core.Record, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return core.Record{}, core.ErrNotFound
 	}
+	if record.ID == "" {
+		return core.Record{}, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
+	}
+	unlock := e.lockShards(name, []uint32{c.RouteShard(record.Namespace, record.ID)})
+	defer unlock()
 	stored, err := c.PrepareUpsert(record)
 	if err != nil {
 		return core.Record{}, err
@@ -247,12 +261,20 @@ func (e *Engine) BatchUpsert(name string, records []core.Record) ([]core.Record,
 	if len(records) == 0 || len(records) > 10_000 {
 		return nil, fmt.Errorf("%w: batch size must be between 1 and 10000", core.ErrInvalidArgument)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return nil, core.ErrNotFound
 	}
+	// Lock every target shard before versions are assigned, so a later
+	// version is never applied before an earlier one for the same key.
+	targets := make([]uint32, 0, len(records))
+	for _, record := range records {
+		targets = append(targets, c.RouteShard(record.Namespace, record.ID))
+	}
+	unlock := e.lockShards(name, targets)
+	defer unlock()
 	prepared := make([]core.Record, len(records))
 	groups := make(map[uint32][]core.Record)
 	for position, record := range records {
@@ -328,8 +350,8 @@ func (e *Engine) BatchUpsertShardIdempotent(name string, shardID uint32, records
 	if len(records) == 0 || len(records) > 10_000 {
 		return nil, 0, fmt.Errorf("%w: batch size must be between 1 and 10000", core.ErrInvalidArgument)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return nil, 0, core.ErrNotFound
@@ -340,6 +362,8 @@ func (e *Engine) BatchUpsertShardIdempotent(name string, shardID uint32, records
 	if int(shardID) >= c.Config().ShardCount {
 		return nil, 0, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
 	}
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	requestDigest, err := idempotencyDigest(records)
 	if err != nil {
 		return nil, 0, err
@@ -418,8 +442,8 @@ func (e *Engine) ApplyReplicaBatch(name string, shardID uint32, sequence uint64,
 	if sequence == 0 || len(records) == 0 || len(records) > 10_000 {
 		return fmt.Errorf("%w: invalid replica batch", core.ErrInvalidArgument)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return core.ErrNotFound
@@ -451,6 +475,8 @@ func (e *Engine) ApplyReplicaBatch(name string, shardID uint32, sequence uint64,
 		return err
 	}
 	digest := sha256.Sum256(payload)
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	log := e.logs[name][shardID]
 	last := log.LastLSN()
 	if sequence <= last {
@@ -473,10 +499,8 @@ func (e *Engine) ApplyReplicaBatch(name string, shardID uint32, sequence uint64,
 	if lsn != sequence {
 		return fmt.Errorf("replica WAL assigned unexpected sequence %d", lsn)
 	}
-	for _, record := range records {
-		if err := c.Restore(record); err != nil {
-			return fmt.Errorf("apply replica WAL batch: %w", err)
-		}
+	if err := c.RestoreBatch(records); err != nil {
+		return fmt.Errorf("apply replica WAL batch: %w", err)
 	}
 	e.walDigests[name][shardID][sequence] = digest
 	e.mutations[name][shardID] += uint64(len(records))
@@ -490,8 +514,8 @@ func (e *Engine) ApplyReplicaDelete(name string, shardID uint32, sequence uint64
 	if sequence == 0 || id == "" {
 		return fmt.Errorf("%w: invalid replica delete", core.ErrInvalidArgument)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return core.ErrNotFound
@@ -507,6 +531,8 @@ func (e *Engine) ApplyReplicaDelete(name string, shardID uint32, sequence uint64
 		return err
 	}
 	digest := sha256.Sum256(payload)
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	log := e.logs[name][shardID]
 	last := log.LastLSN()
 	if sequence <= last {
@@ -552,6 +578,8 @@ func (e *Engine) ExportReplicaSnapshot(name string, shardID uint32) (uint64, []c
 	if int(shardID) >= c.Config().ShardCount {
 		return 0, nil, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
 	}
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	records, err := c.ShardRecords(shardID)
 	return e.logs[name][shardID].LastLSN(), records, err
 }
@@ -569,6 +597,8 @@ func (e *Engine) ReplicaSequence(name string, shardID uint32) (uint64, error) {
 	if int(shardID) >= c.Config().ShardCount {
 		return 0, fmt.Errorf("%w: shard ID out of range", core.ErrInvalidArgument)
 	}
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	return e.logs[name][shardID].LastLSN(), nil
 }
 
@@ -747,12 +777,15 @@ func (e *Engine) scroll(name string, shardID *uint32, namespace, afterNamespace,
 }
 
 func (e *Engine) Delete(name, namespace, id string) error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return core.ErrNotFound
 	}
+	shardID := c.RouteShard(namespace, id)
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	if _, err := c.Get(namespace, id); err != nil {
 		return err
 	}
@@ -760,7 +793,6 @@ func (e *Engine) Delete(name, namespace, id string) error {
 	if err != nil {
 		return err
 	}
-	shardID := c.RouteShard(namespace, id)
 	if !e.shardOwned(name, shardID) {
 		return core.ErrShardNotOwned
 	}
@@ -779,8 +811,8 @@ func (e *Engine) DeleteShardWithSequence(name string, shardID uint32, namespace,
 	if id == "" {
 		return 0, fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
 	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
 	c, ok := e.collections[name]
 	if !ok {
 		return 0, core.ErrNotFound
@@ -791,6 +823,8 @@ func (e *Engine) DeleteShardWithSequence(name string, shardID uint32, namespace,
 	if !e.shardOwned(name, shardID) {
 		return 0, core.ErrShardNotOwned
 	}
+	unlock := e.lockShards(name, []uint32{shardID})
+	defer unlock()
 	if _, err := c.Get(namespace, id); err != nil {
 		return 0, err
 	}
@@ -1152,6 +1186,7 @@ func (e *Engine) loadSegments(c *collection.Collection, legacy []core.Record) er
 	}
 	e.checkpointLSN[config.Name] = lsns
 	e.mutations[config.Name] = make([]uint64, config.ShardCount)
+	e.shardLocks[config.Name] = make([]sync.Mutex, config.ShardCount)
 	return nil
 }
 
@@ -1403,4 +1438,28 @@ func (e *Engine) CollectionConfig(name string) (core.CollectionConfig, error) {
 		return core.CollectionConfig{}, err
 	}
 	return c.Config(), nil
+}
+
+// lockShards locks the distinct shards in ascending order, so callers that
+// lock several shards cannot deadlock, and returns the unlock function. The
+// caller holds e.mu for reading, which keeps the lock table stable.
+func (e *Engine) lockShards(name string, shardIDs []uint32) func() {
+	locks := e.shardLocks[name]
+	unique := make([]uint32, 0, len(shardIDs))
+	seen := make(map[uint32]struct{}, len(shardIDs))
+	for _, shardID := range shardIDs {
+		if _, dup := seen[shardID]; !dup && int(shardID) < len(locks) {
+			seen[shardID] = struct{}{}
+			unique = append(unique, shardID)
+		}
+	}
+	sort.Slice(unique, func(i, j int) bool { return unique[i] < unique[j] })
+	for _, shardID := range unique {
+		locks[shardID].Lock()
+	}
+	return func() {
+		for i := len(unique) - 1; i >= 0; i-- {
+			locks[unique[i]].Unlock()
+		}
+	}
 }

@@ -83,10 +83,8 @@ func (e *Engine) commitReservedBatchLocked(name string, c *collection.Collection
 	if err != nil {
 		return nil, 0, err
 	}
-	for _, record := range entry.Records {
-		if err := c.Restore(record); err != nil {
-			return nil, 0, fmt.Errorf("apply idempotent WAL-backed shard batch: %w", err)
-		}
+	if err := c.RestoreBatch(entry.Records); err != nil {
+		return nil, 0, fmt.Errorf("apply idempotent WAL-backed shard batch: %w", err)
 	}
 	entry.Completed, entry.Sequence = true, sequence
 	e.idempotency[name][shardID][key] = entry

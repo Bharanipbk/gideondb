@@ -7,6 +7,16 @@ describe unreleased experimental work.
 
 ### Changed
 
+- Writes no longer take the engine-wide lock exclusively. Upserts, batch
+  upserts, shard batches, replica applies and deletes now hold it shared,
+  plus a lock per logical shard (taken in shard order, before versions are
+  assigned). Writes to different shards and collections run concurrently,
+  and the WAL append order still matches the apply order within each shard.
+  Collection create and delete, snapshot install, backup, ownership changes,
+  explicit checkpoints and close still run exclusively. Concurrent ingest of
+  100,000 GloVe-100 vectors into 8 shards with 8 clients went from 1,639–1,717
+  to 2,611–2,828 vectors/s, with recall unchanged. A single shard still
+  accepts one batch at a time.
 - Batch writes are about 3× faster on HNSW collections. `vectors/batch`,
   placement-aware shard batches and WAL replay now apply each shard's records
   with one `hnsw.UpsertBatch` call. Once a graph has 2,048 nodes, batches of 64
