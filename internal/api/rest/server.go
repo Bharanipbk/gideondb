@@ -231,6 +231,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /v1/collections/{name}/vectors/{id}", s.protected(s.delete))
 	s.mux.HandleFunc("POST /v1/collections/{name}/search", s.protected(s.search))
 	s.mux.HandleFunc("GET /v1/embedders", s.protected(s.embedderStats))
+	s.mux.HandleFunc("GET /v1/collections/{name}/suggest", s.protected(s.suggest))
+	s.mux.HandleFunc("POST /v1/collections/{name}/documents", s.protected(s.ingestDocument))
 	s.mux.HandleFunc("GET /v1/rerankers", s.protected(s.rerankerList))
 }
 
@@ -778,6 +780,9 @@ type searchRequest struct {
 	// Text runs BM25 keyword retrieval over record text. Without a vector,
 	// a collection's vectorizer also embeds it for the dense side.
 	Text string `json:"text,omitempty"`
+	// Syntax "simple" enables "phrases", +must, -must_not, fuzzy~, prefix*
+	// and ^boosts in Text.
+	Syntax string `json:"syntax,omitempty"`
 	// Fusion is "weighted" (default) or "rrf".
 	Fusion    core.FusionMode `json:"fusion,omitempty"`
 	Offset    int             `json:"offset,omitempty"`
@@ -794,6 +799,13 @@ type searchRequest struct {
 	Facets []core.FacetRequest `json:"facets,omitempty"`
 	// Highlight adds snippets of record text with query terms marked.
 	Highlight *highlightRequest `json:"highlight,omitempty"`
+	// Aggregations compute stats, histograms, ranges and terms over every
+	// matching record, keyed by a client-chosen name.
+	Aggregations map[string]core.AggregationRequest `json:"aggregations,omitempty"`
+	// Sort orders the relevance candidates by metadata fields instead of
+	// score; SortCandidates sizes that pool.
+	Sort           []sortField `json:"sort,omitempty"`
+	SortCandidates int         `json:"sort_candidates,omitempty"`
 }
 
 func (r searchRequest) denseWeight() float32 {
@@ -807,7 +819,7 @@ func (r searchRequest) denseWeight() float32 {
 func (r searchRequest) hybrid() bool { return r.SparseVector != nil || r.Text != "" }
 
 func (r searchRequest) hybridQuery() core.HybridQuery {
-	return core.HybridQuery{Dense: r.Vector, Sparse: r.SparseVector, Text: r.Text, Alpha: r.denseWeight(), Fusion: r.Fusion, TopK: r.TopK}
+	return core.HybridQuery{Dense: r.Vector, Sparse: r.SparseVector, Text: r.Text, Syntax: r.Syntax, Alpha: r.denseWeight(), Fusion: r.Fusion, TopK: r.TopK}
 }
 
 func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
@@ -841,13 +853,13 @@ func (s *Server) internalShardSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	body := map[string]any{"results": results, "shard_id": shardID, "metadata_epoch": s.currentMetadataEpoch()}
-	if len(request.Facets) > 0 {
-		counts, err := s.engine.FacetCounts(r.PathValue("collection"), request.Namespace, filter, request.Text, request.Facets, []uint32{uint32(shardID)})
+	if !request.matchSpec().Empty() {
+		counts, err := s.matchCounts(r.PathValue("collection"), request, filter, []uint32{uint32(shardID)})
 		if err != nil {
 			writeError(w, err)
 			return
 		}
-		body["facet_counts"] = counts
+		body["match_counts"] = counts
 	}
 	writeJSON(w, http.StatusOK, body)
 }
@@ -932,7 +944,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		}
 		applyHighlights(config, request, results)
 	}
-	facets, err := s.localFacets(r.PathValue("name"), request, filter)
+	counts, err := s.matchCounts(r.PathValue("name"), request, filter, nil)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -942,9 +954,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	if status != nil {
 		response["rerank"] = status
 	}
-	if facets != nil {
-		response["facets"] = facets
-	}
+	addMatchResults(response, request, counts)
 	writeJSON(w, http.StatusOK, response)
 }
 

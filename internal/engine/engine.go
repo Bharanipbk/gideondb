@@ -1413,22 +1413,14 @@ func (e *Engine) closeLogs() error {
 	return first
 }
 
-// Facets counts metadata values over a collection's matching records.
-func (e *Engine) Facets(name, namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest) (map[string][]core.FacetBucket, error) {
+// Aggregate returns mergeable facet and aggregation counts over a
+// collection's matching records, for some shards (nil means all).
+func (e *Engine) Aggregate(name, namespace string, filter *metadata.Expr, text, syntax string, spec core.MatchSpec, shards []uint32) (core.MatchCounts, error) {
 	c, err := e.getCollection(name)
 	if err != nil {
-		return nil, err
+		return core.MatchCounts{}, err
 	}
-	return c.Facets(namespace, filter, text, requests)
-}
-
-// FacetCounts returns mergeable raw counts for some of a collection's shards.
-func (e *Engine) FacetCounts(name, namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest, shards []uint32) (core.FacetCounts, error) {
-	c, err := e.getCollection(name)
-	if err != nil {
-		return nil, err
-	}
-	return c.FacetCounts(namespace, filter, text, requests, shards)
+	return c.Aggregate(namespace, filter, text, syntax, spec, shards)
 }
 
 // CollectionConfig returns a collection's configuration.
@@ -1462,4 +1454,14 @@ func (e *Engine) lockShards(name string, shardIDs []uint32) func() {
 			locks[unique[i]].Unlock()
 		}
 	}
+}
+
+// Suggest completes and spell-checks a typed query against a collection's
+// indexed text.
+func (e *Engine) Suggest(name, text string, size int) (collection.SuggestResult, error) {
+	c, err := e.getCollection(name)
+	if err != nil {
+		return collection.SuggestResult{}, err
+	}
+	return c.Suggest(text, size), nil
 }

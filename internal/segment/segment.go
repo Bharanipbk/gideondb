@@ -93,7 +93,7 @@ func NewMappedWithPQ(config core.CollectionConfig, records []core.Record, source
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
 		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
-		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
+		vectorAt: source.VectorCopy, closer: closer, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer), config.Synonyms...),
 	}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
@@ -120,7 +120,7 @@ func New(config core.CollectionConfig) (*Segment, error) {
 	var err error
 	s := &Segment{
 		nextID: 1, records: make(map[uint64]core.Record),
-		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
+		ordinals: make(map[string]uint64), metadata: metadata.NewIndex(), metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer), config.Synonyms...),
 	}
 	switch {
 	case config.Index.Type == core.IndexFlat && config.Index.Quantization == core.QuantizationBinary:
@@ -214,7 +214,7 @@ func NewHNSWFromGraphWithMetadata(config core.CollectionConfig, records []core.R
 	if metadataIndex == nil {
 		metadataIndex = metadata.NewIndex()
 	}
-	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer))}
+	s := &Segment{index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)), ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer), config.Synonyms...)}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
 		s.records[ordinal] = cloneRecord(record)
@@ -271,7 +271,7 @@ func NewDiskANNWithMetadata(config core.CollectionConfig, records []core.Record,
 	s := &Segment{
 		index: idx, nextID: uint64(len(records) + 1), records: make(map[uint64]core.Record, len(records)),
 		ordinals: make(map[string]uint64, len(records)), metadata: metadataIndex, readOnly: true,
-		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer)),
+		vectorAt: idx.VectorCopy, closer: idx, metric: config.Metric, lexical: newLexicalIndex(analysis.MustGet(config.TextAnalyzer), config.Synonyms...),
 	}
 	for position, record := range records {
 		ordinal := uint64(position + 1)
@@ -458,6 +458,22 @@ func (s *Segment) SearchHybrid(namespace string, query core.HybridQuery, filter 
 		_, blocked := excluded[key(record.Namespace, record.ID)]
 		return !blocked
 	}
+	// Operator syntax and synonyms compile the text query against this
+	// segment; plain text without synonyms keeps the original scorer.
+	var compiled *textQuery
+	if query.Text != "" && (query.Syntax != "" || len(s.lexical.synonyms) > 0) {
+		var err error
+		if compiled, err = s.lexical.compileTextQuery(query.Text, query.Syntax, func(ordinal uint64) (core.Record, bool) {
+			record, ok := s.records[ordinal]
+			return record, ok
+		}); err != nil {
+			return nil, err
+		}
+		if compiled.constrained() {
+			base := allow
+			allow = func(ordinal uint64) bool { return base(ordinal) && compiled.allows(ordinal) }
+		}
+	}
 	limit := max(query.TopK*hybridCandidateMultiplier, hybridCandidateFloor)
 	var denseList []index.Candidate
 	if query.Dense != nil {
@@ -470,7 +486,9 @@ func (s *Segment) SearchHybrid(namespace string, query core.HybridQuery, filter 
 	if query.Sparse != nil {
 		sparseList = s.lexical.searchSparse(query.Sparse, allow, limit)
 	}
-	if query.Text != "" {
+	if compiled != nil {
+		textList = compiled.search(allow, limit)
+	} else if query.Text != "" {
 		textList = s.lexical.searchText(query.Text, allow, limit)
 	}
 
@@ -499,7 +517,9 @@ func (s *Segment) SearchHybrid(namespace string, query core.HybridQuery, filter 
 		}
 		queryNorm := sparseNorm(query.Sparse)
 		textScore := func(uint64) float32 { return 0 }
-		if query.Text != "" {
+		if compiled != nil {
+			textScore = compiled.score
+		} else if query.Text != "" {
 			textScore = s.lexical.bm25Scorer(query.Text)
 		}
 		lexicalSignals := 0
@@ -695,25 +715,17 @@ func cloneMap(in map[string]any) map[string]any {
 	return out
 }
 
-// Facets counts metadata values for fields over records in namespace that
-// match filter, are not in excluded, and, when text is non-empty, contain
-// at least one of its analyzed terms.
-func (s *Segment) Facets(namespace string, filter *metadata.Expr, text string, fields []string, excluded map[string]struct{}) core.FacetCounts {
+// Aggregate counts facets and aggregations over records in namespace that
+// match filter, are not in excluded, and, when text is non-empty, match the
+// text query (any term for plain text; the full operator semantics for
+// syntax "simple" or with synonyms).
+func (s *Segment) Aggregate(namespace string, filter *metadata.Expr, text, syntax string, spec core.MatchSpec, excluded map[string]struct{}) (core.MatchCounts, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	counts := core.FacetCounts{}
+	counts := core.NewMatchCounts()
 	var allowed *metadata.Set
 	if filter != nil {
 		allowed = s.metadata.Evaluate(filter)
-	}
-	var textMatch map[uint64]struct{}
-	if text != "" {
-		textMatch = map[uint64]struct{}{}
-		for _, term := range s.lexical.analyzer.Terms(text) {
-			for ordinal := range s.lexical.text[term] {
-				textMatch[ordinal] = struct{}{}
-			}
-		}
 	}
 	visit := func(ordinal uint64, record core.Record) {
 		if record.Namespace != namespace || (allowed != nil && !allowed.Contains(ordinal)) {
@@ -722,24 +734,48 @@ func (s *Segment) Facets(namespace string, filter *metadata.Expr, text string, f
 		if _, blocked := excluded[key(record.Namespace, record.ID)]; blocked {
 			return
 		}
-		for _, field := range fields {
-			if value, ok := record.Metadata[field]; ok {
-				counts.Add(field, value)
+		for _, facet := range spec.Facets {
+			if value, ok := record.Metadata[facet.Field]; ok {
+				counts.Facets.Add(facet.Field, value)
 			}
 		}
+		if len(spec.Aggregations) > 0 {
+			counts.Aggregations.Add(spec.Aggregations, record.Metadata)
+		}
 	}
-	if textMatch != nil {
-		for ordinal := range textMatch {
-			if record, ok := s.records[ordinal]; ok {
+	if text == "" {
+		for ordinal, record := range s.records {
+			visit(ordinal, record)
+		}
+		return counts, nil
+	}
+	if syntax != "" || len(s.lexical.synonyms) > 0 {
+		query, err := s.lexical.compileTextQuery(text, syntax, func(ordinal uint64) (core.Record, bool) {
+			record, ok := s.records[ordinal]
+			return record, ok
+		})
+		if err != nil {
+			return counts, err
+		}
+		for ordinal := range query.candidates() {
+			if record, ok := s.records[ordinal]; ok && query.score(ordinal) > 0 {
 				visit(ordinal, record)
 			}
 		}
-		return counts
+		return counts, nil
 	}
-	for ordinal, record := range s.records {
-		visit(ordinal, record)
+	matched := map[uint64]struct{}{}
+	for _, term := range s.lexical.analyzer.Terms(text) {
+		for ordinal := range s.lexical.text[term] {
+			matched[ordinal] = struct{}{}
+		}
 	}
-	return counts
+	for ordinal := range matched {
+		if record, ok := s.records[ordinal]; ok {
+			visit(ordinal, record)
+		}
+	}
+	return counts, nil
 }
 
 // batchUpserter is implemented by indexes that can insert many vectors at
@@ -828,3 +864,14 @@ func (s *Segment) releaseOrdinals(assigned []bool) {
 		}
 	}
 }
+
+// Suggest returns word statistics for completion and spelling correction.
+// prefix and words are normalized with the collection analyzer by the caller.
+func (s *Segment) Suggest(prefix string, words []string, limit int) core.SuggestCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lexical.suggest(prefix, words, limit)
+}
+
+// Analyzer returns the segment's text analyzer.
+func (s *Segment) Analyzer() *analysis.Analyzer { return s.lexical.analyzer }

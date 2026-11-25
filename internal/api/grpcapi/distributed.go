@@ -109,7 +109,8 @@ func (s *Server) distributedSearch(ctx context.Context, request *v1.SearchReques
 		AllowPartial bool                `json:"allow_partial,omitempty"`
 		Facets       []core.FacetRequest `json:"facets,omitempty"`
 		Highlight    *highlightJSON      `json:"highlight,omitempty"`
-	}{Vector: request.GetVector(), SparseVector: request.GetSparseVector(), Text: request.GetText(), Alpha: request.Alpha, Fusion: fusion, TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial(), Facets: fromProtoFacets(request.GetFacets()), Highlight: fromProtoHighlight(request.GetHighlight())})
+		Syntax       string              `json:"syntax,omitempty"`
+	}{Vector: request.GetVector(), SparseVector: request.GetSparseVector(), Text: request.GetText(), Alpha: request.Alpha, Fusion: fusion, TopK: request.GetTopK(), Namespace: request.GetNamespace(), Filter: filter, AllowPartial: request.GetAllowPartial(), Facets: fromProtoFacets(request.GetFacets()), Highlight: fromProtoHighlight(request.GetHighlight()), Syntax: request.GetSyntax()})
 	if err != nil {
 		return nil, status.Error(codes.InvalidArgument, "search filter cannot be encoded")
 	}

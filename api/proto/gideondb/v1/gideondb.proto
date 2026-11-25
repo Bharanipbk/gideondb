@@ -167,6 +167,14 @@ message Collection {
   // (default), simple, whitespace, folding, cjk, english, french, german,
   // spanish, italian or portuguese. Optional.
   string text_analyzer = 7;
+  // Synonyms are groups of interchangeable words applied to text queries.
+  repeated SynonymGroup synonyms = 8;
+}
+
+// SynonymGroup is a set of interchangeable words.
+message SynonymGroup {
+  // Words are two or more single words.
+  repeated string words = 1;
 }
 
 // IndexConfig contains index selection and HNSW tuning parameters.
@@ -366,6 +374,9 @@ message SearchRequest {
   repeated FacetRequest facets = 11;
   // Highlight adds snippets of record text with query terms marked.
   HighlightOptions highlight = 12;
+  // Syntax "simple" enables "phrases", +must, -must_not, fuzzy~, prefix*
+  // and ^boosts in text.
+  string syntax = 13;
 }
 
 // FacetRequest asks for the most common values of one metadata field.

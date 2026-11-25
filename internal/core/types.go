@@ -88,6 +88,9 @@ type CollectionConfig struct {
 	// "cjk", or a language analyzer ("english", "french", "german",
 	// "spanish", "italian", "portuguese"). Optional.
 	TextAnalyzer string `json:"text_analyzer,omitempty"`
+	// Synonyms are groups of interchangeable words, applied to queries:
+	// [["tv", "television"], ["laptop", "notebook"]]. Optional.
+	Synonyms [][]string `json:"synonyms,omitempty"`
 }
 
 var vectorizerName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -200,6 +203,19 @@ func (c CollectionConfig) Validate() error {
 	if _, err := analysis.Get(c.TextAnalyzer); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 	}
+	if len(c.Synonyms) > 10000 {
+		return fmt.Errorf("%w: at most 10000 synonym groups", ErrInvalidArgument)
+	}
+	for _, group := range c.Synonyms {
+		if len(group) < 2 || len(group) > 64 {
+			return fmt.Errorf("%w: each synonym group needs 2 to 64 words", ErrInvalidArgument)
+		}
+		for _, word := range group {
+			if word == "" || len(word) > 256 {
+				return fmt.Errorf("%w: synonym words must be 1 to 256 bytes", ErrInvalidArgument)
+			}
+		}
+	}
 	switch c.Index.Type {
 	case IndexFlat:
 	case IndexHNSW:
@@ -309,10 +325,16 @@ const RRFConstant = 60
 
 // HybridQuery combines any of dense, sparse and text retrieval. At least one
 // of Sparse or Text is required; Dense alone uses the vector search path.
+// QuerySyntaxSimple selects the operator syntax for HybridQuery.Text:
+// "phrases", +must, -must_not, fuzzy~, prefix* and ^boosts.
+const QuerySyntaxSimple = "simple"
+
 type HybridQuery struct {
 	Dense  []float32
 	Sparse map[string]float32
 	Text   string
+	// Syntax is "" (plain words) or QuerySyntaxSimple.
+	Syntax string
 	Alpha  float32
 	Fusion FusionMode
 	TopK   int
@@ -324,6 +346,9 @@ func (q HybridQuery) Validate(dimension int) error {
 		if err := ValidateVector(q.Dense, dimension); err != nil {
 			return err
 		}
+	}
+	if q.Syntax != "" && q.Syntax != QuerySyntaxSimple {
+		return fmt.Errorf("%w: syntax must be empty or %q", ErrInvalidArgument, QuerySyntaxSimple)
 	}
 	if q.Sparse == nil && q.Text == "" {
 		return fmt.Errorf("%w: hybrid search requires sparse_vector or text", ErrInvalidArgument)

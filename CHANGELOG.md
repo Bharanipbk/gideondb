@@ -28,6 +28,29 @@ describe unreleased experimental work.
 
 ### Added
 
+- Search features for competing with OpenSearch and Azure AI Search:
+  - **Query syntax** (`"syntax": "simple"`): `"phrases"` (position-aware,
+    stopword gaps kept), `+must`, `-must_not`, `fuzzy~` (Damerau edit
+    distance 1–2), `prefix*` and `^boost`. In hybrid search, required and
+    excluded clauses also filter dense results.
+    [Guide](docs/indexing/query-syntax.md).
+  - **Synonyms:** collection `synonyms` groups expand query words, phrases included.
+  - **Aggregations:** `stats`, `histogram`, `range` and `terms` over every
+    matching record, merged exactly across shard owners.
+    [Guide](docs/indexing/aggregations-and-sorting.md).
+  - **Sorting** by metadata fields or `_score` over a relevance candidate
+    pool (`sort`, `sort_candidates`).
+  - **Autocomplete and "did you mean"**: `GET /v1/collections/{name}/suggest`.
+    [Guide](docs/indexing/autocomplete.md).
+  - **Document ingestion:** `POST /v1/collections/{name}/documents` extracts text
+    from text, Markdown, HTML, PDF and DOCX, chunks it on paragraph, sentence
+    and word boundaries with overlap, embeds the chunks and replaces earlier
+    versions. [Guide](docs/indexing/documents.md). Adds the `rsc.io/pdf`
+    dependency.
+  - gRPC gains `SearchRequest.syntax` and `Collection.synonyms`. The Go client
+    gains `Syntax`, `Sort`, `SearchAggregate`, `Suggest` and `IngestDocument`.
+    Aggregations, sorting, suggest and document upload are REST and Go-client
+    only for now.
 - Full-text analyzers, highlighting and facets
   ([guide](docs/indexing/full-text.md)). Collections take `text_analyzer`:
   `standard` (the default, unchanged), `simple`, `whitespace`, `folding`,

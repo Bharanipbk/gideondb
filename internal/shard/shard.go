@@ -315,20 +315,37 @@ func (s *Shard) Close() error {
 	return nil
 }
 
-// Facets counts metadata values across the shard's live records; a record
-// overwritten in the active segment or deleted is counted once or not at all.
-func (s *Shard) Facets(namespace string, filter *metadata.Expr, text string, fields []string) core.FacetCounts {
+// Aggregate counts facets and aggregations across the shard's live records;
+// a record overwritten in the active segment or deleted is counted once or
+// not at all.
+func (s *Shard) Aggregate(namespace string, filter *metadata.Expr, text, syntax string, spec core.MatchSpec) (core.MatchCounts, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	counts := s.active.Facets(namespace, filter, text, fields, nil)
-	if s.immutable != nil {
-		excluded := s.active.Keys()
-		for key := range s.tombstones {
-			excluded[key] = struct{}{}
-		}
-		counts.Merge(s.immutable.segment.Facets(namespace, filter, text, fields, excluded))
+	counts, err := s.active.Aggregate(namespace, filter, text, syntax, spec, nil)
+	if err != nil || s.immutable == nil {
+		return counts, err
 	}
-	return counts
+	excluded := s.active.Keys()
+	for key := range s.tombstones {
+		excluded[key] = struct{}{}
+	}
+	base, err := s.immutable.segment.Aggregate(namespace, filter, text, syntax, spec, excluded)
+	if err != nil {
+		return counts, err
+	}
+	counts.Merge(base)
+	return counts, nil
+}
+
+// Facets counts metadata values for fields (Aggregate without
+// aggregations and with plain text).
+func (s *Shard) Facets(namespace string, filter *metadata.Expr, text string, fields []string) core.FacetCounts {
+	facets := make([]core.FacetRequest, len(fields))
+	for i, field := range fields {
+		facets[i] = core.FacetRequest{Field: field}
+	}
+	counts, _ := s.Aggregate(namespace, filter, text, "", core.MatchSpec{Facets: facets})
+	return counts.Facets
 }
 
 // UpsertBatch applies records to the active segment in one call; counts and
@@ -358,4 +375,16 @@ func (s *Shard) UpsertBatch(records []core.Record) error {
 	}
 	s.count += len(fresh)
 	return nil
+}
+
+// Suggest merges word statistics from the shard's segments. Counts from the
+// base segment can include records since overwritten; suggestions are hints.
+func (s *Shard) Suggest(prefix string, words []string, limit int) core.SuggestCounts {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := s.active.Suggest(prefix, words, limit)
+	if s.immutable != nil {
+		counts.Merge(s.immutable.segment.Suggest(prefix, words, limit))
+	}
+	return counts
 }

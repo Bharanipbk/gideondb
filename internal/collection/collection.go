@@ -3,6 +3,7 @@ package collection
 
 import (
 	"fmt"
+	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"hash/fnv"
 	"runtime"
 	"sort"
@@ -570,38 +571,28 @@ func (c *Collection) RouteShard(namespace, id string) uint32 {
 	return uint32(h.Sum64() % uint64(len(c.shards)))
 }
 
-// Facets returns the top buckets of each requested metadata field over all
-// shards.
-func (c *Collection) Facets(namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest) (map[string][]core.FacetBucket, error) {
-	counts, err := c.FacetCounts(namespace, filter, text, requests, nil)
-	if err != nil {
-		return nil, err
+// Aggregate returns raw, mergeable counts for the given shards (all when
+// shards is nil), so a coordinator can merge counts from several nodes.
+func (c *Collection) Aggregate(namespace string, filter *metadata.Expr, text, syntax string, spec core.MatchSpec, shards []uint32) (core.MatchCounts, error) {
+	if err := spec.Validate(); err != nil {
+		return core.MatchCounts{}, err
 	}
-	return counts.Top(requests), nil
-}
-
-// FacetCounts returns raw counts for the given shards (all when shards is
-// nil), so a coordinator can merge counts from several nodes before Top.
-func (c *Collection) FacetCounts(namespace string, filter *metadata.Expr, text string, requests []core.FacetRequest, shards []uint32) (core.FacetCounts, error) {
-	if err := core.ValidateFacets(requests); err != nil {
-		return nil, err
-	}
-	fields := make([]string, len(requests))
-	for i, request := range requests {
-		fields[i] = request.Field
-	}
-	counts := core.FacetCounts{}
 	if shards == nil {
-		for shardID := range c.shards {
-			counts.Merge(c.shards[shardID].Facets(namespace, filter, text, fields))
+		shards = make([]uint32, len(c.shards))
+		for i := range shards {
+			shards[i] = uint32(i)
 		}
-		return counts, nil
 	}
+	counts := core.NewMatchCounts()
 	for _, shardID := range shards {
 		if int(shardID) >= len(c.shards) {
-			return nil, fmt.Errorf("%w: shard %d", core.ErrNotFound, shardID)
+			return core.MatchCounts{}, fmt.Errorf("%w: shard %d", core.ErrNotFound, shardID)
 		}
-		counts.Merge(c.shards[shardID].Facets(namespace, filter, text, fields))
+		partial, err := c.shards[shardID].Aggregate(namespace, filter, text, syntax, spec)
+		if err != nil {
+			return core.MatchCounts{}, err
+		}
+		counts.Merge(partial)
 	}
 	return counts, nil
 }
@@ -649,4 +640,85 @@ func (c *Collection) RestoreBatch(records []core.Record) error {
 		}
 	}
 	return c.ApplyUpsertBatch(records)
+}
+
+// Suggestion is one completion of the last word of a typed query.
+type Suggestion struct {
+	Text  string `json:"text"`
+	Word  string `json:"word"`
+	Count int    `json:"count"`
+}
+
+// SuggestResult holds completions and an optional corrected query.
+type SuggestResult struct {
+	Completions []Suggestion `json:"completions"`
+	DidYouMean  string       `json:"did_you_mean,omitempty"`
+}
+
+// Suggest completes the last word of text from the indexed vocabulary and
+// proposes a spelling correction when some word is not indexed but a close
+// spelling is. Words are matched after case and accent folding, before
+// stemming, and counts are document frequencies.
+func (c *Collection) Suggest(text string, size int) SuggestResult {
+	analyzer := analysis.MustGet(c.config.TextAnalyzer)
+	tokens := analyzer.Analyze(text)
+	words := make([]string, len(tokens))
+	for i, token := range tokens {
+		words[i] = analyzer.Normalize(text[token.Start:token.End])
+	}
+	// The last word is still being typed unless the text ends in a space.
+	prefix := ""
+	if len(tokens) > 0 && tokens[len(tokens)-1].End == len(text) {
+		prefix = words[len(words)-1]
+	}
+	counts := core.NewSuggestCounts()
+	for _, shard := range c.shards {
+		counts.Merge(shard.Suggest(prefix, words, size))
+	}
+	result := SuggestResult{Completions: []Suggestion{}}
+	if prefix != "" {
+		type scored struct {
+			word  string
+			count int
+		}
+		list := make([]scored, 0, len(counts.Completions))
+		for word, count := range counts.Completions {
+			list = append(list, scored{word, count})
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].count != list[j].count {
+				return list[i].count > list[j].count
+			}
+			return list[i].word < list[j].word
+		})
+		head := text[:tokens[len(tokens)-1].Start]
+		for _, item := range list[:min(len(list), size)] {
+			result.Completions = append(result.Completions, Suggestion{Text: head + item.word, Word: item.word, Count: item.count})
+		}
+	}
+	corrected, changed := text, false
+	for i := len(tokens) - 1; i >= 0; i-- {
+		word := words[i]
+		candidates := counts.Corrections[word]
+		if candidates[word] > 0 {
+			continue // indexed as typed
+		}
+		if i == len(tokens)-1 && prefix != "" && len(result.Completions) > 0 {
+			continue // a partial word that completes is not a typo
+		}
+		best, bestCount := "", 0
+		for candidate, count := range candidates {
+			if count > bestCount || (count == bestCount && candidate < best) {
+				best, bestCount = candidate, count
+			}
+		}
+		if best != "" {
+			corrected = corrected[:tokens[i].Start] + best + corrected[tokens[i].End:]
+			changed = true
+		}
+	}
+	if changed {
+		result.DidYouMean = corrected
+	}
+	return result
 }

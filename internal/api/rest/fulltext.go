@@ -2,10 +2,13 @@ package rest
 
 import (
 	"fmt"
+	"net/http"
+	"strconv"
 
 	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/segment"
 )
 
 // highlightRequest asks for snippets of each result's record text with the
@@ -21,7 +24,19 @@ type highlightRequest struct {
 }
 
 func (r searchRequest) validateFullText() error {
-	if err := core.ValidateFacets(r.Facets); err != nil {
+	switch r.Syntax {
+	case "":
+	case core.QuerySyntaxSimple:
+		if r.Text == "" {
+			return fmt.Errorf("%w: syntax requires text", core.ErrInvalidArgument)
+		}
+		if _, err := segment.ParseSimpleQuery(r.Text); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("%w: syntax must be omitted or %q", core.ErrInvalidArgument, core.QuerySyntaxSimple)
+	}
+	if err := r.matchSpec().Validate(); err != nil {
 		return err
 	}
 	if h := r.Highlight; h != nil {
@@ -53,6 +68,9 @@ func applyHighlights(config core.CollectionConfig, request searchRequest, result
 	query := h.Query
 	if query == "" {
 		query = request.Text
+		if request.Syntax == core.QuerySyntaxSimple {
+			query = segment.HighlightTerms(query)
+		}
 	}
 	analyzer := analysis.MustGet(config.TextAnalyzer)
 	options := analysis.HighlightOptions{PreTag: h.PreTag, PostTag: h.PostTag, FragmentSize: h.FragmentSize, Fragments: h.Fragments, Raw: h.Raw}
@@ -63,10 +81,50 @@ func applyHighlights(config core.CollectionConfig, request searchRequest, result
 	}
 }
 
-// localFacets counts facets over every shard of a collection on this node.
-func (s *Server) localFacets(collection string, request searchRequest, filter *metadata.Expr) (map[string][]core.FacetBucket, error) {
-	if len(request.Facets) == 0 {
-		return nil, nil
+// matchSpec is what the request counts over its matching records.
+func (r searchRequest) matchSpec() core.MatchSpec {
+	return core.MatchSpec{Facets: r.Facets, Aggregations: r.Aggregations}
+}
+
+// matchCounts counts facets and aggregations over the given shards on this
+// node (nil means every shard).
+func (s *Server) matchCounts(collection string, request searchRequest, filter *metadata.Expr, shards []uint32) (core.MatchCounts, error) {
+	if request.matchSpec().Empty() {
+		return core.NewMatchCounts(), nil
 	}
-	return s.engine.Facets(collection, request.Namespace, filter, request.Text, request.Facets)
+	return s.engine.Aggregate(collection, request.Namespace, filter, request.Text, request.Syntax, request.matchSpec(), shards)
+}
+
+// addMatchResults adds facets and aggregations to a response.
+func addMatchResults(response map[string]any, request searchRequest, counts core.MatchCounts) {
+	if len(request.Facets) > 0 {
+		response["facets"] = counts.Facets.Top(request.Facets)
+	}
+	if len(request.Aggregations) > 0 {
+		response["aggregations"] = counts.Aggregations.Results(request.Aggregations)
+	}
+}
+
+// suggest serves GET /v1/collections/{name}/suggest?text=...&size=N.
+func (s *Server) suggest(w http.ResponseWriter, r *http.Request) {
+	text := r.URL.Query().Get("text")
+	if text == "" || len(text) > 1024 {
+		writeError(w, fmt.Errorf("%w: text must be 1 to 1024 bytes", core.ErrInvalidArgument))
+		return
+	}
+	size := 5
+	if raw := r.URL.Query().Get("size"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 50 {
+			writeError(w, fmt.Errorf("%w: size must be between 1 and 50", core.ErrInvalidArgument))
+			return
+		}
+		size = parsed
+	}
+	result, err := s.engine.Suggest(r.PathValue("name"), text, size)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

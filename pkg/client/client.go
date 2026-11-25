@@ -9,8 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -53,6 +56,8 @@ type CollectionConfig struct {
 	// TextAnalyzer selects how record and query text become BM25 terms, such
 	// as "english" or "cjk"; empty uses "standard".
 	TextAnalyzer string `json:"text_analyzer,omitempty"`
+	// Synonyms are groups of interchangeable words for text queries.
+	Synonyms [][]string `json:"synonyms,omitempty"`
 }
 
 type IndexConfig struct {
@@ -119,6 +124,84 @@ type SearchOptions struct {
 	Offset int
 	// Highlight asks for marked snippets of each result's record text.
 	Highlight *HighlightOptions
+	// Syntax "simple" enables "phrases", +must, -must_not, fuzzy~,
+	// prefix* and ^boosts in Text.
+	Syntax string
+	// Sort orders relevance candidates by metadata fields (or "_score");
+	// SortCandidates sizes that pool (server default 10x the page, min 100).
+	Sort           []SortField
+	SortCandidates int
+}
+
+// SortField orders results by one field; Order is "asc" or "desc".
+type SortField struct {
+	Field string `json:"field"`
+	Order string `json:"order,omitempty"`
+}
+
+// Aggregation is one stats, histogram, range or terms aggregation.
+type Aggregation struct {
+	Type     string             `json:"type"`
+	Field    string             `json:"field"`
+	Interval float64            `json:"interval,omitempty"`
+	Ranges   []AggregationRange `json:"ranges,omitempty"`
+	Size     int                `json:"size,omitempty"`
+}
+
+// AggregationRange is a half-open [From, To) range; nil bounds are open.
+type AggregationRange struct {
+	Key  string   `json:"key,omitempty"`
+	From *float64 `json:"from,omitempty"`
+	To   *float64 `json:"to,omitempty"`
+}
+
+// AggregationResult holds stats fields or buckets.
+type AggregationResult struct {
+	Count   *int                `json:"count,omitempty"`
+	Min     *float64            `json:"min,omitempty"`
+	Max     *float64            `json:"max,omitempty"`
+	Sum     *float64            `json:"sum,omitempty"`
+	Avg     *float64            `json:"avg,omitempty"`
+	Buckets []AggregationBucket `json:"buckets,omitempty"`
+}
+
+// AggregationBucket is one bucket of a histogram, range or terms result.
+type AggregationBucket struct {
+	Key   any      `json:"key"`
+	From  *float64 `json:"from,omitempty"`
+	To    *float64 `json:"to,omitempty"`
+	Count int      `json:"count"`
+}
+
+// Suggestions are completions of the last word and an optional
+// corrected query.
+type Suggestions struct {
+	Completions []struct {
+		Text  string `json:"text"`
+		Word  string `json:"word"`
+		Count int    `json:"count"`
+	} `json:"completions"`
+	DidYouMean string `json:"did_you_mean,omitempty"`
+}
+
+// DocumentOptions describe an uploaded document.
+type DocumentOptions struct {
+	ID           string // default: the file name without extension
+	Namespace    string
+	Metadata     map[string]any
+	ChunkSize    int // runes; server default 1000
+	ChunkOverlap int // runes; server default 150
+	ContentType  string
+}
+
+// DocumentResult summarizes an ingested document.
+type DocumentResult struct {
+	DocumentID            string `json:"document_id"`
+	Title                 string `json:"title"`
+	Format                string `json:"format"`
+	Chunks                int    `json:"chunks"`
+	Characters            int    `json:"characters"`
+	ReplacedChunksRemoved int    `json:"replaced_chunks_removed"`
 }
 
 // HighlightOptions controls result snippets; zero values use the server
@@ -333,6 +416,75 @@ func (c *Client) SearchFacets(ctx context.Context, collection string, options Se
 	return response.Results, response.Facets, err
 }
 
+// SearchAggregate runs a search and computes aggregations over every
+// matching record.
+func (c *Client) SearchAggregate(ctx context.Context, collection string, options SearchOptions, aggregations map[string]Aggregation) ([]SearchResult, map[string]AggregationResult, error) {
+	var response struct {
+		Results      []SearchResult               `json:"results"`
+		Aggregations map[string]AggregationResult `json:"aggregations"`
+	}
+	body := searchBody(options, false)
+	body["aggregations"] = aggregations
+	err := c.do(ctx, http.MethodPost, collectionPath(collection)+"/search", body, &response)
+	return response.Results, response.Aggregations, err
+}
+
+// Suggest completes the last word of text and proposes a spelling fix.
+func (c *Client) Suggest(ctx context.Context, collection, text string, size int) (Suggestions, error) {
+	query := url.Values{"text": {text}}
+	if size > 0 {
+		query.Set("size", strconv.Itoa(size))
+	}
+	var response Suggestions
+	err := c.do(ctx, http.MethodGet, collectionPath(collection)+"/suggest?"+query.Encode(), nil, &response)
+	return response, err
+}
+
+// IngestDocument uploads a text, Markdown, HTML, PDF or DOCX file; the
+// server extracts, chunks and embeds it with the collection vectorizer.
+func (c *Client) IngestDocument(ctx context.Context, collection, filename string, content io.Reader, options DocumentOptions) (DocumentResult, error) {
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	fields := map[string]string{"id": options.ID, "namespace": options.Namespace}
+	if options.ChunkSize != 0 {
+		fields["chunk_size"] = strconv.Itoa(options.ChunkSize)
+	}
+	if options.ChunkOverlap != 0 {
+		fields["chunk_overlap"] = strconv.Itoa(options.ChunkOverlap)
+	}
+	if options.Metadata != nil {
+		encoded, err := json.Marshal(options.Metadata)
+		if err != nil {
+			return DocumentResult{}, fmt.Errorf("gideondb: encode metadata: %w", err)
+		}
+		fields["metadata"] = string(encoded)
+	}
+	for key, value := range fields {
+		if value != "" {
+			if err := form.WriteField(key, value); err != nil {
+				return DocumentResult{}, err
+			}
+		}
+	}
+	header := textproto.MIMEHeader{"Content-Disposition": {fmt.Sprintf(`form-data; name="file"; filename=%q`, filepath.Base(filename))}}
+	if options.ContentType != "" {
+		header.Set("Content-Type", options.ContentType)
+	}
+	part, err := form.CreatePart(header)
+	if err != nil {
+		return DocumentResult{}, err
+	}
+	if _, err := io.Copy(part, content); err != nil {
+		return DocumentResult{}, fmt.Errorf("gideondb: read document: %w", err)
+	}
+	if err := form.Close(); err != nil {
+		return DocumentResult{}, err
+	}
+	var response DocumentResult
+	err = c.send(ctx, http.MethodPost, collectionPath(collection)+"/documents", &body, form.FormDataContentType(), &response, "")
+	return response, err
+}
+
 // SearchGroups returns up to options.TopK groups of hits sharing a value of
 // group.Field, ordered by each group's best hit.
 func (c *Client) SearchGroups(ctx context.Context, collection string, options SearchOptions, group GroupOptions) ([]SearchGroup, error) {
@@ -402,6 +554,15 @@ func searchBody(options SearchOptions, distributed bool) map[string]any {
 	if options.Highlight != nil {
 		body["highlight"] = options.Highlight
 	}
+	if options.Syntax != "" {
+		body["syntax"] = options.Syntax
+	}
+	if len(options.Sort) > 0 {
+		body["sort"] = options.Sort
+	}
+	if options.SortCandidates != 0 {
+		body["sort_candidates"] = options.SortCandidates
+	}
 	if distributed && options.AllowPartial {
 		body["allow_partial"] = true
 	}
@@ -420,21 +581,27 @@ func (c *Client) do(ctx context.Context, method, path string, requestBody, respo
 
 func (c *Client) doWithIdempotencyKey(ctx context.Context, method, path string, requestBody, responseBody any, idempotencyKey string) error {
 	var body io.Reader
+	contentType := ""
 	if requestBody != nil {
 		payload, err := json.Marshal(requestBody)
 		if err != nil {
 			return fmt.Errorf("gideondb: encode request: %w", err)
 		}
-		body = bytes.NewReader(payload)
+		body, contentType = bytes.NewReader(payload), "application/json"
 	}
+	return c.send(ctx, method, path, body, contentType, responseBody, idempotencyKey)
+}
+
+// send performs one request with an already-encoded body.
+func (c *Client) send(ctx context.Context, method, path string, body io.Reader, contentType string, responseBody any, idempotencyKey string) error {
 	request, err := http.NewRequestWithContext(ctx, method, c.baseURL.String()+path, body)
 	if err != nil {
 		return fmt.Errorf("gideondb: create request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", c.userAgent)
-	if requestBody != nil {
-		request.Header.Set("Content-Type", "application/json")
+	if contentType != "" {
+		request.Header.Set("Content-Type", contentType)
 	}
 	if c.apiKey != "" {
 		request.Header.Set("Authorization", "Bearer "+c.apiKey)

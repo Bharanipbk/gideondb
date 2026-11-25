@@ -25,6 +25,9 @@ import (
 type Token struct {
 	Term       string
 	Start, End int
+	// Position counts tokens before stopword removal, so phrase matching
+	// sees the gap a dropped stopword leaves.
+	Position int
 }
 
 // Analyzer turns text into index terms.
@@ -44,7 +47,8 @@ func (a *Analyzer) Name() string { return a.name }
 func (a *Analyzer) Analyze(text string) []Token {
 	tokens := a.split(text)
 	out := tokens[:0]
-	for _, token := range tokens {
+	for position, token := range tokens {
+		token.Position = position
 		term := token.Term
 		if a.lowercase {
 			term = strings.ToLower(term)
@@ -65,6 +69,18 @@ func (a *Analyzer) Analyze(text string) []Token {
 		out = append(out, token)
 	}
 	return out
+}
+
+// Normalize applies the analyzer's case and accent rules to one word, but
+// not stopwords or stemming. Prefix and fuzzy queries match on it.
+func (a *Analyzer) Normalize(word string) string {
+	if a.lowercase {
+		word = strings.ToLower(word)
+	}
+	if a.fold {
+		word = Fold(word)
+	}
+	return word
 }
 
 // Terms returns only the terms of Analyze.

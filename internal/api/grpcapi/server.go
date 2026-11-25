@@ -271,7 +271,7 @@ func (s *Server) Search(ctx context.Context, request *v1.SearchRequest) (*v1.Sea
 		if alpha := searchAlpha(request); alpha < 0 || alpha > 1 {
 			return nil, status.Error(codes.InvalidArgument, "alpha must be between 0 and 1")
 		}
-		query := core.HybridQuery{Dense: vector, Sparse: request.GetSparseVector(), Text: request.GetText(), Alpha: searchAlpha(request), Fusion: fusion, TopK: int(request.GetTopK())}
+		query := core.HybridQuery{Dense: vector, Sparse: request.GetSparseVector(), Text: request.GetText(), Syntax: request.GetSyntax(), Alpha: searchAlpha(request), Fusion: fusion, TopK: int(request.GetTopK())}
 		results, err = s.engine.SearchHybrid(request.GetCollection(), request.GetNamespace(), query, filter)
 	} else {
 		results, err = s.engine.SearchFiltered(request.GetCollection(), request.GetNamespace(), vector, int(request.GetTopK()), filter)
@@ -762,7 +762,7 @@ func fromProtoCollection(value *v1.Collection) (core.CollectionConfig, error) {
 	default:
 		return core.CollectionConfig{}, fmtInvalid("unsupported quantization")
 	}
-	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Vectorizer: value.GetVectorizer(), TextAnalyzer: value.GetTextAnalyzer(), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch()), Quantization: quantization, Oversampling: int(value.GetIndex().GetOversampling())}}
+	config := core.CollectionConfig{Name: value.GetName(), Dimension: int(value.GetDimension()), Metric: metric, ShardCount: int(value.GetShardCount()), Vectorizer: value.GetVectorizer(), TextAnalyzer: value.GetTextAnalyzer(), Synonyms: fromProtoSynonyms(value.GetSynonyms()), Index: core.IndexConfig{Type: indexType, M: int(value.GetIndex().GetM()), EFConstruction: int(value.GetIndex().GetEfConstruction()), EFSearch: int(value.GetIndex().GetEfSearch()), Quantization: quantization, Oversampling: int(value.GetIndex().GetOversampling())}}
 	if err := config.Validate(); err != nil {
 		return core.CollectionConfig{}, err
 	}
@@ -774,7 +774,7 @@ func toProtoCollection(value core.CollectionConfig) *v1.Collection {
 	indexTypes := map[core.IndexType]v1.IndexType{core.IndexFlat: v1.IndexType_INDEX_TYPE_FLAT, core.IndexHNSW: v1.IndexType_INDEX_TYPE_HNSW}
 	value = value.Normalized()
 	quantizations := map[core.Quantization]v1.Quantization{core.QuantizationBinary: v1.Quantization_QUANTIZATION_BINARY}
-	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Vectorizer: value.Vectorizer, TextAnalyzer: value.TextAnalyzer, Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch), Quantization: quantizations[value.Index.Quantization], Oversampling: uint32(value.Index.Oversampling)}}
+	return &v1.Collection{Name: value.Name, Dimension: uint32(value.Dimension), Metric: metrics[value.Metric], ShardCount: uint32(value.ShardCount), Vectorizer: value.Vectorizer, TextAnalyzer: value.TextAnalyzer, Synonyms: toProtoSynonyms(value.Synonyms), Index: &v1.IndexConfig{Type: indexTypes[value.Index.Type], M: uint32(value.Index.M), EfConstruction: uint32(value.Index.EFConstruction), EfSearch: uint32(value.Index.EFSearch), Quantization: quantizations[value.Index.Quantization], Oversampling: uint32(value.Index.Oversampling)}}
 }
 
 func fromProtoRecord(value *v1.Record) (core.Record, error) {

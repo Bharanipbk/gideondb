@@ -523,6 +523,10 @@ paths:
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
                 facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                syntax: {type: string, enum: [simple], description: 'Enables "phrases", +must, -must_not, fuzzy~ (or ~N), prefix* and ^boost in text. See docs/indexing/query-syntax.md.'}
+                aggregations: {type: object, maxProperties: 16, additionalProperties: {$ref: "#/components/schemas/AggregationRequest"}, description: Named stats, histogram, range or terms aggregations over every matching record.}
+                sort: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/SortField"}, description: Order relevance candidates by metadata fields or _score. Missing values sort last.}
+                sort_candidates: {type: integer, minimum: 1, maximum: 10000, description: Relevance candidates that sort reorders. Default max(100, 10 * (offset + top_k)).}
                 highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
@@ -536,9 +540,77 @@ paths:
                   results: {type: array, items: {$ref: "#/components/schemas/SearchResult"}}
                   rerank: {$ref: "#/components/schemas/RerankStatus"}
                   facets: {$ref: "#/components/schemas/FacetResults"}
+                  aggregations: {type: object, additionalProperties: {$ref: "#/components/schemas/AggregationResult"}}
         "400": {$ref: "#/components/responses/Error"}
         "404": {$ref: "#/components/responses/Error"}
         "409": {$ref: "#/components/responses/Error"}
+  /collections/{name}/suggest:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    get:
+      operationId: suggest
+      description: Completes the last word of text from indexed words and proposes a spelling-corrected query. Counts are document frequencies on this node.
+      parameters:
+        - {name: text, in: query, required: true, schema: {type: string, minLength: 1, maxLength: 1024}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 5}}
+      responses:
+        "200":
+          description: Completions and an optional did_you_mean.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  completions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        text: {type: string}
+                        word: {type: string}
+                        count: {type: integer}
+                  did_you_mean: {type: string}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+  /collections/{name}/documents:
+    parameters:
+      - {$ref: "#/components/parameters/CollectionName"}
+    post:
+      operationId: ingestDocument
+      description: Extracts text from a text, Markdown, HTML, PDF or DOCX file, splits it into overlapping chunks, embeds each with the collection vectorizer and stores one record per chunk (id "<document id>#00000"). Uploading the same document id again replaces its chunks.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: {type: string, format: binary, description: At most 32 MiB.}
+                id: {type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$", description: Defaults to the file name without extension.}
+                namespace: {type: string}
+                metadata: {type: string, description: JSON object copied onto every chunk.}
+                chunk_size: {type: integer, minimum: 100, maximum: 8000, default: 1000}
+                chunk_overlap: {type: integer, minimum: 0, default: 150, description: At most half of chunk_size.}
+              required: [file]
+      responses:
+        "200":
+          description: The stored document.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  document_id: {type: string}
+                  title: {type: string}
+                  format: {type: string, enum: [text, markdown, html, pdf, docx]}
+                  chunks: {type: integer}
+                  characters: {type: integer}
+                  replaced_chunks_removed: {type: integer}
+        "400": {$ref: "#/components/responses/Error"}
+        "404": {$ref: "#/components/responses/Error"}
+        "415": {$ref: "#/components/responses/Error"}
+        "422": {$ref: "#/components/responses/Error"}
+        "503": {$ref: "#/components/responses/Error"}
   /internal/shards/{collection}/{shard}/search:
     parameters:
       - {name: collection, in: path, required: true, schema: {type: string}}
@@ -570,6 +642,10 @@ paths:
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
                 facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                syntax: {type: string, enum: [simple], description: 'Enables "phrases", +must, -must_not, fuzzy~ (or ~N), prefix* and ^boost in text. See docs/indexing/query-syntax.md.'}
+                aggregations: {type: object, maxProperties: 16, additionalProperties: {$ref: "#/components/schemas/AggregationRequest"}, description: Named stats, histogram, range or terms aggregations over every matching record.}
+                sort: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/SortField"}, description: Order relevance candidates by metadata fields or _score. Missing values sort last.}
+                sort_candidates: {type: integer, minimum: 1, maximum: 10000, description: Relevance candidates that sort reorders. Default max(100, 10 * (offset + top_k)).}
                 highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
@@ -847,6 +923,10 @@ paths:
                 candidates: {type: integer, minimum: 1, maximum: 1000, description: Pooled-index candidates rescored by MaxSim per segment. Default max(4*top_k, 100).}
                 rerank: {$ref: "#/components/schemas/RerankSpec"}
                 facets: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/FacetRequest"}, description: Count metadata values over every record matching namespace, filter and (when set) text.}
+                syntax: {type: string, enum: [simple], description: 'Enables "phrases", +must, -must_not, fuzzy~ (or ~N), prefix* and ^boost in text. See docs/indexing/query-syntax.md.'}
+                aggregations: {type: object, maxProperties: 16, additionalProperties: {$ref: "#/components/schemas/AggregationRequest"}, description: Named stats, histogram, range or terms aggregations over every matching record.}
+                sort: {type: array, maxItems: 4, items: {$ref: "#/components/schemas/SortField"}, description: Order relevance candidates by metadata fields or _score. Missing values sort last.}
+                sort_candidates: {type: integer, minimum: 1, maximum: 10000, description: Relevance candidates that sort reorders. Default max(100, 10 * (offset + top_k)).}
                 highlight: {$ref: "#/components/schemas/HighlightRequest"}
               required: [top_k]
       responses:
@@ -864,6 +944,7 @@ paths:
                   authoritative_placement: {type: boolean}
                   rerank: {$ref: "#/components/schemas/RerankStatus"}
                   facets: {$ref: "#/components/schemas/FacetResults", description: Exact counts merged from every shard that answered; partial when shards failed.}
+                  aggregations: {type: object, additionalProperties: {$ref: "#/components/schemas/AggregationResult"}}
                 required: [results, partial, failures, metadata_epoch, authoritative_placement]
         "400": {$ref: "#/components/responses/Error"}
         "401": {$ref: "#/components/responses/Error"}
@@ -1127,6 +1208,7 @@ components:
         metric: {type: string, enum: [cosine, dot, l2]}
         shard_count: {type: integer, minimum: 1}
         index: {$ref: "#/components/schemas/IndexConfig"}
+        synonyms: {type: array, maxItems: 10000, items: {type: array, minItems: 2, maxItems: 64, items: {type: string, minLength: 1, maxLength: 256}}, description: Groups of interchangeable single words applied to text queries.}
         text_analyzer: {type: string, enum: [standard, simple, whitespace, folding, cjk, english, french, german, spanish, italian, portuguese], default: standard, description: Analyzer that turns record and query text into BM25 terms. See docs/indexing/full-text.md.}
         vectors:
           type: object
@@ -1144,6 +1226,50 @@ components:
         datatype: {type: string, enum: [float32, float16, bfloat16], default: float32, description: Storage precision. Half types are rounded at write time and scored in float32.}
         multi_vector: {type: boolean, default: false, description: Store a list of vectors per record (late interaction) and search with MaxSim.}
       required: [dimension, metric]
+    SortField:
+      type: object
+      additionalProperties: false
+      properties:
+        field: {type: string, description: Metadata field, or _score.}
+        order: {type: string, enum: [asc, desc], description: Default asc for fields and desc for _score.}
+      required: [field]
+    AggregationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        type: {type: string, enum: [stats, histogram, range, terms]}
+        field: {type: string}
+        interval: {type: number, exclusiveMinimum: 0, description: Bucket width for histogram (at most 1000 buckets).}
+        ranges:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              key: {type: string}
+              from: {type: number, description: Inclusive lower bound; omit for open.}
+              to: {type: number, description: Exclusive upper bound; omit for open.}
+        size: {type: integer, minimum: 1, maximum: 1000, default: 10, description: Buckets for terms.}
+      required: [type, field]
+    AggregationResult:
+      type: object
+      properties:
+        count: {type: integer}
+        min: {type: number}
+        max: {type: number}
+        sum: {type: number}
+        avg: {type: number}
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              key: {description: Bucket lower bound, range key or term value.}
+              from: {type: number}
+              to: {type: number}
+              count: {type: integer}
+            required: [key, count]
     FacetRequest:
       type: object
       additionalProperties: false

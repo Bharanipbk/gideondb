@@ -69,11 +69,16 @@ Search and indexing:
   [product quantization](docs/indexing/product-quantization.md) with exact
   rescoring.
 - **Retrieval:** [BM25 and sparse hybrid search](docs/indexing/sparse-hybrid.md)
-  with fusion, [language analyzers, highlighting and facets](docs/indexing/full-text.md), [named vectors](docs/indexing/named-vectors.md),
+  with fusion, [language analyzers, highlighting and facets](docs/indexing/full-text.md),
+  [query syntax and synonyms](docs/indexing/query-syntax.md),
+  [aggregations and sorting](docs/indexing/aggregations-and-sorting.md),
+  [autocomplete](docs/indexing/autocomplete.md), [named vectors](docs/indexing/named-vectors.md),
   [multi-vector MaxSim](docs/indexing/multi-vector.md), and
   [reranking](docs/indexing/reranking.md).
 - **Filtering:** indexed metadata, text and geo filters, score pagination and
   grouping.
+- **Documents:** [upload PDF, DOCX, HTML or Markdown](docs/indexing/documents.md);
+  text is extracted, chunked and embedded server-side.
 - **Embedding:** [server-side vectorizers](docs/indexing/server-side-embedding.md)
   (OpenAI-compatible, Cohere, Hugging Face, Ollama).
 - **Agents:** an [MCP server](docs/integrations/mcp.md) with agent memory and

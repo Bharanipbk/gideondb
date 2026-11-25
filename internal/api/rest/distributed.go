@@ -33,7 +33,7 @@ type shardSearchFailure struct {
 
 type shardSearchOutcome struct {
 	results []core.SearchResult
-	facets  core.FacetCounts
+	counts  core.MatchCounts
 	failure *shardSearchFailure
 }
 
@@ -130,12 +130,12 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 			for position := range jobs {
 				assignment := table.Shards[position]
 				var results []core.SearchResult
-				var counts core.FacetCounts
+				counts := core.NewMatchCounts()
 				var searchErr error
 				if assignment.NodeID == s.nodeID {
 					results, searchErr = s.searchShardStage(config.Name, assignment.ShardID, request.searchRequest, filter)
-					if searchErr == nil && len(request.Facets) > 0 {
-						counts, searchErr = s.engine.FacetCounts(config.Name, request.Namespace, filter, request.Text, request.Facets, []uint32{assignment.ShardID})
+					if searchErr == nil {
+						counts, searchErr = s.matchCounts(config.Name, request.searchRequest, filter, []uint32{assignment.ShardID})
 					}
 				} else {
 					peer, exists := peerByID[assignment.NodeID]
@@ -149,7 +149,7 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 					outcomes[position].failure = &shardSearchFailure{ShardID: assignment.ShardID, NodeID: assignment.NodeID, Error: searchErr.Error()}
 				} else {
 					outcomes[position].results = results
-					outcomes[position].facets = counts
+					outcomes[position].counts = counts
 				}
 			}
 		}()
@@ -160,14 +160,14 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 	close(jobs)
 	wait.Wait()
 	allResults := make([][]core.SearchResult, 0, len(outcomes))
-	facetCounts := core.FacetCounts{}
+	matched := core.NewMatchCounts()
 	failures := make([]shardSearchFailure, 0)
 	for _, outcome := range outcomes {
 		if outcome.failure != nil {
 			failures = append(failures, *outcome.failure)
 		} else {
 			allResults = append(allResults, outcome.results)
-			facetCounts.Merge(outcome.facets)
+			matched.Merge(outcome.counts)
 		}
 	}
 	if len(failures) > 0 && !request.AllowPartial {
@@ -188,24 +188,22 @@ func (s *Server) distributedSearch(w http.ResponseWriter, r *http.Request) {
 	applyHighlights(config, request.searchRequest, merged)
 	key, shaped := shape.apply(clearText(merged))
 	response := map[string]any{key: shaped, "partial": len(failures) > 0, "failures": failures, "metadata_epoch": epoch, "authoritative_placement": s.authoritativePlacementReady()}
-	if len(request.Facets) > 0 {
-		response["facets"] = facetCounts.Top(request.Facets)
-	}
+	addMatchResults(response, request.searchRequest, matched)
 	if status != nil {
 		response["rerank"] = status
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
-func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, request searchRequest, traceparent string) ([]core.SearchResult, core.FacetCounts, error) {
+func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, collection string, shardID uint32, request searchRequest, traceparent string) ([]core.SearchResult, core.MatchCounts, error) {
 	payload, err := json.Marshal(request)
 	if err != nil {
-		return nil, nil, err
+		return nil, core.MatchCounts{}, err
 	}
 	target := peer.SeedURL + "/v1/internal/shards/" + url.PathEscape(collection) + "/" + strconv.FormatUint(uint64(shardID), 10) + "/search"
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
-		return nil, nil, err
+		return nil, core.MatchCounts{}, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("X-GideonDB-Cluster-ID", s.clusterID)
@@ -219,11 +217,11 @@ func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, colle
 	}
 	response, err := s.internalClient.Do(httpRequest)
 	if err != nil {
-		return nil, nil, err
+		return nil, core.MatchCounts{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("peer returned HTTP %d", response.StatusCode)
+		return nil, core.MatchCounts{}, fmt.Errorf("peer returned HTTP %d", response.StatusCode)
 	}
 	decoder := json.NewDecoder(io.LimitReader(response.Body, maxBodyBytes))
 	decoder.DisallowUnknownFields()
@@ -231,19 +229,22 @@ func (s *Server) remoteShardSearch(ctx context.Context, peer cluster.Peer, colle
 		Results       []core.SearchResult `json:"results"`
 		ShardID       uint32              `json:"shard_id"`
 		MetadataEpoch uint64              `json:"metadata_epoch"`
-		FacetCounts   core.FacetCounts    `json:"facet_counts,omitempty"`
+		MatchCounts   core.MatchCounts    `json:"match_counts,omitempty"`
 	}
 	if err := decoder.Decode(&body); err != nil {
-		return nil, nil, fmt.Errorf("decode peer response: %w", err)
+		return nil, core.MatchCounts{}, fmt.Errorf("decode peer response: %w", err)
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
-		return nil, nil, fmt.Errorf("peer response must contain one JSON value")
+		return nil, core.MatchCounts{}, fmt.Errorf("peer response must contain one JSON value")
 	}
 	if body.ShardID != shardID || body.MetadataEpoch != s.currentMetadataEpoch() {
-		return nil, nil, fmt.Errorf("peer response fence mismatch")
+		return nil, core.MatchCounts{}, fmt.Errorf("peer response fence mismatch")
 	}
-	return body.Results, body.FacetCounts, nil
+	if body.MatchCounts.Facets == nil {
+		body.MatchCounts = core.NewMatchCounts()
+	}
+	return body.Results, body.MatchCounts, nil
 }
 
 func mergeDistributedTopK(groups [][]core.SearchResult, k int) []core.SearchResult {

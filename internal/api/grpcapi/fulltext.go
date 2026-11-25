@@ -9,6 +9,7 @@ import (
 	"github.com/Bharanipbk/gideondb/internal/analysis"
 	"github.com/Bharanipbk/gideondb/internal/core"
 	"github.com/Bharanipbk/gideondb/internal/metadata"
+	"github.com/Bharanipbk/gideondb/internal/segment"
 )
 
 func fromProtoFacets(values []*v1.FacetRequest) []core.FacetRequest {
@@ -64,6 +65,9 @@ func (s *Server) applyLocalFullText(request *v1.SearchRequest, filter *metadata.
 		query := h.GetQuery()
 		if query == "" {
 			query = request.GetText()
+			if request.GetSyntax() == core.QuerySyntaxSimple {
+				query = segment.HighlightTerms(query)
+			}
 		}
 		if query == "" {
 			return status.Error(codes.InvalidArgument, "highlight needs a text query or highlight.query")
@@ -87,13 +91,35 @@ func (s *Server) applyLocalFullText(request *v1.SearchRequest, filter *metadata.
 		}
 	}
 	if facets := fromProtoFacets(request.GetFacets()); facets != nil {
-		top, err := s.engine.Facets(request.GetCollection(), request.GetNamespace(), filter, request.GetText(), facets)
+		counts, err := s.engine.Aggregate(request.GetCollection(), request.GetNamespace(), filter, request.GetText(), request.GetSyntax(), core.MatchSpec{Facets: facets}, nil)
 		if err != nil {
 			return mapError(err)
 		}
-		if response.Facets, err = toProtoFacets(top); err != nil {
+		if response.Facets, err = toProtoFacets(counts.Facets.Top(facets)); err != nil {
 			return status.Error(codes.Internal, "convert facets")
 		}
 	}
 	return nil
+}
+
+func fromProtoSynonyms(groups []*v1.SynonymGroup) [][]string {
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make([][]string, len(groups))
+	for i, group := range groups {
+		out[i] = group.GetWords()
+	}
+	return out
+}
+
+func toProtoSynonyms(groups [][]string) []*v1.SynonymGroup {
+	if len(groups) == 0 {
+		return nil
+	}
+	out := make([]*v1.SynonymGroup, len(groups))
+	for i, words := range groups {
+		out[i] = &v1.SynonymGroup{Words: words}
+	}
+	return out
 }

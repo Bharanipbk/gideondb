@@ -256,3 +256,120 @@ func TestRESTAnalyzerFacetsAndHighlight(t *testing.T) {
 	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{"vector": []float32{1, 1}, "top_k": 1, "highlight": map[string]any{}}, http.StatusBadRequest)
 	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{"vector": []float32{1, 1}, "top_k": 1, "facets": []map[string]any{{"field": ""}}}, http.StatusBadRequest)
 }
+
+func TestRESTQuerySyntaxAggregationsAndSort(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(db, nil).Handler()
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "shop", "dimension": 2, "metric": "cosine", "shard_count": 3,
+		"text_analyzer": "english", "synonyms": [][]string{{"sneaker", "shoe"}}}, http.StatusCreated)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "bad", "dimension": 2, "metric": "cosine", "shard_count": 1, "synonyms": [][]string{{"lonely"}}}, http.StatusBadRequest)
+	records := []map[string]any{
+		{"id": "1", "vector": []float32{1, 0}, "text": "red running shoes", "metadata": map[string]any{"price": 120, "brand": "acme"}},
+		{"id": "2", "vector": []float32{1, 0.1}, "text": "blue running shoes", "metadata": map[string]any{"price": 80, "brand": "zeta"}},
+		{"id": "3", "vector": []float32{0.9, 0.2}, "text": "red trail shoes", "metadata": map[string]any{"price": 95, "brand": "acme"}},
+		{"id": "4", "vector": []float32{0, 1}, "text": "red winter jacket", "metadata": map[string]any{"price": 200, "brand": "acme"}},
+		{"id": "5", "vector": []float32{0.5, 0.5}, "text": "running socks", "metadata": map[string]any{"brand": "zeta"}},
+	}
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/vectors/batch", map[string]any{"records": records}, http.StatusOK)
+
+	// Syntax + synonyms: +sneakers finds shoes, -blue excludes 2, +red requires red.
+	body := string(requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{
+		"text": "+red +sneakers -blue", "syntax": "simple", "top_k": 10,
+		"aggregations": map[string]any{
+			"price_stats": map[string]any{"type": "stats", "field": "price"},
+			"price_hist":  map[string]any{"type": "histogram", "field": "price", "interval": 50},
+			"price_bands": map[string]any{"type": "range", "field": "price", "ranges": []map[string]any{{"to": 100}, {"from": 100, "key": "premium"}}},
+			"brands":      map[string]any{"type": "terms", "field": "brand"},
+		},
+		"sort": []map[string]any{{"field": "price"}},
+	}, http.StatusOK))
+	for _, want := range []string{
+		`"results":[{"id":"3"`, `{"id":"1"`,
+		`"price_stats":{"count":2,"min":95,"max":120,"sum":215,"avg":107.5}`,
+		`"price_hist":{"buckets":[{"key":50,"count":1},{"key":100,"count":1}]}`,
+		`"price_bands":{"buckets":[{"key":"*-100","to":100,"count":1},{"key":"premium","from":100,"count":1}]}`,
+		`"brands":{"buckets":[{"key":"acme","count":2}]}`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
+	}
+	for _, unwanted := range []string{`"id":"2"`, `"id":"4"`, `"id":"5"`} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("unexpected %s in %s", unwanted, body)
+		}
+	}
+	// Vector search sorted by price descending; record 5 has no price and sorts last.
+	body = string(requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{
+		"vector": []float32{1, 0}, "top_k": 5, "sort": []map[string]any{{"field": "price", "order": "desc"}},
+	}, http.StatusOK))
+	order := []string{`"id":"4"`, `"id":"1"`, `"id":"3"`, `"id":"2"`, `"id":"5"`}
+	last := -1
+	for _, id := range order {
+		position := strings.Index(body, id)
+		if position < last {
+			t.Fatalf("sort order wrong: %s", body)
+		}
+		last = position
+	}
+	// Phrase with highlight terms from the parsed query.
+	body = string(requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", map[string]any{
+		"text": `"running shoes"`, "syntax": "simple", "top_k": 5, "highlight": map[string]any{"pre_tag": "[", "post_tag": "]"},
+	}, http.StatusOK))
+	if !strings.Contains(body, `[running] [shoes]`) || strings.Contains(body, `"id":"3"`) {
+		t.Fatalf("phrase/highlight: %s", body)
+	}
+	for _, bad := range []map[string]any{
+		{"text": `"open`, "syntax": "simple", "top_k": 1},
+		{"text": "x", "syntax": "lucene", "top_k": 1},
+		{"vector": []float32{1, 0}, "top_k": 1, "sort": []map[string]any{{"field": "price", "order": "up"}}},
+		{"vector": []float32{1, 0}, "top_k": 1, "aggregations": map[string]any{"h": map[string]any{"type": "histogram", "field": "price"}}},
+	} {
+		requestJSON(t, handler, http.MethodPost, "/v1/collections/shop/search", bad, http.StatusBadRequest)
+	}
+}
+
+func TestRESTSuggestCompletesAndCorrects(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	handler := New(db, nil).Handler()
+	requestJSON(t, handler, http.MethodPost, "/v1/collections", map[string]any{"name": "docs", "dimension": 2, "metric": "cosine", "shard_count": 2, "text_analyzer": "english"}, http.StatusCreated)
+	requestJSON(t, handler, http.MethodPost, "/v1/collections/docs/vectors/batch", map[string]any{"records": []map[string]any{
+		{"id": "1", "vector": []float32{1, 0}, "text": "Running shoes for marathon running"},
+		{"id": "2", "vector": []float32{1, 0}, "text": "Running jackets"},
+		{"id": "3", "vector": []float32{1, 0}, "text": "Runner's guide to recovery"},
+		{"id": "4", "vector": []float32{1, 0}, "text": "Café reviews"},
+	}}, http.StatusOK)
+	get := func(query string) string {
+		request := httptest.NewRequest(http.MethodGet, "/v1/collections/docs/suggest?"+query, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", query, response.Code, response.Body)
+		}
+		return response.Body.String()
+	}
+	body := get("text=fast+runn&size=3")
+	if !strings.Contains(body, `{"text":"fast running","word":"running","count":2}`) || !strings.Contains(body, `"word":"runner"`) {
+		t.Fatalf("completions: %s", body)
+	}
+	if body := get("text=runing+shoez+"); !strings.Contains(body, `"did_you_mean":"running shoes "`) {
+		t.Fatalf("did you mean: %s", body)
+	}
+	if body := get("text=cafe+rev"); !strings.Contains(body, `"word":"reviews"`) || strings.Contains(body, "did_you_mean") {
+		t.Fatalf("folded words count as indexed: %s", body)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/v1/collections/docs/suggest?text=x&size=99", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("size 99 = %d", response.Code)
+	}
+}

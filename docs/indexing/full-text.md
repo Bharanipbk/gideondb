@@ -87,6 +87,8 @@ count is not limited to the top-k hits.
   as well as the results. Every node must run a version with facet support.
 - gRPC: `SearchRequest.facets`, `SearchRequest.highlight`,
   `SearchResult.highlights` and `SearchResponse.facets`.
+- Numeric statistics, histograms and ranges are
+  [aggregations](aggregations-and-sorting.md).
 
 Facet counting visits every matching record in each segment, so its cost
 grows with the match count. Narrow it with a filter on large collections.

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/Bharanipbk/gideondb/internal/api/rest"
@@ -208,5 +209,41 @@ func TestClientHybridSearchAndBinaryQuantization(t *testing.T) {
 	results, err = sdk.Search(ctx, "h", client.SearchOptions{Vector: []float32{1, 0}, SparseVector: map[string]float32{"graph": 1}, Alpha: &alpha, TopK: 2})
 	if err != nil || len(results) == 0 || results[0].ID != "a" {
 		t.Fatalf("hybrid search = %v, %v", results, err)
+	}
+}
+
+func TestClientSearchFeatures(t *testing.T) {
+	db, err := engine.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	sdk, err := client.New("http://gideondb.test", client.Options{HTTPClient: inMemoryHTTPClient(rest.New(db, nil).Handler())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := sdk.CreateCollection(ctx, client.CollectionConfig{Name: "s", Dimension: 2, Metric: "cosine", ShardCount: 2, TextAnalyzer: "english", Synonyms: [][]string{{"shoe", "sneaker"}}}); err != nil {
+		t.Fatal(err)
+	}
+	records := []client.Record{
+		{ID: "a", Vector: []float32{1, 0}, Text: "red running shoes", Metadata: map[string]any{"price": 120}},
+		{ID: "b", Vector: []float32{1, 0}, Text: "blue running shoes", Metadata: map[string]any{"price": 80}},
+		{ID: "c", Vector: []float32{0, 1}, Text: "winter jacket", Metadata: map[string]any{"price": 200}},
+	}
+	if _, err := sdk.BatchUpsert(ctx, "s", records); err != nil {
+		t.Fatal(err)
+	}
+	results, aggregations, err := sdk.SearchAggregate(ctx, "s", client.SearchOptions{Text: "+sneakers -blue", Syntax: "simple", TopK: 5, Sort: []client.SortField{{Field: "price"}}},
+		map[string]client.Aggregation{"p": {Type: "stats", Field: "price"}})
+	if err != nil || len(results) != 1 || results[0].ID != "a" || *aggregations["p"].Count != 1 || *aggregations["p"].Max != 120 {
+		t.Fatalf("results = %+v, aggregations = %+v, err = %v", results, aggregations, err)
+	}
+	suggestions, err := sdk.Suggest(ctx, "s", "runn", 3)
+	if err != nil || len(suggestions.Completions) == 0 || suggestions.Completions[0].Word != "running" {
+		t.Fatalf("suggestions = %+v, %v", suggestions, err)
+	}
+	if _, err := sdk.IngestDocument(ctx, "s", "a.txt", strings.NewReader("text"), client.DocumentOptions{}); err == nil {
+		t.Fatal("ingest without a vectorizer must fail")
 	}
 }
