@@ -14,6 +14,12 @@ import (
 // deterministic path; below it, goroutine and lock overhead outweighs the gain.
 const parallelBuildThreshold = 2048
 
+// parallelBatchThreshold is the smallest batch linked in parallel into a
+// graph that already has at least parallelBuildThreshold nodes. Each worker
+// starts from the existing entry point, so a few hundred new nodes split
+// well across cores; a small graph keeps the serial path.
+const parallelBatchThreshold = 64
+
 // Build constructs an index from a batch of vectors. With workers > 1 and
 // enough vectors, nodes are inserted concurrently with per-node locks, as in
 // hnswlib. Node levels stay deterministic, but neighbour lists then depend on
@@ -161,7 +167,8 @@ func (h *Index) UpsertBatch(ids []uint64, vectors [][]float32, workers int) erro
 	if h.immutableGraph {
 		return fmt.Errorf("%w: persisted hnsw graph is immutable", core.ErrInvalidArgument)
 	}
-	if workers <= 1 || len(ids) < parallelBuildThreshold {
+	parallel := len(ids) >= parallelBuildThreshold || (len(ids) >= parallelBatchThreshold && len(h.nodes) >= parallelBuildThreshold)
+	if workers <= 1 || !parallel {
 		updated := false
 		for i, id := range ids {
 			if ordinal, ok := h.ordinals[id]; ok {

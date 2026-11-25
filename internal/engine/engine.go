@@ -284,10 +284,8 @@ func (e *Engine) BatchUpsert(name string, records []core.Record) ([]core.Record,
 		if _, err := e.logs[name][shardID].Append(wal.OperationBatchUpsert, payload); err != nil {
 			return nil, fmt.Errorf("batch partially committed before shard %d: %w", shardID, err)
 		}
-		for _, record := range group {
-			if err := c.ApplyUpsert(record); err != nil {
-				return nil, fmt.Errorf("apply WAL-backed batch: %w", err)
-			}
+		if err := c.ApplyUpsertBatch(group); err != nil {
+			return nil, fmt.Errorf("apply WAL-backed batch: %w", err)
 		}
 		e.mutations[name][shardID] += uint64(len(group))
 		if e.checkpointEvery > 0 && e.mutations[name][shardID] >= e.checkpointEvery {
@@ -401,10 +399,8 @@ func (e *Engine) BatchUpsertShardIdempotent(name string, shardID uint32, records
 	if err != nil {
 		return nil, 0, err
 	}
-	for _, record := range prepared {
-		if err := c.ApplyUpsert(record); err != nil {
-			return nil, 0, fmt.Errorf("apply WAL-backed shard batch: %w", err)
-		}
+	if err := c.ApplyUpsertBatch(prepared); err != nil {
+		return nil, 0, fmt.Errorf("apply WAL-backed shard batch: %w", err)
 	}
 	e.mutations[name][shardID] += uint64(len(prepared))
 	if e.checkpointEvery > 0 && e.mutations[name][shardID] >= e.checkpointEvery {
@@ -958,11 +954,8 @@ func (e *Engine) openCollectionLogs(c *collection.Collection) error {
 					if c.RouteShard(item.Namespace, item.ID) != uint32(shardID) {
 						return fmt.Errorf("batch record routed to wrong shard")
 					}
-					if err := c.Restore(item); err != nil {
-						return err
-					}
 				}
-				return nil
+				return c.RestoreBatch(mutation.Records)
 			default:
 				return fmt.Errorf("unknown operation %d", record.Operation)
 			}

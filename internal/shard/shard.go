@@ -330,3 +330,32 @@ func (s *Shard) Facets(namespace string, filter *metadata.Expr, text string, fie
 	}
 	return counts
 }
+
+// UpsertBatch applies records to the active segment in one call; counts and
+// tombstones end up exactly as with one Upsert per record.
+func (s *Shard) UpsertBatch(records []core.Record) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fresh := map[string]struct{}{}
+	for _, record := range records {
+		key := recordKey(record.Namespace, record.ID)
+		if _, counted := fresh[key]; counted {
+			continue
+		}
+		existed := s.active.Has(record.Namespace, record.ID)
+		if !existed && s.immutable != nil && !hasKey(s.tombstones, key) {
+			existed = s.immutable.segment.Has(record.Namespace, record.ID)
+		}
+		if !existed {
+			fresh[key] = struct{}{}
+		}
+	}
+	if err := s.active.UpsertBatch(records); err != nil {
+		return err
+	}
+	for _, record := range records {
+		delete(s.tombstones, recordKey(record.Namespace, record.ID))
+	}
+	s.count += len(fresh)
+	return nil
+}

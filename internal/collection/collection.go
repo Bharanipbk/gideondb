@@ -605,3 +605,48 @@ func (c *Collection) FacetCounts(namespace string, filter *metadata.Expr, text s
 	}
 	return counts, nil
 }
+
+// ApplyUpsertBatch applies prepared records, one batch per shard.
+func (c *Collection) ApplyUpsertBatch(records []core.Record) error {
+	groups := map[uint32][]core.Record{}
+	var order []uint32
+	for _, record := range records {
+		shardID := c.RouteShard(record.Namespace, record.ID)
+		if _, seen := groups[shardID]; !seen {
+			order = append(order, shardID)
+		}
+		groups[shardID] = append(groups[shardID], record)
+	}
+	for _, shardID := range order {
+		if err := c.shards[shardID].UpsertBatch(groups[shardID]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RestoreBatch is Restore for many records: it validates each one, keeps
+// the collection version at least as high as every record's, and applies
+// them in shard batches.
+func (c *Collection) RestoreBatch(records []core.Record) error {
+	for _, record := range records {
+		if err := core.ValidateVector(record.Vector, c.config.Dimension); err != nil {
+			return err
+		}
+		if record.SparseVector != nil {
+			if err := core.ValidateSparseVector(record.SparseVector); err != nil {
+				return err
+			}
+		}
+		if err := core.ValidateText(record.Text); err != nil {
+			return err
+		}
+		for {
+			current := c.version.Load()
+			if current >= record.Version || c.version.CompareAndSwap(current, record.Version) {
+				break
+			}
+		}
+	}
+	return c.ApplyUpsertBatch(records)
+}

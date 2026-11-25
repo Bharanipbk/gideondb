@@ -5,6 +5,17 @@ describe unreleased experimental work.
 
 ## Unreleased
 
+### Changed
+
+- Batch writes are about 3× faster on HNSW collections. `vectors/batch`,
+  placement-aware shard batches and WAL replay now apply each shard's records
+  with one `hnsw.UpsertBatch` call. Once a graph has 2,048 nodes, batches of 64
+  or more are linked on all cores. Before, each record was inserted on one core
+  under the engine lock. Ingesting 100,000 GloVe-100 vectors into one shard
+  over REST went from 556–654 to 1,943–2,008 vectors/s, with recall@10 within
+  0.002 (two runs in each order, loaded host). A key repeated inside a batch
+  keeps its last record, as before.
+
 ### Added
 
 - Full-text analyzers, highlighting and facets

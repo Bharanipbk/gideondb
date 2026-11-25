@@ -58,3 +58,32 @@ func assertBuckets(t *testing.T, got []core.FacetBucket, want map[any]int) {
 		}
 	}
 }
+
+func TestUpsertBatchCountsAndTombstones(t *testing.T) {
+	config := core.CollectionConfig{Name: "f", Dimension: 2, Metric: core.Metric("l2"), ShardCount: 1}.Normalized()
+	s, _ := New(0, config)
+	base, _ := segment.NewImmutable(config, []core.Record{{ID: "old", Vector: []float32{1, 0}}, {ID: "gone", Vector: []float32{0, 1}}}, nil)
+	if err := s.InstallImmutable(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if s.Len() != 1 {
+		t.Fatalf("len after delete = %d", s.Len())
+	}
+	// "old" exists in the base; "gone" is resurrected; "new" appears twice.
+	err := s.UpsertBatch([]core.Record{{ID: "old", Vector: []float32{1, 1}}, {ID: "gone", Vector: []float32{0, 2}}, {ID: "new", Vector: []float32{2, 2}}, {ID: "new", Vector: []float32{3, 3}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Len() != 3 {
+		t.Fatalf("len = %d, want 3", s.Len())
+	}
+	if record, err := s.Get("", "gone"); err != nil || record.Vector[1] != 2 {
+		t.Fatalf("tombstone not cleared: %v %v", record, err)
+	}
+	if record, _ := s.Get("", "new"); record.Vector[0] != 3 {
+		t.Fatalf("last write did not win: %v", record)
+	}
+}

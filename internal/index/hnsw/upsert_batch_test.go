@@ -184,3 +184,45 @@ func TestParallelBuildRespectsNeighbourLimits(t *testing.T) {
 		}
 	}
 }
+
+// REST clients send batches of a few hundred; once the graph is large those
+// must take the parallel path and keep recall equal to serial inserts.
+func TestSmallBatchesIntoLargeGraphStayParallelAndAccurate(t *testing.T) {
+	const dimension, initial, batches, batchSize, queryCount, k = 48, parallelBuildThreshold, 8, 500, 100, 10
+	cfg := index.Config{Dimension: dimension, Metric: core.MetricL2, M: 16, EFConstruction: 100, EFSearch: 64}
+	total := initial + batches*batchSize
+	all := clusteredVectors(29, total+queryCount, dimension, 50, 12)
+	exact, _ := flat.New(cfg)
+	parallel, _ := New(cfg)
+	serial, _ := New(cfg)
+	ids := make([]uint64, total)
+	for i := range ids {
+		ids[i] = uint64(i + 1)
+		_ = exact.Upsert(ids[i], all[i])
+	}
+	if err := parallel.UpsertBatch(ids[:initial], all[:initial], 8); err != nil {
+		t.Fatal(err)
+	}
+	for i := range initial {
+		_ = serial.Upsert(ids[i], all[i])
+	}
+	for b := range batches {
+		lo, hi := initial+b*batchSize, initial+(b+1)*batchSize
+		if err := parallel.UpsertBatch(ids[lo:hi], all[lo:hi], 8); err != nil {
+			t.Fatal(err)
+		}
+		for i := lo; i < hi; i++ {
+			_ = serial.Upsert(ids[i], all[i])
+		}
+	}
+	if parallel.Len() != total {
+		t.Fatalf("len = %d", parallel.Len())
+	}
+	queries := all[total:]
+	gotParallel := clusteredRecall(t, parallel, exact, queries, k, 64)
+	gotSerial := clusteredRecall(t, serial, exact, queries, k, 64)
+	t.Logf("recall@%d ef=64: parallel batches %.3f, serial %.3f", k, gotParallel, gotSerial)
+	if gotParallel < gotSerial-0.02 {
+		t.Fatalf("parallel batches lost recall: %.3f vs serial %.3f", gotParallel, gotSerial)
+	}
+}

@@ -53,13 +53,15 @@ Memory is the container's resident memory after the run (`docker stats`).
   stays flat, which suggests faiss expands small ef values. Check this on a
   larger set.
 - **Ingest is GideonDB's weak point.** Qdrant ingests about 8× faster, and
-  OpenSearch about 1.6× faster. GideonDB inserts each record into a live HNSW
+  OpenSearch about 1.6× faster. GideonDB inserted each record into a live HNSW
   graph inside the write path, and a single shard used only about 1.1 of its
-  4 CPUs. On GloVe (390,000 × 100), batches slowed from about 3 s to over 5 min as
-  the graph grew, so the run did not finish (see below). The fixes already on
-  the [standard-datasets](standard-datasets.md#findings) follow-up list, batch
-  `hnsw.UpsertBatch` and background sealing, are the top priority for
-  competing on write-heavy workloads.
+  4 CPUs. On GloVe (390,000 × 100), batches slowed from about 3 s to over 5 min
+  as the graph grew, so the run did not finish (see below).
+  **Update:** batch writes now link each shard's records in parallel, which
+  makes ingest about 3× faster (556–654 → 1,943–2,008 vectors/s on 100,000
+  GloVe vectors, with recall unchanged; see the [changelog](../../CHANGELOG.md)).
+  The figures above are from the earlier build. The engine-wide write lock
+  still serializes concurrent batches, so that is the next step.
 - **Per-query latency:** latency through REST was lowest for GideonDB at
   every ef on this run. With the host this loaded, that ranking is not
   reliable yet.

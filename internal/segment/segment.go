@@ -741,3 +741,90 @@ func (s *Segment) Facets(namespace string, filter *metadata.Expr, text string, f
 	}
 	return counts
 }
+
+// batchUpserter is implemented by indexes that can insert many vectors at
+// once faster than one Upsert at a time (HNSW links them in parallel).
+type batchUpserter interface {
+	UpsertBatch(ids []uint64, vectors [][]float32, workers int) error
+}
+
+// UpsertBatch applies records as if Upsert were called for each in order,
+// under one lock and with one index call. A key repeated in the batch keeps
+// its last record.
+func (s *Segment) UpsertBatch(records []core.Record) error {
+	if s.readOnly {
+		return fmt.Errorf("immutable segment cannot be mutated")
+	}
+	for _, record := range records {
+		if record.ID == "" {
+			return fmt.Errorf("%w: record id is required", core.ErrInvalidArgument)
+		}
+	}
+	// Last write wins inside the batch; keep first-seen order otherwise.
+	position := make(map[string]int, len(records))
+	unique := make([]core.Record, 0, len(records))
+	for _, record := range records {
+		k := key(record.Namespace, record.ID)
+		if i, seen := position[k]; seen {
+			unique[i] = record
+			continue
+		}
+		position[k] = len(unique)
+		unique = append(unique, record)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ordinals := make([]uint64, len(unique))
+	assigned := make([]bool, len(unique))
+	for i, record := range unique {
+		ordinal, ok := s.ordinals[key(record.Namespace, record.ID)]
+		if !ok {
+			ordinal = s.nextID
+			s.nextID++
+			assigned[i] = true
+		}
+		ordinals[i] = ordinal
+	}
+	if batch, ok := s.index.(batchUpserter); ok && len(unique) > 1 {
+		vectors := make([][]float32, len(unique))
+		for i, record := range unique {
+			vectors[i] = record.Vector
+		}
+		if err := batch.UpsertBatch(ordinals, vectors, 0); err != nil {
+			s.releaseOrdinals(assigned)
+			return err
+		}
+	} else {
+		for i, record := range unique {
+			if err := s.index.Upsert(ordinals[i], record.Vector); err != nil {
+				return err
+			}
+		}
+	}
+	for i, record := range unique {
+		ordinal := ordinals[i]
+		if previous, exists := s.records[ordinal]; exists {
+			s.lexical.remove(ordinal, previous)
+		}
+		if err := s.putNamedLocked(ordinal, record); err != nil {
+			return err
+		}
+		s.ordinals[key(record.Namespace, record.ID)] = ordinal
+		stored := cloneRecord(record)
+		stored.Vectors, stored.MultiVectors = nil, nil
+		s.records[ordinal] = stored
+		s.lexical.add(ordinal, record)
+		s.metadata.Upsert(ordinal, record.Metadata)
+	}
+	return nil
+}
+
+// releaseOrdinals rewinds nextID when a failed batch reserved ordinals at
+// the end of the sequence; the index rejected the batch as a whole.
+func (s *Segment) releaseOrdinals(assigned []bool) {
+	for _, fresh := range assigned {
+		if fresh {
+			s.nextID--
+		}
+	}
+}
